@@ -57,3 +57,41 @@ jobs:
           }
           $arguments += $assets.FullName
           gh @arguments
+
+  macos-release:
+    name: Build and publish macOS ${{ matrix.package_arch }} release
+    needs: windows-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            python_arch: arm64
+            package_arch: arm64
+          - runner: macos-15-intel
+            python_arch: x64
+            package_arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.10'
+          architecture: ${{ matrix.python_arch }}
+
+      - name: Test and build app bundle
+        shell: bash
+        run: ./scripts/build-macos.sh dist
+
+      - name: Publish macOS release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag='${{ github.ref_name }}'
+          gh release upload "${tag}" dist/*.zip dist/*.sha256 --clobber

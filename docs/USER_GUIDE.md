@@ -10,6 +10,12 @@ Beim ersten Start richtet der Windows-Bootstrapper eine private Python-Laufzeit 
 
 Dieser Vorgang benötigt einmalig eine Internetverbindung. Spätere Starts und das lokale Logging funktionieren offline.
 
+## 2a. Erststart unter macOS
+
+Im GitHub-Release das Paket `macos-arm64` für Apple Silicon oder `macos-x64` für einen Intel-Mac laden. ZIP entpacken und `DA6IT.de Wavelog Offline Logger.app` nach **Programme** verschieben. Python, Tk und Hamlib sind bereits im App-Bundle enthalten.
+
+Die kostenlose Community-App ist derzeit nicht von Apple notarisiert. Beim ersten Start deshalb im Finder die App mit Rechtsklick auswählen, **Öffnen** anklicken und die Rückfrage bestätigen. Danach lässt sie sich normal starten. Lokales Logging benötigt keine Internetverbindung.
+
 ## 3. Logger-Profil einrichten
 
 Ein Profil trennt Station, Zugangsdaten, Logpfad und Sync-Metadaten vollständig von anderen Profilen. Benötigt werden insbesondere Stationsrufzeichen beziehungsweise Operator und ein Ordner für die lokalen ADI-Dateien. Für den Sync kommen Wavelog-URL, API-v2-Token und Wavelog-Stationsprofil hinzu.

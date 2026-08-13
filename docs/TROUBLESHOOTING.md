@@ -8,9 +8,13 @@ Der erste Start lädt und installiert eine private Python-Laufzeit. Prüfe die I
 
 Die derzeitigen Community-Builds sind nicht digital signiert. Vergleiche vor dem Start die SHA-256-Prüfsumme der Datei mit `SHA256SUMS.txt` aus demselben GitHub-Release. Lade Builds ausschließlich aus dem offiziellen Release-Bereich des Projekts.
 
+## macOS blockiert den ersten Start
+
+Die macOS-Pakete sind technisch ad-hoc signiert, aber noch nicht mit einem kostenpflichtigen Apple-Developer-Zertifikat signiert und notarisiert. Lade das passende Paket nur aus dem offiziellen GitHub-Release, vergleiche die beiliegende `.sha256`-Datei und wähle die entpackte App im Finder mit Rechtsklick → **Öffnen**. Der Logger verändert Gatekeeper oder andere Sicherheitseinstellungen nicht automatisch.
+
 ## CAT verbindet sich nicht
 
-Prüfe unter **CAT Setup** das gewählte Funkgerätemodell, den COM-Port, die Baudrate und die seriellen Parameter. Der COM-Port darf nicht gleichzeitig von einer anderen CAT-Anwendung belegt sein. Hamlib ist im Windows-Build bereits enthalten und muss nicht separat installiert werden; der zum Funkgerät oder USB-Adapter gehörende Windows-Treiber kann dennoch erforderlich sein.
+Prüfe unter **CAT Setup** das gewählte Funkgerätemodell, den seriellen Port, die Baudrate und die seriellen Parameter. Der Port darf nicht gleichzeitig von einer anderen CAT-Anwendung belegt sein. Hamlib ist in den Windows- und macOS-Builds bereits enthalten und muss nicht separat installiert werden; der zum Funkgerät oder USB-Adapter gehörende Treiber kann dennoch erforderlich sein.
 
 ## DX Cluster verbindet sich nicht
 

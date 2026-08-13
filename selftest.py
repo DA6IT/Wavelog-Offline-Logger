@@ -410,6 +410,19 @@ assert hamlib_mode_for_logger("SSB", 7_100_000) == "LSB"
 assert hamlib_mode_for_logger("SSB", 21_260_000) == "USB"
 assert hamlib_mode_for_logger("FT8", 14_074_000) == "PKTUSB"
 
+# Frozen macOS bundles place added resources below PyInstaller's bundle root.
+# CAT must find rigctld there without a system-wide installation.
+from unittest.mock import patch as mock_patch
+with TemporaryDirectory() as bundle_dir:
+    bundle_root = Path(bundle_dir)
+    bundled_hamlib = bundle_root / "hamlib"
+    bundled_hamlib.mkdir()
+    bundled_rigctld = bundled_hamlib / ("rigctld.exe" if sys.platform == "win32" else "rigctld")
+    bundled_rigctld.write_bytes(b"")
+    with mock_patch.object(sys, "_MEIPASS", str(bundle_root), create=True):
+        from cat_control import find_hamlib_dir
+        assert find_hamlib_dir() == bundled_hamlib
+
 # Closing the app while rigctld is still inside Popen used to leave the newly
 # spawned process behind. A stop must invalidate the in-flight start and kill
 # that exact process as soon as Popen returns.
