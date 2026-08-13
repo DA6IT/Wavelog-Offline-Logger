@@ -43,7 +43,7 @@ APP_NAME="DA6IT.de Wavelog Offline Logger"
   --name "${APP_NAME}" \
   --osx-bundle-identifier "de.da6it.wavelog-offline-logger" \
   --target-arch "${ARCH}" \
-  --add-data "cty.dat:." \
+  --add-data "${PROJECT_ROOT}/cty.dat:." \
   --add-data "${HAMLIB_DIR}:hamlib" \
   --distpath "${PACKAGE_DIR}" \
   --workpath "${BUILD_DIR}/work" \
