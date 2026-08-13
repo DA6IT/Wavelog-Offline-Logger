@@ -26,6 +26,15 @@ from cat_control import (
     RigModel, format_frequency_mhz, hamlib_version, list_rig_models,
     list_serial_ports, map_hamlib_mode,
 )
+from external_logging import (
+    ExternalLogError, UdpLogConfig, UdpLogEvent, UdpLogReceiver,
+    find_duplicate_qso,
+)
+from dx_cluster import (
+    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DxClusterClient, DxClusterConfig,
+    DxClusterError, DxSpot, SPOTTER_REGION_OPTIONS, normalize_worked_mode,
+    spot_sort_value, spotter_region_for_continent, worked_flags,
+)
 from update_check import ReleaseInfo, find_newer_release
 
 
@@ -93,6 +102,26 @@ class LoggerApp(tk.Tk):
         self.cat_generation = 0
         self.cat_poll_job = None
         self.cat_poll_busy = False
+        self.udp_log_receiver = UdpLogReceiver(app_version=VERSION)
+        atexit.register(self.udp_log_receiver.stop)
+        self.udp_log_generation = 0
+        self.udp_log_received = 0
+        self.dx_cluster = DxClusterClient()
+        atexit.register(self.dx_cluster.stop)
+        self.dx_cluster_generation = 0
+        self.dx_cluster_spots: list[tuple[str, DxSpot]] = []
+        self.dx_cluster_spot_by_id: dict[str, DxSpot] = {}
+        self.dx_cluster_sequence = 0
+        self.dx_cluster_country_cache: dict[str, str] = {}
+        self.dx_cluster_continent_cache: dict[str, str] = {}
+        self.dx_cluster_worked_calls: set[tuple[str, str]] = set()
+        self.dx_cluster_worked_countries: set[tuple[str, str]] = set()
+        self.dx_cluster_filter_job = None
+        self.dx_cluster_session_received = 0
+        self.dx_cluster_last_spot_utc: datetime | None = None
+        self.dx_cluster_seen_keys: set[tuple] = set()
+        self.dx_cluster_sort_key = "time"
+        self.dx_cluster_sort_descending = True
 
         self.data_dir = app_data_dir()
         self.country_db = CountryDB(Path(__file__).resolve().parent / "cty.dat")
@@ -110,6 +139,8 @@ class LoggerApp(tk.Tk):
         self._build_qsos_page()
         self._build_stats_page()
         self._build_cat_page()
+        self._build_dx_cluster_page()
+        self._build_udp_log_page()
         self._build_settings_page()
         self._load_settings_to_ui()
         self._show_page("log")
@@ -188,6 +219,8 @@ class LoggerApp(tk.Tk):
         ttk.Button(side, text="  Logbuch & Sync", style="Nav.TButton", command=lambda: self._show_page("qsos")).pack(fill="x")
         ttk.Button(side, text="  Statistiken", style="Nav.TButton", command=lambda: self._show_page("stats")).pack(fill="x")
         ttk.Button(side, text="  CAT Setup", style="Nav.TButton", command=lambda: self._show_page("cat")).pack(fill="x")
+        ttk.Button(side, text="  DX Cluster", style="Nav.TButton", command=lambda: self._show_page("dx_cluster")).pack(fill="x")
+        ttk.Button(side, text="  UDP Logging", style="Nav.TButton", command=lambda: self._show_page("udp_log")).pack(fill="x")
         ttk.Button(side, text="  Einstellungen", style="Nav.TButton", command=lambda: self._show_page("settings")).pack(fill="x")
         tk.Label(side, text=f"v{VERSION}", bg=SIDEBAR, fg="#8297a6", font=("Segoe UI", 8)).pack(side="bottom", anchor="w", padx=20, pady=18)
 
@@ -281,6 +314,8 @@ class LoggerApp(tk.Tk):
         try:
             old = self._current_profile().get("name", "")
             self._stop_cat_runtime(update_ui=False)
+            self._stop_dx_cluster_runtime(update_ui=False)
+            self._stop_udp_log_runtime(update_ui=False)
             if self.db:
                 self.db.close()
             self._open_profile_storage(profile_id)
@@ -366,7 +401,7 @@ class LoggerApp(tk.Tk):
         return f
 
     def _show_page(self, name: str):
-        titles = {"log": "QSO loggen", "contest": "Contest Logging", "qsos": "Logbuch & Sync", "stats": "Statistiken", "cat": "CAT Setup", "settings": "Einstellungen"}
+        titles = {"log": "QSO loggen", "contest": "Contest Logging", "qsos": "Logbuch & Sync", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "udp_log": "UDP Logging", "settings": "Einstellungen"}
         self.page_title.configure(text=titles[name])
         self.pages[name].tkraise()
         if name == "contest":
@@ -435,6 +470,7 @@ class LoggerApp(tk.Tk):
         ttk.Button(btns, text="QSO speichern", style="Primary.TButton", command=lambda: self.save_qso(False)).pack(side="left")
         ttk.Button(btns, text="Speichern + Neu", style="Secondary.TButton", command=lambda: self.save_qso(True)).pack(side="left", padx=8)
         ttk.Button(btns, text="Felder leeren", style="Secondary.TButton", command=self.clear_qso_form).pack(side="left")
+        ttk.Button(btns, text="DX-Spot senden", style="Secondary.TButton", command=self.send_current_dx_spot).pack(side="right")
 
         right = self._card(p, row=0, column=1, sticky="nsew", padx=(8, 0))
         right.columnconfigure(0, weight=1)
@@ -1059,6 +1095,7 @@ class LoggerApp(tk.Tk):
         if not hasattr(self, "tree"):
             return
         qsos = self.store.scan()
+        self._update_dx_cluster_worked_cache(qsos)
         self.db.reconcile_index(qsos)
         self.tree.delete(*self.tree.get_children())
         for q in qsos:
@@ -1899,6 +1936,897 @@ class LoggerApp(tk.Tk):
         if update_ui and hasattr(self, "cat_status_label"):
             self.cat_status_label.configure(text="CAT ist gestoppt.", fg=MUTED)
 
+    # ---------- DX Cluster / Telnet ----------
+    def _build_dx_cluster_page(self):
+        p = self._new_page("dx_cluster")
+        p.columnconfigure(0, weight=1)
+        p.rowconfigure(2, weight=1)
+
+        setup = self._card(p, row=0, column=0, sticky="ew", pady=(0, 10))
+        setup.columnconfigure(0, weight=3)
+        setup.columnconfigure(1, weight=1)
+        setup.columnconfigure(2, weight=2)
+        setup.columnconfigure(3, weight=3)
+        ttk.Label(setup, text="Telnet-Verbindung", style="CardTitle.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
+        ttk.Label(
+            setup,
+            text="Online-Funktion: Empfang und Versand von DX-Spots funktionieren nur bei bestehender Internetverbindung. Server, Port und Login-Rufzeichen gehören zum aktiven Profil; die Verbindung wird nach jedem Programmstart bewusst manuell hergestellt.",
+            style="Muted.Card.TLabel", wraplength=950,
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(3, 10))
+
+        self.dx_cluster_host_var = tk.StringVar(value=DEFAULT_CLUSTER_HOST)
+        self.dx_cluster_port_var = tk.StringVar(value=str(DEFAULT_CLUSTER_PORT))
+        self.dx_cluster_call_var = tk.StringVar()
+        fields = (
+            ("DX-Cluster-Host", self.dx_cluster_host_var),
+            ("Telnet-Port", self.dx_cluster_port_var),
+            ("Login-Rufzeichen", self.dx_cluster_call_var),
+        )
+        for column, (label, variable) in enumerate(fields):
+            ttk.Label(setup, text=label, style="Card.TLabel").grid(row=2, column=column, sticky="w", padx=(0, 10), pady=(2, 3))
+            ttk.Entry(setup, textvariable=variable).grid(row=3, column=column, sticky="ew", padx=(0, 10))
+
+        buttons = ttk.Frame(setup, style="Card.TFrame")
+        buttons.grid(row=3, column=3, sticky="e")
+        ttk.Button(buttons, text="Einstellungen speichern", style="Secondary.TButton", command=self.save_dx_cluster_settings).pack(side="left")
+        self.dx_cluster_start_button = ttk.Button(buttons, text="Verbinden", style="Primary.TButton", command=self.start_dx_cluster)
+        self.dx_cluster_start_button.pack(side="left", padx=8)
+        self.dx_cluster_stop_button = ttk.Button(buttons, text="Trennen", style="Secondary.TButton", command=self.stop_dx_cluster)
+        self.dx_cluster_stop_button.pack(side="left")
+
+        self.dx_cluster_status_label = tk.Label(
+            setup, text="DX Cluster ist getrennt.", bg=CARD, fg=MUTED, font=("Segoe UI", 9),
+            justify="left", anchor="w", wraplength=1050,
+        )
+        self.dx_cluster_status_label.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+
+        filters = self._card(p, row=1, column=0, sticky="ew", pady=(0, 10))
+        ttk.Label(filters, text="Spot-Filter", style="CardTitle.TLabel").pack(side="left", padx=(0, 18))
+        tk.Label(filters, text="Band", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(0, 5))
+        self.dx_cluster_band_filter_var = tk.StringVar(value="Alle")
+        band_filter = ttk.Combobox(filters, textvariable=self.dx_cluster_band_filter_var, values=["Alle", *BANDS], state="readonly", width=10)
+        band_filter.pack(side="left")
+        band_filter.bind("<<ComboboxSelected>>", lambda _event: self._refresh_dx_cluster_spots())
+        tk.Label(filters, text="Mode", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(18, 5))
+        self.dx_cluster_mode_filter_var = tk.StringVar(value="Alle")
+        mode_filter = ttk.Combobox(filters, textvariable=self.dx_cluster_mode_filter_var, values=["Alle", *[mode for mode in MODES if mode != "SSB"]], state="readonly", width=14)
+        mode_filter.pack(side="left")
+        mode_filter.bind("<<ComboboxSelected>>", lambda _event: self._refresh_dx_cluster_spots())
+        tk.Label(filters, text="Spotter-Region", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(18, 5))
+        self.dx_cluster_spotter_region_filter_var = tk.StringVar(value="Alle")
+        region_filter = ttk.Combobox(
+            filters, textvariable=self.dx_cluster_spotter_region_filter_var,
+            values=SPOTTER_REGION_OPTIONS, state="readonly", width=16,
+        )
+        region_filter.pack(side="left")
+        region_filter.bind("<<ComboboxSelected>>", self._dx_cluster_spotter_region_changed)
+        tk.Label(filters, text="Zeitraum", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(18, 5))
+        self.dx_cluster_time_filter_var = tk.StringVar(value="30 Minuten")
+        time_filter = ttk.Combobox(
+            filters, textvariable=self.dx_cluster_time_filter_var,
+            values=("15 Minuten", "30 Minuten", "60 Minuten", "2 Stunden", "Alle"),
+            state="readonly", width=12,
+        )
+        time_filter.pack(side="left")
+        time_filter.bind("<<ComboboxSelected>>", self._dx_cluster_time_filter_changed)
+        ttk.Button(filters, text="Liste leeren", style="Secondary.TButton", command=self._clear_dx_cluster_spots).pack(side="right")
+
+        table = self._card(p, row=2, column=0, sticky="nsew")
+        table.columnconfigure(0, weight=1)
+        table.rowconfigure(1, weight=1)
+        ttk.Label(table, text="Empfangene DX-Spots", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+        tk.Label(
+            table, text="Doppelklick stimmt den TRX auf Frequenz und Mode ab. QSO übernehmen füllt anschließend das Formular.",
+            bg=CARD, fg=MUTED, font=("Segoe UI", 9), anchor="e",
+        ).grid(row=0, column=1, sticky="e", pady=(0, 8))
+
+        tree_box = ttk.Frame(table, style="Card.TFrame")
+        tree_box.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        tree_box.columnconfigure(0, weight=1)
+        tree_box.rowconfigure(0, weight=1)
+        self.dx_cluster_visible_ids: list[str] = []
+        self.dx_cluster_selected_id: str | None = None
+        self.dx_cluster_table_columns = (
+            ("time", "UTC", 7), ("call", "DX-Rufzeichen", 15),
+            ("dx_country", "DX-Land", 20), ("frequency", "MHz", 11),
+            ("band", "Band", 8), ("mode", "Mode", 10),
+            ("spotter", "Spotter", 15), ("spotter_country", "Spotter-Land", 20),
+            ("comment", "Kommentar", 60),
+        )
+        self.dx_cluster_tree = tk.Text(
+            tree_box, wrap="none", state="disabled", bg="white", fg=TEXT,
+            font=("Consolas", 9), relief="solid", borderwidth=1,
+            highlightthickness=0, cursor="arrow", padx=4, pady=2,
+        )
+        self.dx_cluster_tree.tag_configure("header", background="#eceff2", foreground=TEXT, font=("Consolas", 9, "bold"))
+        self.dx_cluster_tree.tag_configure("new", background="#eaf4ff")
+        self.dx_cluster_tree.tag_configure("worked", foreground="#18733b", font=("Consolas", 9, "bold"))
+        self.dx_cluster_tree.tag_configure("selected", background="#cfe4f7")
+        self.dx_cluster_tree.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(tree_box, orient="vertical", command=self.dx_cluster_tree.yview)
+        scroll.grid(row=0, column=1, sticky="ns")
+        hscroll = ttk.Scrollbar(tree_box, orient="horizontal", command=self.dx_cluster_tree.xview)
+        hscroll.grid(row=1, column=0, sticky="ew")
+        self.dx_cluster_tree.configure(yscrollcommand=scroll.set, xscrollcommand=hscroll.set)
+        self.dx_cluster_tree.bind("<Button-1>", self._dx_cluster_table_click)
+        self.dx_cluster_tree.bind("<Double-1>", self._dx_cluster_table_double_click)
+
+        actions = ttk.Frame(table, style="Card.TFrame")
+        actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        ttk.Button(actions, text="QSO übernehmen", style="Primary.TButton", command=self._use_selected_dx_spot).pack(side="left")
+        tk.Label(
+            actions, text="Überschriften sortieren · neu: hellblau · gleicher Mode gearbeitet: grün · Doppelklick stimmt TRX ab.",
+            bg=CARD, fg=MUTED, font=("Segoe UI", 9),
+        ).pack(side="right")
+        self.dx_cluster_filter_job = self.after(10_000, self._dx_cluster_filter_tick)
+
+    def _load_dx_cluster_settings_to_ui(self):
+        config = DxClusterConfig.from_getter(self.db.get_setting)
+        login_call = config.callsign or self.db.get_setting("operator_call", "").strip().upper()
+        self.dx_cluster_host_var.set(config.host)
+        self.dx_cluster_port_var.set(str(config.port))
+        self.dx_cluster_call_var.set(login_call)
+        saved_window = self.db.get_setting("dx_cluster_time_window", "30 Minuten")
+        if saved_window not in {"15 Minuten", "30 Minuten", "60 Minuten", "2 Stunden", "Alle"}:
+            saved_window = "30 Minuten"
+        self.dx_cluster_time_filter_var.set(saved_window)
+        saved_region = self.db.get_setting("dx_cluster_spotter_region", "Alle")
+        if saved_region not in SPOTTER_REGION_OPTIONS:
+            saved_region = "Alle"
+        self.dx_cluster_spotter_region_filter_var.set(saved_region)
+        self._clear_dx_cluster_spots()
+        self.dx_cluster_status_label.configure(
+            text="DX Cluster ist getrennt · zum Empfangen bitte manuell verbinden.", fg=MUTED,
+        )
+        self.dx_cluster_start_button.configure(state="normal")
+        self.dx_cluster_stop_button.configure(state="disabled")
+
+    def _dx_cluster_config_from_ui(self) -> DxClusterConfig:
+        try:
+            port = int(self.dx_cluster_port_var.get().strip())
+        except ValueError as exc:
+            raise DxClusterError("Der DX-Cluster-Port muss eine ganze Zahl sein.") from exc
+        config = DxClusterConfig(
+            host=self.dx_cluster_host_var.get().strip(),
+            port=port,
+            callsign=self.dx_cluster_call_var.get().strip().upper(),
+        )
+        config.validate()
+        return config
+
+    def _store_dx_cluster_config(self, config: DxClusterConfig):
+        for key, value in config.settings().items():
+            self.db.set_setting(key, value)
+
+    def save_dx_cluster_settings(self):
+        try:
+            config = self._dx_cluster_config_from_ui()
+            self._store_dx_cluster_config(config)
+            if self.dx_cluster.running:
+                message = "DX-Cluster-Einstellungen gespeichert · Änderungen gelten nach Trennen und erneutem Verbinden."
+            else:
+                message = "DX-Cluster-Einstellungen gespeichert · Verbindung bleibt getrennt."
+            self.dx_cluster_status_label.configure(text=message, fg=OK)
+            self.status_var.set("DX-Cluster-Einstellungen gespeichert")
+        except Exception as exc:
+            messagebox.showerror("DX Cluster", str(exc), parent=self)
+
+    def start_dx_cluster(self):
+        try:
+            config = self._dx_cluster_config_from_ui()
+            self._store_dx_cluster_config(config)
+            self.dx_cluster_session_received = 0
+            self.dx_cluster_last_spot_utc = None
+            self.dx_cluster_generation += 1
+            generation = self.dx_cluster_generation
+            self.dx_cluster.start(
+                config,
+                lambda spot: self._queue_dx_cluster_spot(generation, spot),
+                lambda message: self._queue_dx_cluster_status(generation, message),
+                lambda message: self._queue_dx_cluster_error(generation, message),
+            )
+        except Exception as exc:
+            self.dx_cluster_status_label.configure(text="Verbindung fehlgeschlagen: " + str(exc), fg=ERR)
+            messagebox.showerror("DX Cluster", str(exc), parent=self)
+            return
+        self.dx_cluster_start_button.configure(state="disabled")
+        self.dx_cluster_stop_button.configure(state="normal")
+        self.dx_cluster_status_label.configure(text=f"Verbinde mit {config.host}:{config.port} …", fg=MUTED)
+        self.status_var.set("DX Cluster verbindet …")
+
+    def stop_dx_cluster(self):
+        self._stop_dx_cluster_runtime()
+        self.status_var.set("DX Cluster getrennt")
+
+    def _stop_dx_cluster_runtime(self, *, update_ui: bool = True):
+        self.dx_cluster_generation += 1
+        self.dx_cluster.stop()
+        if update_ui and hasattr(self, "dx_cluster_status_label"):
+            self.dx_cluster_status_label.configure(text="DX Cluster ist getrennt.", fg=MUTED)
+            self.dx_cluster_start_button.configure(state="normal")
+            self.dx_cluster_stop_button.configure(state="disabled")
+
+    def _queue_dx_cluster_spot(self, generation: int, spot: DxSpot):
+        if not self.closing:
+            self.after(0, lambda: self._accept_dx_cluster_spot(generation, spot))
+
+    def _queue_dx_cluster_status(self, generation: int, message: str):
+        if not self.closing:
+            self.after(0, lambda: self._show_dx_cluster_status(generation, message))
+
+    def _queue_dx_cluster_error(self, generation: int, message: str):
+        if not self.closing:
+            self.after(0, lambda: self._show_dx_cluster_error(generation, message))
+
+    def _show_dx_cluster_status(self, generation: int, message: str):
+        if generation != self.dx_cluster_generation or self.closing:
+            return
+        active = "aktiv" in message.lower()
+        if active:
+            self._update_dx_cluster_live_status()
+        else:
+            self.dx_cluster_status_label.configure(text=message, fg=MUTED)
+        self.status_var.set(message)
+
+    def _update_dx_cluster_live_status(self):
+        if not hasattr(self, "dx_cluster_status_label") or not self.dx_cluster.connected:
+            return
+        last = (
+            self.dx_cluster_last_spot_utc.strftime("%H:%M:%S UTC")
+            if self.dx_cluster_last_spot_utc else "noch keiner"
+        )
+        visible = len(getattr(self, "dx_cluster_visible_ids", []))
+        host = self.dx_cluster_host_var.get().strip()
+        port = self.dx_cluster_port_var.get().strip()
+        self.dx_cluster_status_label.configure(
+            text=(
+                f"✓ Live-Telnet {host}:{port} · {self.dx_cluster_session_received} Spot(s) empfangen · "
+                f"{visible} sichtbar · letzter Spot: {last}"
+            ),
+            fg=OK,
+        )
+
+    def _show_dx_cluster_error(self, generation: int, message: str):
+        if generation != self.dx_cluster_generation or self.closing:
+            return
+        self.dx_cluster_status_label.configure(text="DX-Cluster-Verbindung beendet: " + message, fg=ERR)
+        self.dx_cluster_start_button.configure(state="normal")
+        self.dx_cluster_stop_button.configure(state="disabled")
+        self.status_var.set("DX-Cluster-Verbindung beendet")
+
+    def _accept_dx_cluster_spot(self, generation: int, spot: DxSpot):
+        if generation != self.dx_cluster_generation or self.closing:
+            return
+        identity = (
+            spot.spotter, spot.call, spot.frequency_hz, spot.time_utc, spot.comment,
+        )
+        if identity in self.dx_cluster_seen_keys:
+            return
+        self.dx_cluster_seen_keys.add(identity)
+        self.dx_cluster_sequence += 1
+        self.dx_cluster_session_received += 1
+        self.dx_cluster_last_spot_utc = datetime.now(timezone.utc)
+        item_id = f"dx-{self.dx_cluster_sequence}"
+        self.dx_cluster_spots.insert(0, (item_id, spot))
+        if len(self.dx_cluster_spots) > 500:
+            removed = self.dx_cluster_spots[500:]
+            self.dx_cluster_spots = self.dx_cluster_spots[:500]
+            for _old_id, old_spot in removed:
+                self.dx_cluster_seen_keys.discard((
+                    old_spot.spotter, old_spot.call, old_spot.frequency_hz,
+                    old_spot.time_utc, old_spot.comment,
+                ))
+        self._refresh_dx_cluster_spots()
+        self.status_var.set(f"Neuer Live-DX-Spot: {spot.call} · {spot.frequency_mhz} MHz")
+
+    def _clear_dx_cluster_spots(self):
+        self.dx_cluster_spots.clear()
+        self.dx_cluster_spot_by_id.clear()
+        self.dx_cluster_visible_ids = []
+        self.dx_cluster_selected_id = None
+        self.dx_cluster_seen_keys.clear()
+        self._refresh_dx_cluster_spots()
+
+    def _dx_cluster_time_filter_changed(self, _event=None):
+        value = self.dx_cluster_time_filter_var.get()
+        self.db.set_setting("dx_cluster_time_window", value)
+        self._refresh_dx_cluster_spots()
+
+    def _dx_cluster_spotter_region_changed(self, _event=None):
+        value = self.dx_cluster_spotter_region_filter_var.get()
+        if value not in SPOTTER_REGION_OPTIONS:
+            value = "Alle"
+            self.dx_cluster_spotter_region_filter_var.set(value)
+        self.db.set_setting("dx_cluster_spotter_region", value)
+        self._refresh_dx_cluster_spots()
+
+    @staticmethod
+    def _dx_cluster_spot_age_seconds(spot: DxSpot, now: datetime | None = None) -> float:
+        current = now or datetime.now(timezone.utc)
+        return max(0.0, (current - spot.spotted_at_utc).total_seconds())
+
+    def _dx_cluster_filter_tick(self):
+        self.dx_cluster_filter_job = None
+        if self.closing:
+            return
+        self._refresh_dx_cluster_spots()
+        self.dx_cluster_filter_job = self.after(10_000, self._dx_cluster_filter_tick)
+
+    def _update_dx_cluster_worked_cache(self, qsos: list[dict]):
+        calls: set[tuple[str, str]] = set()
+        countries: set[tuple[str, str]] = set()
+        for qso in qsos:
+            call = str(qso.get("call") or "").strip().upper()
+            country = str(qso.get("country") or "").strip()
+            if not country and call:
+                info = self.country_db.lookup(call)
+                country = info.country if info else ""
+            frequency_hz = 0
+            try:
+                frequency_hz = int(round(float(str(qso.get("freq") or "0").replace(",", ".")) * 1_000_000))
+            except (TypeError, ValueError):
+                pass
+            mode = normalize_worked_mode(
+                str(qso.get("mode") or ""), frequency_hz, str(qso.get("band") or ""),
+            )
+            if not mode:
+                continue
+            if call:
+                calls.add((call, mode))
+            if country:
+                countries.add((country, mode))
+        self.dx_cluster_worked_calls = calls
+        self.dx_cluster_worked_countries = countries
+        if hasattr(self, "dx_cluster_tree"):
+            self._refresh_dx_cluster_spots()
+
+    def _dx_cluster_country(self, callsign: str) -> str:
+        key = (callsign or "").strip().upper()
+        if key in self.dx_cluster_country_cache:
+            return self.dx_cluster_country_cache[key]
+        lookup_call = re.sub(r"-(?:\d+|#)$", "", key)
+        info = self.country_db.lookup(lookup_call)
+        country = info.country if info else "—"
+        self.dx_cluster_country_cache[key] = country
+        self.dx_cluster_continent_cache[key] = (info.cont or "").upper() if info else ""
+        return country
+
+    def _dx_cluster_continent(self, callsign: str) -> str:
+        key = (callsign or "").strip().upper()
+        if key not in self.dx_cluster_continent_cache:
+            self._dx_cluster_country(callsign)
+        return self.dx_cluster_continent_cache.get(key, "")
+
+    @staticmethod
+    def _dx_cluster_table_cell(value: str, width: int) -> str:
+        text = str(value or "—")
+        if len(text) > width - 1:
+            text = text[: width - 2] + "…"
+        return text.ljust(width)
+
+    def _dx_cluster_sort_value(self, row: tuple):
+        _item_id, spot, dx_country, spotter_country, comment, _age = row
+        return spot_sort_value(
+            spot, self.dx_cluster_sort_key, dx_country, spotter_country, comment,
+        )
+
+    def _refresh_dx_cluster_spots(self):
+        if not hasattr(self, "dx_cluster_tree"):
+            return
+        band_filter = self.dx_cluster_band_filter_var.get()
+        mode_filter = self.dx_cluster_mode_filter_var.get()
+        spotter_region_filter = self.dx_cluster_spotter_region_filter_var.get()
+        window_label = self.dx_cluster_time_filter_var.get()
+        window_minutes = {
+            "15 Minuten": 15, "30 Minuten": 30, "60 Minuten": 60, "2 Stunden": 120,
+        }.get(window_label)
+        now = datetime.now(timezone.utc)
+        rows = []
+        for item_id, spot in self.dx_cluster_spots:
+            age_seconds = self._dx_cluster_spot_age_seconds(spot, now)
+            if window_minutes is not None and age_seconds > window_minutes * 60:
+                continue
+            if band_filter != "Alle" and spot.band != band_filter:
+                continue
+            if mode_filter != "Alle" and spot.mode != mode_filter:
+                continue
+            comment = spot.comment
+            if spot.locator:
+                comment = (comment + " · " if comment else "") + spot.locator
+            dx_country = self._dx_cluster_country(spot.call)
+            spotter_country = self._dx_cluster_country(spot.spotter)
+            spotter_region = spotter_region_for_continent(self._dx_cluster_continent(spot.spotter))
+            if spotter_region_filter != "Alle" and spotter_region != spotter_region_filter:
+                continue
+            rows.append((item_id, spot, dx_country, spotter_country, comment, age_seconds))
+        rows.sort(key=self._dx_cluster_sort_value, reverse=self.dx_cluster_sort_descending)
+
+        old_y = self.dx_cluster_tree.yview()
+        old_x = self.dx_cluster_tree.xview()
+        selected_id = self.dx_cluster_selected_id
+        self.dx_cluster_tree.configure(state="normal")
+        self.dx_cluster_tree.delete("1.0", "end")
+        self.dx_cluster_spot_by_id.clear()
+        self.dx_cluster_visible_ids = []
+        header_parts = []
+        for key, label, width in self.dx_cluster_table_columns:
+            if key == self.dx_cluster_sort_key:
+                label += " ▼" if self.dx_cluster_sort_descending else " ▲"
+            header_parts.append(self._dx_cluster_table_cell(label, width))
+        self.dx_cluster_tree.insert("end", "".join(header_parts) + "\n", ("header",))
+
+        for item_id, spot, dx_country, spotter_country, comment, age_seconds in rows:
+            worked_call, worked_country = worked_flags(
+                spot.call, dx_country, spot.mode,
+                self.dx_cluster_worked_calls, self.dx_cluster_worked_countries,
+            )
+            line_number = len(self.dx_cluster_visible_ids) + 2
+            self.dx_cluster_tree.insert("end", self._dx_cluster_table_cell((spot.time_utc + "Z") if spot.time_utc else "—", 7))
+            self.dx_cluster_tree.insert(
+                "end", self._dx_cluster_table_cell(spot.call, 15), ("worked",) if worked_call else (),
+            )
+            self.dx_cluster_tree.insert(
+                "end", self._dx_cluster_table_cell(dx_country, 20), ("worked",) if worked_country else (),
+            )
+            for value, width in (
+                (spot.frequency_mhz, 11), (spot.band or "—", 8), (spot.mode or "—", 10),
+                (spot.spotter, 15), (spotter_country, 20), (comment, 60),
+            ):
+                self.dx_cluster_tree.insert("end", self._dx_cluster_table_cell(value, width))
+            self.dx_cluster_tree.insert("end", "\n")
+            line_start = f"{line_number}.0"
+            line_end = f"{line_number}.end"
+            if age_seconds <= 120:
+                self.dx_cluster_tree.tag_add("new", line_start, line_end)
+            if item_id == selected_id:
+                self.dx_cluster_tree.tag_add("selected", line_start, line_end)
+            self.dx_cluster_visible_ids.append(item_id)
+            self.dx_cluster_spot_by_id[item_id] = spot
+
+        if selected_id not in self.dx_cluster_spot_by_id:
+            self.dx_cluster_selected_id = None
+        self.dx_cluster_tree.configure(state="disabled")
+        if old_y:
+            self.dx_cluster_tree.yview_moveto(old_y[0])
+        if old_x:
+            self.dx_cluster_tree.xview_moveto(old_x[0])
+        self._update_dx_cluster_live_status()
+
+    def _dx_cluster_sort_from_character(self, character: int):
+        start = 0
+        for key, _label, width in self.dx_cluster_table_columns:
+            if start <= character < start + width:
+                if self.dx_cluster_sort_key == key:
+                    self.dx_cluster_sort_descending = not self.dx_cluster_sort_descending
+                else:
+                    self.dx_cluster_sort_key = key
+                    self.dx_cluster_sort_descending = key in {"time", "frequency"}
+                self._refresh_dx_cluster_spots()
+                return
+            start += width
+
+    def _dx_cluster_table_click(self, event):
+        line_text, character_text = self.dx_cluster_tree.index(f"@{event.x},{event.y}").split(".")
+        line = int(line_text)
+        if line == 1:
+            self._dx_cluster_sort_from_character(int(character_text))
+            return "break"
+        visible_index = line - 2
+        if not 0 <= visible_index < len(self.dx_cluster_visible_ids):
+            return "break"
+        self.dx_cluster_selected_id = self.dx_cluster_visible_ids[visible_index]
+        self.dx_cluster_tree.tag_remove("selected", "1.0", "end")
+        self.dx_cluster_tree.tag_add("selected", f"{line}.0", f"{line}.end")
+        return "break"
+
+    def _dx_cluster_table_double_click(self, event):
+        line = int(self.dx_cluster_tree.index(f"@{event.x},{event.y}").split(".")[0])
+        if line == 1:
+            return "break"
+        self._dx_cluster_table_click(event)
+        self._tune_selected_dx_spot()
+        return "break"
+
+    def _selected_dx_cluster_spot(self) -> DxSpot | None:
+        return self.dx_cluster_spot_by_id.get(self.dx_cluster_selected_id or "")
+
+    def _use_selected_dx_spot(self):
+        spot = self._selected_dx_cluster_spot()
+        if spot is None:
+            messagebox.showinfo("DX Cluster", "Bitte zuerst einen DX-Spot auswählen.", parent=self)
+            return
+        self.call_var.set(spot.call)
+        self._call_changed()
+        self.freq_var.set(spot.frequency_mhz)
+        if spot.band:
+            self.band_var.set(spot.band)
+        if spot.mode in MODES:
+            self.mode_var.set(spot.mode)
+        self._show_page("log")
+        self.call_entry.focus_set()
+        self.status_var.set(f"DX-Spot als QSO übernommen: {spot.call} · noch nicht gespeichert")
+
+    def _tune_selected_dx_spot(self):
+        spot = self._selected_dx_cluster_spot()
+        if spot is None:
+            messagebox.showinfo("DX Cluster", "Bitte zuerst einen DX-Spot auswählen.", parent=self)
+            return
+        if not self.cat_manager.running:
+            messagebox.showwarning(
+                "CAT ist ausgeschaltet",
+                "Zum Abstimmen des TRX bitte zuerst CAT im CAT Setup starten.",
+                parent=self,
+            )
+            return
+        generation = self.cat_generation
+        self.status_var.set(f"CAT stimmt auf {spot.call} · {spot.frequency_mhz} MHz ab …")
+
+        def worker():
+            try:
+                self.cat_manager.set_frequency_and_mode(spot.frequency_hz, spot.mode)
+                if not self.closing:
+                    self.after(0, lambda: self._dx_cluster_tuned(generation, spot))
+            except Exception as exc:
+                message = str(exc)
+                if not self.closing:
+                    self.after(0, lambda message=message: messagebox.showerror("CAT abstimmen", message, parent=self))
+
+        threading.Thread(target=worker, name="dx-cluster-cat-tune", daemon=True).start()
+
+    def _dx_cluster_tuned(self, generation: int, spot: DxSpot):
+        if generation != self.cat_generation or self.closing:
+            return
+        mode = f" · {spot.mode}" if spot.mode else ""
+        self.status_var.set(f"CAT abgestimmt: {spot.call} · {spot.frequency_mhz} MHz{mode}")
+
+    def send_current_dx_spot(self):
+        if not self.dx_cluster.connected:
+            messagebox.showinfo(
+                "DX-Spot senden",
+                "Bitte zuerst im Menü DX Cluster eine Telnet-Verbindung herstellen.",
+                parent=self,
+            )
+            return
+        try:
+            call = self.call_var.get().strip().upper()
+            if not call:
+                raise ValueError
+            frequency_hz = int(round(float(self.freq_var.get().strip().replace(",", ".")) * 1_000_000))
+            if frequency_hz <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("DX-Spot senden", "Bitte Rufzeichen und eine gültige Frequenz im QSO-Formular eintragen.", parent=self)
+            return
+        comment = simpledialog.askstring(
+            "DX-Spot senden",
+            "Optionaler Kommentar für den öffentlichen DX-Spot:",
+            initialvalue=self.form_vars["comment"].get().strip(),
+            parent=self,
+        )
+        if comment is None:
+            return
+        frequency_mhz = f"{frequency_hz / 1_000_000:.6f}".rstrip("0").rstrip(".")
+        if not messagebox.askyesno(
+            "DX-Spot öffentlich senden",
+            f"Folgenden Spot wirklich öffentlich an den verbundenen DX Cluster senden?\n\n"
+            f"Rufzeichen: {call}\nFrequenz: {frequency_mhz} MHz\nKommentar: {comment.strip() or '—'}",
+            parent=self,
+        ):
+            return
+        generation = self.dx_cluster_generation
+
+        def worker():
+            try:
+                self.dx_cluster.send_spot(call, frequency_hz, comment)
+                if not self.closing:
+                    self.after(0, lambda: self._dx_spot_sent(generation, call, frequency_mhz))
+            except Exception as exc:
+                message = str(exc)
+                if not self.closing:
+                    self.after(0, lambda message=message: messagebox.showerror("DX-Spot senden", message, parent=self))
+
+        threading.Thread(target=worker, name="dx-cluster-send-spot", daemon=True).start()
+
+    def _dx_spot_sent(self, generation: int, call: str, frequency_mhz: str):
+        if generation != self.dx_cluster_generation or self.closing:
+            return
+        self.status_var.set(f"DX-Spot gesendet: {call} · {frequency_mhz} MHz")
+        self.dx_cluster_status_label.configure(text=f"✓ DX-Spot gesendet: {call} · {frequency_mhz} MHz", fg=OK)
+
+
+    # ---------- WSJT-X / external UDP logging ----------
+    def _build_udp_log_page(self):
+        p = self._new_page("udp_log")
+        p.columnconfigure(0, weight=1)
+        p.columnconfigure(1, weight=1)
+        p.rowconfigure(0, weight=1)
+
+        left = self._card(p, row=0, column=0, sticky="nsew", padx=(0, 8))
+        left.columnconfigure(0, weight=1)
+        ttk.Label(left, text="UDP-Empfänger", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            left,
+            text=(
+                "Empfängt geloggte QSOs aus WSJT-X oder anderen Programmen. "
+                "Die Einstellungen gehören zum aktiven Logger-Profil."
+            ),
+            style="Muted.Card.TLabel",
+            wraplength=470,
+        ).grid(row=1, column=0, sticky="w", pady=(3, 14))
+
+        ttk.Label(left, text="Bind-Adresse", style="Card.TLabel").grid(row=2, column=0, sticky="w", pady=(2, 3))
+        self.udp_log_host_var = tk.StringVar(value="127.0.0.1")
+        ttk.Combobox(
+            left,
+            textvariable=self.udp_log_host_var,
+            values=("127.0.0.1", "0.0.0.0"),
+            state="readonly",
+        ).grid(row=3, column=0, sticky="ew")
+        ttk.Label(
+            left,
+            text="127.0.0.1 nimmt nur Programme auf diesem PC an. 0.0.0.0 erlaubt auch Pakete aus dem lokalen Netzwerk.",
+            style="Muted.Card.TLabel",
+            wraplength=470,
+        ).grid(row=4, column=0, sticky="w", pady=(4, 12))
+
+        ttk.Label(left, text="UDP-Port", style="Card.TLabel").grid(row=5, column=0, sticky="w", pady=(2, 3))
+        self.udp_log_port_var = tk.StringVar(value="2237")
+        ttk.Entry(left, textvariable=self.udp_log_port_var).grid(row=6, column=0, sticky="ew")
+        ttk.Label(
+            left,
+            text="Der Port ist frei wählbar. Er muss in Sender und Logger identisch und auf diesem PC noch frei sein.",
+            style="Muted.Card.TLabel",
+            wraplength=470,
+        ).grid(row=7, column=0, sticky="w", pady=(4, 16))
+
+        ttk.Separator(left).grid(row=8, column=0, sticky="ew", pady=(0, 14))
+        ttk.Label(left, text="UDP-Status", style="CardTitle.TLabel").grid(row=9, column=0, sticky="w")
+        self.udp_log_status_label = tk.Label(
+            left,
+            text="UDP-Logging ist ausgeschaltet.",
+            bg=CARD,
+            fg=MUTED,
+            font=("Segoe UI", 10),
+            justify="left",
+            anchor="nw",
+            wraplength=470,
+        )
+        self.udp_log_status_label.grid(row=10, column=0, sticky="ew", pady=(6, 10))
+        self.udp_log_last_label = tk.Label(
+            left,
+            text="Noch kein QSO empfangen.",
+            bg=CARD,
+            fg=MUTED,
+            font=("Segoe UI", 9),
+            justify="left",
+            anchor="nw",
+            wraplength=470,
+        )
+        self.udp_log_last_label.grid(row=11, column=0, sticky="ew", pady=(0, 12))
+
+        buttons = ttk.Frame(left, style="Card.TFrame")
+        buttons.grid(row=12, column=0, sticky="ew")
+        ttk.Button(buttons, text="Einstellungen speichern", style="Secondary.TButton", command=self.save_udp_log_settings).pack(side="left")
+        self.udp_log_start_button = ttk.Button(buttons, text="UDP starten", style="Primary.TButton", command=self.start_udp_log)
+        self.udp_log_start_button.pack(side="left", padx=8)
+        self.udp_log_stop_button = ttk.Button(buttons, text="UDP stoppen", style="Secondary.TButton", command=self.stop_udp_log)
+        self.udp_log_stop_button.pack(side="left")
+
+        right = self._card(p, row=0, column=1, sticky="nsew", padx=(8, 0))
+        right.columnconfigure(0, weight=1)
+        ttk.Label(right, text="Einrichtung in WSJT-X", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        wsjtx_help = (
+            "Empfohlen: In WSJT-X unter File > Settings > Reporting beim UDP Server "
+            "127.0.0.1 und denselben freien Port eintragen (typisch 2237). Der Logger "
+            "erkennt das native WSJT-X-Protokoll automatisch.\n\n"
+            "Falls der primäre WSJT-X-Port bereits von JTAlert, GridTracker oder einem "
+            "anderen Programm belegt ist, kann alternativ der 'logged contact ADIF broadcast' "
+            "auf einen zweiten freien Port (zum Beispiel 2333) zeigen. Auch dieses ADIF-Format "
+            "wird automatisch erkannt."
+        )
+        tk.Label(
+            right, text=wsjtx_help, bg=CARD, fg=TEXT, font=("Segoe UI", 10),
+            justify="left", anchor="nw", wraplength=480,
+        ).grid(row=1, column=0, sticky="ew", pady=(8, 18))
+
+        ttk.Separator(right).grid(row=2, column=0, sticky="ew", pady=(0, 16))
+        ttk.Label(right, text="Andere Logprogramme", style="CardTitle.TLabel").grid(row=3, column=0, sticky="w")
+        tk.Label(
+            right,
+            text=(
+                "Programme, die einen vollständigen ADIF-Datensatz mit <EOR> per UDP senden, "
+                "können denselben Empfänger verwenden. Andere Protokolle wie N1MM-XML brauchen "
+                "einen eigenen Adapter."
+            ),
+            bg=CARD, fg=TEXT, font=("Segoe UI", 10), justify="left", anchor="nw", wraplength=480,
+        ).grid(row=4, column=0, sticky="ew", pady=(8, 18))
+
+        ttk.Separator(right).grid(row=5, column=0, sticky="ew", pady=(0, 16))
+        ttk.Label(right, text="Speicherung", style="CardTitle.TLabel").grid(row=6, column=0, sticky="w")
+        tk.Label(
+            right,
+            text=(
+                "Jedes empfangene QSO landet direkt in der ADI-Datei des aktiven Profils und "
+                "erscheint als LOCAL ONLY im Logbuch. Es wird später über den normalen Wavelog-Sync "
+                "übertragen. Mehrfach gesendete identische QSOs werden ignoriert.\n\n"
+                "Der UDP-Empfaenger wird nach jedem Programmstart bewusst manuell gestartet."
+            ),
+            bg=CARD, fg=TEXT, font=("Segoe UI", 10), justify="left", anchor="nw", wraplength=480,
+        ).grid(row=7, column=0, sticky="ew", pady=(8, 0))
+
+    def _load_udp_log_settings_to_ui(self):
+        try:
+            config = UdpLogConfig.from_getter(self.db.get_setting)
+        except ExternalLogError:
+            config = UdpLogConfig()
+        self.udp_log_host_var.set(config.bind_host)
+        self.udp_log_port_var.set(str(config.port))
+        self.udp_log_received = 0
+        self.udp_log_status_label.configure(
+            text="UDP-Logging ist ausgeschaltet · zum Empfangen bitte UDP starten.", fg=MUTED,
+        )
+        self.udp_log_last_label.configure(text="Noch kein QSO empfangen.", fg=MUTED)
+        self.udp_log_start_button.configure(state="normal")
+        self.udp_log_stop_button.configure(state="disabled")
+
+    def _udp_log_config_from_ui(self) -> UdpLogConfig:
+        try:
+            port = int(self.udp_log_port_var.get().strip())
+        except ValueError as exc:
+            raise ExternalLogError("Der UDP-Port muss eine ganze Zahl sein.") from exc
+        config = UdpLogConfig(self.udp_log_host_var.get().strip(), port)
+        config.validate()
+        return config
+
+    def save_udp_log_settings(self):
+        try:
+            config = self._udp_log_config_from_ui()
+            for key, value in config.settings().items():
+                self.db.set_setting(key, value)
+            if self.udp_log_receiver.running:
+                message = "UDP-Einstellungen gespeichert · Änderungen gelten nach UDP stoppen und erneut starten."
+            else:
+                message = "UDP-Einstellungen gespeichert · UDP bleibt ausgeschaltet."
+            self.udp_log_status_label.configure(text=message, fg=OK)
+            self.status_var.set("UDP-Einstellungen gespeichert")
+        except Exception as exc:
+            messagebox.showerror("UDP Logging", str(exc), parent=self)
+
+    def start_udp_log(self):
+        try:
+            config = self._udp_log_config_from_ui()
+            for key, value in config.settings().items():
+                self.db.set_setting(key, value)
+            self.udp_log_generation += 1
+            generation = self.udp_log_generation
+            self.udp_log_receiver.start(
+                config,
+                lambda event: self._queue_udp_log_event(generation, event),
+                lambda message: self._queue_udp_log_error(generation, message),
+            )
+        except Exception as exc:
+            self.udp_log_status_label.configure(text="UDP konnte nicht gestartet werden: " + str(exc), fg=ERR)
+            messagebox.showerror("UDP Logging", str(exc), parent=self)
+            return
+        self.udp_log_start_button.configure(state="disabled")
+        self.udp_log_stop_button.configure(state="normal")
+        self.udp_log_status_label.configure(
+            text=f"✓ UDP aktiv auf {config.bind_host}:{config.port} · warte auf QSOs …", fg=OK,
+        )
+        self.status_var.set(f"UDP Logging aktiv · Port {config.port}")
+
+    def stop_udp_log(self):
+        self._stop_udp_log_runtime()
+        self.status_var.set("UDP Logging gestoppt")
+
+    def _stop_udp_log_runtime(self, *, update_ui: bool = True):
+        self.udp_log_generation += 1
+        self.udp_log_receiver.stop()
+        if update_ui and hasattr(self, "udp_log_status_label"):
+            self.udp_log_status_label.configure(text="UDP-Logging ist ausgeschaltet.", fg=MUTED)
+            self.udp_log_start_button.configure(state="normal")
+            self.udp_log_stop_button.configure(state="disabled")
+
+    def _queue_udp_log_event(self, generation: int, event: UdpLogEvent):
+        if not self.closing:
+            self.after(0, lambda: self._accept_udp_log_event(generation, event))
+
+    def _queue_udp_log_error(self, generation: int, message: str):
+        if not self.closing:
+            self.after(0, lambda: self._show_udp_log_error(generation, message))
+
+    def _show_udp_log_error(self, generation: int, message: str):
+        if generation != self.udp_log_generation or self.closing:
+            return
+        self.udp_log_status_label.configure(text="UDP-Datagramm konnte nicht gelesen werden: " + message, fg=WARN)
+        self.status_var.set("UDP-Empfangsfehler")
+
+    def _prepare_external_qso(self, incoming: dict) -> dict:
+        qso = dict(incoming)
+        call = str(qso.get("call") or "").strip().upper()
+        if not call:
+            raise ValueError("Empfangenes QSO enthält kein Rufzeichen.")
+        qso["call"] = call
+
+        qso_date = str(qso.get("qso_date") or "").strip()
+        if len(qso_date) == 8 and qso_date.isdigit():
+            qso_date = f"{qso_date[:4]}-{qso_date[4:6]}-{qso_date[6:8]}"
+        datetime.strptime(qso_date, "%Y-%m-%d")
+        qso["qso_date"] = qso_date
+
+        time_on = "".join(ch for ch in str(qso.get("time_on") or "") if ch.isdigit())
+        if len(time_on) == 4:
+            time_on += "00"
+        if len(time_on) != 6:
+            raise ValueError("Empfangenes QSO enthält keine gültige TIME_ON.")
+        datetime.strptime(time_on, "%H%M%S")
+        qso["time_on"] = time_on
+
+        freq = str(qso.get("freq") or "").strip().replace(",", ".")
+        if freq:
+            mhz = float(freq)
+            if mhz <= 0:
+                raise ValueError("Empfangenes QSO enthält keine gültige Frequenz.")
+            qso["freq"] = freq
+            if not qso.get("band"):
+                qso["band"] = band_from_mhz(mhz) or ""
+        qso["band"] = str(qso.get("band") or "").strip()
+        qso["mode"] = str(qso.get("mode") or "").strip().upper()
+        if not qso["mode"]:
+            raise ValueError("Empfangenes QSO enthält keinen Modus.")
+
+        profile = self._profile_values()
+        defaults = {
+            **profile,
+            "station_call": profile.get("station_call") or profile.get("operator_call") or "",
+            "tx_pwr": self.db.get_setting("default_power", ""),
+        }
+        for key, value in defaults.items():
+            if not str(qso.get(key) or "").strip():
+                qso[key] = value
+        if not qso.get("station_call"):
+            raise ValueError("Weder das empfangene QSO noch das aktive Profil enthält ein Stationsrufzeichen.")
+
+        country = self._country_fields_for_call(call)
+        for key, value in country.items():
+            if not str(qso.get(key) or "").strip():
+                qso[key] = value
+        for key in (
+            "rst_sent", "rst_rcvd", "gridsquare", "name", "qth", "comment", "notes",
+            "pota_ref", "sota_ref", "wwff_ref", "contest_id", "stx", "srx",
+            "stx_string", "srx_string", "prop_mode", "qso_date_off", "time_off",
+        ):
+            qso[key] = str(qso.get(key) or "").strip()
+        return qso
+
+    def _accept_udp_log_event(self, generation: int, event: UdpLogEvent):
+        if generation != self.udp_log_generation or self.closing or not self.udp_log_receiver.running:
+            return
+        try:
+            qso = self._prepare_external_qso(event.qso)
+            duplicate = find_duplicate_qso(self.store.scan(), qso)
+            if duplicate is not None:
+                self.udp_log_last_label.configure(
+                    text=f"Duplikat ignoriert: {qso['call']} · {qso['qso_date']} {qso['time_on']} · {event.source}",
+                    fg=WARN,
+                )
+                self.status_var.set(f"UDP-Duplikat ignoriert: {qso['call']}")
+                return
+            saved = self.store.add(qso)
+            self.db.ensure_local(saved["local_id"], qso_hash(saved))
+            self.udp_log_received += 1
+            self.udp_log_last_label.configure(
+                text=(
+                    f"Zuletzt gespeichert: {saved['call']} · {saved.get('band') or '—'} · "
+                    f"{saved['mode']} · {event.source}\nIn dieser Sitzung empfangen: {self.udp_log_received}"
+                ),
+                fg=OK,
+            )
+            self.status_var.set(f"UDP-QSO gespeichert: {saved['call']} · LOCAL ONLY")
+            self.refresh_qsos()
+        except Exception as exc:
+            self._show_udp_log_error(generation, str(exc))
+
     # ---------- settings ----------
     def _build_settings_page(self):
         p = self._new_page("settings")
@@ -1985,6 +2913,8 @@ class LoggerApp(tk.Tk):
         self._update_profile_summary()
         self._set_current_qso_time()
         self._load_cat_settings_to_ui()
+        self._load_dx_cluster_settings_to_ui()
+        self._load_udp_log_settings_to_ui()
 
         # If Wavelog was configured before, profile labels are loaded only on explicit test.
         sid = self.db.get_setting("station_profile_id", "")
@@ -2103,6 +3033,8 @@ class LoggerApp(tk.Tk):
         try:
             write_startup_log("Programm wird geschlossen")
             self._stop_cat_runtime(update_ui=False)
+            self._stop_dx_cluster_runtime(update_ui=False)
+            self._stop_udp_log_runtime(update_ui=False)
             # Every database operation is committed immediately.
             if not self.sync_busy:
                 self.db.close()

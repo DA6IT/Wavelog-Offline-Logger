@@ -12,6 +12,22 @@ Die derzeitigen Community-Builds sind nicht digital signiert. Vergleiche vor dem
 
 Prüfe unter **CAT Setup** das gewählte Funkgerätemodell, den COM-Port, die Baudrate und die seriellen Parameter. Der COM-Port darf nicht gleichzeitig von einer anderen CAT-Anwendung belegt sein. Hamlib ist im Windows-Build bereits enthalten und muss nicht separat installiert werden; der zum Funkgerät oder USB-Adapter gehörende Windows-Treiber kann dennoch erforderlich sein.
 
+## DX Cluster verbindet sich nicht
+
+Die DX-Cluster-Funktion benötigt Internet. Prüfe Host, Telnet-Port, Login-Rufzeichen, Firewall, VPN und gegebenenfalls den Status des gewählten Clusters. Als Vorgabe verwendet der Logger `dxcluster.afu-tools.de:7300`; eigene DXSpider-kompatible Telnet-Server können profilbezogen eingetragen werden. Die Verbindung wird nach einem Programmstart nicht automatisch hergestellt.
+
+Bei aktiver Verbindung zeigt der Status die Zahl der in dieser Sitzung empfangenen Spots und die Uhrzeit des letzten Empfangs. Neue Spots werden sofort ergänzt. Bleibt „letzter Spot: noch keiner“ stehen, kann der Cluster gerade ruhig sein oder die Anmeldung noch nicht abgeschlossen sein. Werden Spots gezählt, aber nicht angezeigt, prüfe Band-, Mode- und Zeitraumfilter; standardmäßig sind nur die letzten 30 Minuten sichtbar.
+
+## Ein eigener DX-Spot wird nicht gesendet
+
+Der Button **DX-Spot senden** funktioniert erst nach einer aktiven Telnet-Anmeldung. Rufzeichen und Frequenz müssen im normalen QSO-Formular stehen. Jeder Spot wird öffentlich verbreitet und muss deshalb nach Eingabe des optionalen Kommentars ausdrücklich bestätigt werden. Ob ein Cluster einen Befehl anschließend fachlich akzeptiert, hängt von dessen Regeln und dem verwendeten Login ab.
+
+## UDP Logging meldet „Port bereits belegt“
+
+Ein UDP-Port kann auf derselben Bind-Adresse normalerweise nur von einem Empfänger verwendet werden. Trage unter **UDP Logging** einen anderen freien Port ein und verwende exakt dieselbe Nummer im sendenden Programm. Nach **UDP stoppen** und erneutem **UDP starten** ist die Änderung aktiv; ein kompletter Programmneustart ist nicht nötig.
+
+Wenn JTAlert oder GridTracker bereits den primären WSJT-X-Port belegt, kann WSJT-X den zusätzlichen „logged contact ADIF broadcast“ an einen separaten Port des Offline Loggers senden.
+
 ## Kein Update-Hinweis beim Programmstart
 
 Ohne Internetverbindung oder wenn GitHub nicht erreichbar ist, bleibt die Update-Prüfung absichtlich still. Stabile Versionen weisen außerdem nicht auf Vorabversionen hin. Releases können jederzeit manuell unter https://github.com/DA6IT/Wavelog-Offline-Logger/releases geprüft werden.

@@ -2,7 +2,7 @@
 
 Offlinefähiger Desktop-Logger für Funkamateure mit sicherer Synchronisation zu Wavelog.
 
-> Aktueller Entwicklungsstand: **v0.12.0-rc2 (Release Candidate)**. Die neue CAT-Steuerung wurde mit einem Yaesu FTX-1 praktisch getestet.
+> Aktuelle Vorabversion: **v0.13.0-rc1**. Sie ergänzt die praktisch getestete CAT-Steuerung um UDP-Logging für WSJT-X und andere Programme sowie einen integrierten Telnet-DX-Cluster.
 
 ## Zweck
 
@@ -21,6 +21,8 @@ Das Programm ersetzt Wavelog nicht. Wavelog bleibt das zentrale Online-Logbuch; 
 - Contest-Presets, Seriennummern und Operatorwechsel
 - Profilbezogenes CAT Setup mit gebündeltem Hamlib 4.7.2 und mehr als 300 unterstützten Funkgerätemodellen
 - Automatische Übernahme von Frequenz, Band und Mode in normales und Contest-Logging
+- Profilbezogener Telnet-DX-Cluster mit Spot-Filtern, QSO-Übernahme, optionaler CAT-Abstimmung und bewusst bestätigtem Spotversand
+- Profilbezogener UDP-Empfänger für native WSJT-X-QSOs und ADIF-Broadcasts anderer Logprogramme
 - QRZ-, LoTW-, eQSL- und DCL-Status im Logbuch
 - Statistiken und Operatorauswertung
 - Schutz des Wavelog-Tokens über Windows DPAPI
@@ -68,8 +70,10 @@ Release Candidates verwenden einen eigenen versionsabhängigen Programmordner un
 3. Verbindung testen und ein Wavelog-Stationsprofil auswählen.
 4. Stationsrufzeichen, Operator und optional Locator/QTH ergänzen.
 5. Optional unter **CAT Setup** Funkgerät, COM-Port und serielle Parameter wählen, Einstellungen speichern und CAT starten.
-6. Ein QSO erfassen und speichern.
-7. Bei vorhandener Internetverbindung die Synchronisation starten.
+6. Optional unter **DX Cluster** den vorbelegten Telnet-Server oder einen eigenen Server konfigurieren und manuell verbinden.
+7. Optional unter **UDP Logging** eine freie Portnummer wählen und den Empfänger starten.
+8. Ein QSO erfassen und speichern.
+9. Bei vorhandener Internetverbindung die Synchronisation starten.
 
 ## CAT-Steuerung mit Hamlib
 
@@ -94,6 +98,36 @@ Der Windows-Build enthält Hamlib 4.7.2 und unterstützt damit mehr als 300 Funk
 - **CAT stoppen** oder das Beenden des Loggers beendet auch den von der Anwendung gestarteten `rigctld`-Prozess.
 
 Weitere Einzelheiten stehen im Abschnitt CAT des [Benutzerhandbuchs](docs/USER_GUIDE.md#5-cat-einrichten). Die Lizenzhinweise zu den eingebetteten Hamlib-Dateien enthält [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## DX Cluster über Telnet
+
+Unter **DX Cluster** steht eine direkte Telnet-Anbindung zur Verfügung. Standardmäßig sind `dxcluster.afu-tools.de` und Port `7300` eingetragen; Host, Port und Login-Rufzeichen können für jedes Logger-Profil frei geändert werden.
+
+1. Login-Rufzeichen prüfen und **Verbinden** auswählen.
+2. Spots nach Band, Mode, Zeitraum und Spotter-Region filtern; voreingestellt sind die letzten 30 Minuten. Für die Region stehen Europa, Nordamerika, Südamerika, Asien/Pazifik, Afrika und Unbekannt zur Auswahl. Neu empfangene Telnet-Spots erscheinen ohne manuelles Neuladen sofort in der Liste.
+3. Einen Spot doppelt anklicken, um den TRX bei laufendem CAT auf Frequenz und den erkannten Mode abzustimmen. Die Cluster-Seite bleibt dabei geöffnet.
+4. **QSO übernehmen** auswählen, um Rufzeichen, Frequenz, Band und Mode in das normale QSO-Formular zu laden.
+
+Die Übernahme speichert niemals automatisch ein QSO. Ein generisches `SSB` im Spot-Kommentar wird auf 160, 80 und 40 Metern als `LSB`, auf den übrigen Bändern als `USB` behandelt. Fehlt die Mode-Angabe vollständig, verwendet der Logger dieselbe bandabhängige SSB-Vorgabe. Eindeutige Modes wie FT8, CW oder FM haben Vorrang und bleiben erhalten.
+
+DX-Rufzeichen, DX-Land und das Land des Spotters werden mit der lokalen `cty.dat` bestimmt. Ein Klick auf eine beliebige Tabellenüberschrift sortiert die Liste nach dieser Spalte – einschließlich DX-Land und Spotter-Land; ein zweiter Klick kehrt die Reihenfolge um. Standardmäßig steht der jüngste Spot oben. Neue Spots besitzen zwei Minuten lang einen hellblauen Zeilenhintergrund. Die grüne Worked-Markierung gilt immer nur für denselben Mode: Ein in FT8 gearbeitetes Land wird bei einem USB-Spot daher nicht grün. Wurde das Land im Spot-Mode bereits gearbeitet, erscheint nur der Ländertext grün; wurde auch das konkrete Rufzeichen in diesem Mode gearbeitet, erscheinen Rufzeichen und Land grün.
+
+Über **DX-Spot senden** im QSO-Formular können Rufzeichen und Frequenz an den verbundenen Cluster gemeldet werden. Vor dem öffentlichen Versand werden ein optionaler Kommentar und eine ausdrückliche Bestätigung abgefragt. Es werden weder beim Start noch automatisch beim Loggen Spots gesendet.
+
+Der DX Cluster benötigt Internet, die übrigen Offline-Funktionen jedoch nicht. Die Telnet-Verbindung startet stets manuell und wird bei Profilwechsel oder Programmende beendet.
+
+## WSJT-X und ADIF über UDP
+
+Unter **UDP Logging** kann das aktive Profil geloggte QSOs direkt von WSJT-X empfangen. Der Empfänger erkennt sowohl das native WSJT-X-Netzwerkprotokoll als auch vollständige ADIF-Datensätze mit `<EOR>`, die andere Programme per UDP senden.
+
+1. Als Bind-Adresse für Programme auf demselben PC `127.0.0.1` beibehalten.
+2. Einen freien UDP-Port wählen, beispielsweise `2237`, und die Einstellungen speichern.
+3. In WSJT-X unter **File > Settings > Reporting** dieselbe Adresse und Portnummer als UDP Server eintragen.
+4. Im Offline Logger **UDP starten** auswählen.
+
+Ist der primäre WSJT-X-Port bereits von JTAlert, GridTracker oder einer anderen Anwendung belegt, kann der zusätzliche „logged contact ADIF broadcast“ von WSJT-X auf einen separaten freien Port zeigen, beispielsweise `2333`. Ein belegter Port wird beim Start verständlich gemeldet. Nach einer Portänderung genügt **UDP stoppen** und erneutes **UDP starten**; ein Programmneustart ist nicht nötig.
+
+Empfangene QSOs werden direkt in der ADI-Datei des aktiven Profils gespeichert, im Logbuch als `LOCAL ONLY` angezeigt und später mit dem normalen Wavelog-Abgleich synchronisiert. Identische Mehrfachübertragungen werden nicht doppelt gespeichert. Der UDP-Empfänger bleibt nach einem Programmstart ausgeschaltet, bis er ausdrücklich gestartet wird.
 
 ## Updates
 
@@ -146,6 +180,8 @@ Die empfohlenen GitHub-Einstellungen für Maintainer beschreibt [GITHUB_SETUP.md
 | `app.py` | Tkinter-Oberfläche und Benutzerinteraktion |
 | `logger_core.py` | ADI-, Profil-, Metadaten-, Sync- und Statistiklogik |
 | `cat_control.py` | Hamlib-Modellliste, `rigctld`-Prozess, CAT-Abfragen und Mode-Zuordnung |
+| `dx_cluster.py` | Telnet-Verbindung, DX-Spot-Parser, Login und expliziter Spotversand |
+| `external_logging.py` | WSJT-X- und ADIF-Empfang über UDP |
 | `update_check.py` | Fehlertolerante Prüfung auf neuere GitHub-Releases |
 | `bootstrap_windows.go` | Kleiner Windows-Launcher mit eingebetteter Anwendung |
 | `cty.dat` | Offline-Länder- und DXCC-Daten |
