@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	appVersion   = "0.12.0-rc2"
+	appVersion   = "0.13.0-rc1"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -40,6 +40,12 @@ var catSource []byte
 
 //go:embed update_check.py
 var updateCheckSource []byte
+
+//go:embed external_logging.py
+var externalLoggingSource []byte
+
+//go:embed dx_cluster.py
+var dxClusterSource []byte
 
 //go:embed cty.dat
 var ctyData []byte
@@ -230,6 +236,12 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "update_check.py"), updateCheckSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "external_logging.py"), externalLoggingSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "dx_cluster.py"), dxClusterSource, 0644); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "cty.dat"), ctyData, 0644); err != nil {
 		return err
 	}
@@ -259,6 +271,8 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "logger_core.py"),
 		filepath.Join(appDir, "cat_control.py"),
 		filepath.Join(appDir, "update_check.py"),
+		filepath.Join(appDir, "external_logging.py"),
+		filepath.Join(appDir, "dx_cluster.py"),
 		filepath.Join(appDir, "cty.dat"),
 	}
 	for _, name := range hamlibFileNames {
@@ -325,7 +339,7 @@ func main() {
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
 	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v0120-rc2")
+	appDir := filepath.Join(base, "app-v0130-rc1")
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)

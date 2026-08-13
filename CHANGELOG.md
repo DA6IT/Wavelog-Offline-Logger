@@ -4,6 +4,31 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.13.0-rc1] - 2026-08-13
+
+### Added
+
+- Profilbezogenes UDP Logging für das native WSJT-X-Protokoll und vollständige ADIF-Datensätze anderer Programme
+- Frei wählbare Bind-Adresse und UDP-Portnummer mit verständlicher Meldung bei bereits belegtem Port
+- Automatische WSJT-X-Heartbeat-Antwort und Duplikatschutz für mehrfach gesendete QSOs
+- Profilbezogener Telnet-DX-Cluster mit frei wählbarem Host, Port und Login-Rufzeichen; vorbelegt mit dxcluster.afu-tools.de:7300
+- Nach Band, Mode und Zeitraum filterbare Spotliste; Standardansicht sind die letzten 30 Minuten
+- Profilbezogener Filter für die Region des Spotters: Europa, Nordamerika, Südamerika, Asien/Pazifik, Afrika oder Unbekannt
+- DX- und Spotter-Land aus der Offline-Länderdatenbank sowie zellgenaue Worked-Markierung aus dem lokalen ADI-Logbuch
+- Hellblaue Hervorhebung neuer Spots für zwei Minuten
+- Sofortige Anzeige fortlaufend empfangener Live-Spots mit Sitzungszähler und Zeit des letzten Empfangs
+- Sortierung über alle Tabellenüberschriften einschließlich DX-Land und Spotter-Land; jüngster Spot steht standardmäßig oben
+- Getrennte Bedienung: Doppelklick stimmt den TRX auf Frequenz und Mode ab, **QSO übernehmen** füllt das Formular
+- Bewusst bestätigter öffentlicher DX-Spot-Versand aus dem normalen QSO-Formular
+
+### Changed
+
+- Über UDP empfangene QSOs durchlaufen denselben ADI- und LOCAL-ONLY-Speicherpfad wie manuell erfasste QSOs
+- Der UDP-Empfänger startet bewusst manuell und wird bei Profilwechsel oder Programmende sicher gestoppt
+- Auch die DX-Cluster-Verbindung startet nur manuell und wird bei Profilwechsel oder Programmende beendet; ohne Internet bleibt der Offline-Betrieb unverändert
+- Generisches SSB und Spots ohne Mode-Angabe werden bandabhängig als LSB oder USB behandelt
+- Worked-Markierungen vergleichen zusätzlich den Mode, damit beispielsweise ein FT8-QSO keinen USB-Spot als gearbeitet markiert
+
 ## [0.12.0-rc2] - 2026-08-13
 
 ### Fixed

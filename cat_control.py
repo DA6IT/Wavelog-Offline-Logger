@@ -318,6 +318,19 @@ def map_hamlib_mode(raw_mode: str, current_mode: str = "") -> str:
     return raw if raw else current
 
 
+def hamlib_mode_for_logger(logger_mode: str, frequency_hz: int = 0) -> str:
+    mode = (logger_mode or "").strip().upper()
+    if mode == "SSB":
+        mhz = frequency_hz / 1_000_000
+        mode = "LSB" if (1.8 <= mhz <= 2.0 or 3.5 <= mhz <= 4.0 or 7.0 <= mhz <= 7.3) else "USB"
+    if mode in {"FT8", "FT4", "JS8", "PSK31", "MFSK"}:
+        return "PKTUSB"
+    return {
+        "USB": "USB", "LSB": "LSB", "CW": "CW", "FM": "FM", "AM": "AM",
+        "RTTY": "RTTY", "DIGITALVOICE": "DV",
+    }.get(mode, "")
+
+
 def format_frequency_mhz(frequency_hz: int) -> str:
     if frequency_hz <= 0:
         return ""
@@ -341,6 +354,26 @@ def _rigctld_command(host: str, port: int, command: str, expected_lines: int) ->
                         raise CatError(f"rigctld meldet Fehler {line[5:]}")
                     lines.append(line)
                 return lines
+    except CatError:
+        raise
+    except OSError as exc:
+        raise CatError(f"Keine Verbindung zum lokalen rigctld: {exc}") from exc
+
+
+def _rigctld_set_command(host: str, port: int, command: str) -> None:
+    try:
+        with socket.create_connection((host, port), timeout=2.0) as connection:
+            connection.settimeout(2.0)
+            with connection.makefile("rwb", buffering=0) as stream:
+                stream.write((command.rstrip("\n") + "\n").encode("ascii"))
+                raw = stream.readline(4096)
+                if not raw:
+                    raise CatError("rigctld hat die Verbindung unerwartet geschlossen")
+                line = raw.decode("utf-8", errors="replace").strip()
+                if line != "RPRT 0":
+                    if line.startswith("RPRT "):
+                        raise CatError(f"rigctld meldet Fehler {line[5:]}")
+                    raise CatError(f"Unerwartete Antwort von rigctld: {line!r}")
     except CatError:
         raise
     except OSError as exc:
@@ -484,3 +517,35 @@ class HamlibManager:
             raw_mode=raw_mode,
             logger_mode=map_hamlib_mode(raw_mode, current_mode),
         )
+
+    def set_frequency(self, frequency_hz: int) -> None:
+        try:
+            frequency_hz = int(round(frequency_hz))
+        except (TypeError, ValueError) as exc:
+            raise CatError("Ungültige Frequenz für CAT") from exc
+        if frequency_hz <= 0:
+            raise CatError("Ungültige Frequenz für CAT")
+        with self._lock:
+            process = self._process
+            config = self._config
+        if process is None or config is None or process.poll() is not None:
+            raise CatError("CAT ist nicht gestartet")
+        _rigctld_set_command("127.0.0.1", config.port, f"F {frequency_hz}")
+
+
+    def set_mode(self, logger_mode: str, frequency_hz: int = 0) -> None:
+        hamlib_mode = hamlib_mode_for_logger(logger_mode, frequency_hz)
+        if not hamlib_mode:
+            raise CatError(f"Mode {logger_mode!r} kann nicht sicher über CAT gesetzt werden")
+        with self._lock:
+            process = self._process
+            config = self._config
+        if process is None or config is None or process.poll() is not None:
+            raise CatError("CAT ist nicht gestartet")
+        # Passband 0 asks Hamlib/the backend for the normal filter width.
+        _rigctld_set_command("127.0.0.1", config.port, f"M {hamlib_mode} 0")
+
+    def set_frequency_and_mode(self, frequency_hz: int, logger_mode: str = "") -> None:
+        self.set_frequency(frequency_hz)
+        if (logger_mode or "").strip():
+            self.set_mode(logger_mode, frequency_hz)

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.12.0-rc2"
+VERSION = "0.13.0-rc1"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -618,6 +618,8 @@ def qso_to_adif_fields(qso: dict[str, Any]) -> dict[str, Any]:
         "CALL": (qso.get("call") or "").upper(),
         "QSO_DATE": str(qso.get("qso_date") or "").replace("-", ""),
         "TIME_ON": str(qso.get("time_on") or "").replace(":", "")[:6],
+        "QSO_DATE_OFF": str(qso.get("qso_date_off") or "").replace("-", ""),
+        "TIME_OFF": str(qso.get("time_off") or "").replace(":", "")[:6],
         "BAND": qso.get("band"),
         "MODE": mode,
         "SUBMODE": submode,
@@ -644,6 +646,7 @@ def qso_to_adif_fields(qso: dict[str, Any]) -> dict[str, Any]:
         "SRX": qso.get("srx"),
         "STX_STRING": qso.get("stx_string"),
         "SRX_STRING": qso.get("srx_string"),
+        "PROP_MODE": (qso.get("prop_mode") or "").upper(),
         "MY_GRIDSQUARE": (qso.get("my_gridsquare") or "").upper(),
         "MY_CITY": qso.get("my_qth"),
         "MY_POTA_REF": qso.get("my_pota_ref"),
@@ -660,6 +663,12 @@ def adif_fields_to_qso(f: dict[str, str]) -> dict[str, Any]:
     time_on = f.get("TIME_ON", "")
     if len(time_on) == 4:
         time_on += "00"
+    qso_date_off = f.get("QSO_DATE_OFF", "")
+    if len(qso_date_off) == 8:
+        qso_date_off = f"{qso_date_off[:4]}-{qso_date_off[4:6]}-{qso_date_off[6:8]}"
+    time_off = f.get("TIME_OFF", "")
+    if len(time_off) == 4:
+        time_off += "00"
     mode = f.get("SUBMODE") or f.get("MODE") or ""
     return {
         "local_id": f.get(APP_ID_FIELD) or str(uuid.uuid4()),
@@ -669,6 +678,8 @@ def adif_fields_to_qso(f: dict[str, str]) -> dict[str, Any]:
         "freq": f.get("FREQ", ""),
         "qso_date": qso_date,
         "time_on": time_on[:6],
+        "qso_date_off": qso_date_off,
+        "time_off": time_off[:6],
         "rst_sent": f.get("RST_SENT", ""),
         "rst_rcvd": f.get("RST_RCVD", ""),
         "gridsquare": f.get("GRIDSQUARE", "").upper(),
@@ -691,6 +702,7 @@ def adif_fields_to_qso(f: dict[str, str]) -> dict[str, Any]:
         "srx": f.get("SRX", ""),
         "stx_string": f.get("STX_STRING", ""),
         "srx_string": f.get("SRX_STRING", ""),
+        "prop_mode": f.get("PROP_MODE", "").upper(),
         "my_gridsquare": f.get("MY_GRIDSQUARE", "").upper(),
         "my_qth": f.get("MY_CITY", ""),
         "my_pota_ref": f.get("MY_POTA_REF", ""),
@@ -702,9 +714,9 @@ def adif_fields_to_qso(f: dict[str, str]) -> dict[str, Any]:
 def qso_to_adif_record(qso: dict[str, Any]) -> str:
     fields = qso_to_adif_fields(qso)
     order = [
-        APP_ID_FIELD, "CALL", "QSO_DATE", "TIME_ON", "BAND", "FREQ", "MODE", "SUBMODE",
+        APP_ID_FIELD, "CALL", "QSO_DATE", "TIME_ON", "QSO_DATE_OFF", "TIME_OFF", "BAND", "FREQ", "MODE", "SUBMODE",
         "RST_SENT", "RST_RCVD", "GRIDSQUARE", "COUNTRY", "CONT", "CQZ", "ITUZ", "NAME", "QTH", "POTA_REF", "SOTA_REF", "WWFF_REF",
-        "TX_PWR", "COMMENT", "NOTES", "OPERATOR", "STATION_CALLSIGN", "CONTEST_ID", "STX", "SRX", "STX_STRING", "SRX_STRING", "MY_GRIDSQUARE", "MY_CITY",
+        "TX_PWR", "COMMENT", "NOTES", "OPERATOR", "STATION_CALLSIGN", "CONTEST_ID", "STX", "SRX", "STX_STRING", "SRX_STRING", "PROP_MODE", "MY_GRIDSQUARE", "MY_CITY",
         "MY_POTA_REF", "MY_SOTA_REF", "MY_WWFF_REF",
     ]
     return "".join(adif_field(k, fields.get(k)) for k in order) + "<EOR>\n"

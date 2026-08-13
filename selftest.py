@@ -366,8 +366,8 @@ print("HASH MIGRATION SELFTEST OK")
 # CAT/Hamlib configuration, model parsing and logger-field mapping. These
 # tests deliberately need neither a connected radio nor a Hamlib installation.
 from cat_control import (
-    CatConfig, build_rigctld_args, format_frequency_mhz, map_hamlib_mode,
-    parse_rigctld_models,
+    CatConfig, build_rigctld_args, format_frequency_mhz, hamlib_mode_for_logger,
+    map_hamlib_mode, parse_rigctld_models,
 )
 
 model_output = """\
@@ -406,6 +406,9 @@ assert map_hamlib_mode("CWR", "SSB") == "CW"
 assert map_hamlib_mode("RTTYR", "SSB") == "RTTY"
 assert map_hamlib_mode("FMN", "SSB") == "FM", "FTX-1 narrow FM must be logged as FM"
 assert map_hamlib_mode("NFM", "SSB") == "FM"
+assert hamlib_mode_for_logger("SSB", 7_100_000) == "LSB"
+assert hamlib_mode_for_logger("SSB", 21_260_000) == "USB"
+assert hamlib_mode_for_logger("FT8", 14_074_000) == "PKTUSB"
 
 # Closing the app while rigctld is still inside Popen used to leave the newly
 # spawned process behind. A stop must invalidate the in-flight start and kill
@@ -467,6 +470,22 @@ assert fake_process.terminated and fake_process.returncode is not None
 assert not manager.running
 assert start_errors and isinstance(start_errors[0], CatError)
 
+# Setting a cluster-selected frequency must use Hamlib's documented F command.
+frequency_manager = HamlibManager(Path("rigctld.exe"))
+frequency_process = FakeRigctldProcess()
+frequency_manager._process = frequency_process
+frequency_manager._config = CatConfig(enabled=True, model_id=1, device="", port=4550)
+with patch("cat_control._rigctld_set_command") as set_command:
+    frequency_manager.set_frequency(145_500_000)
+    set_command.assert_called_once_with("127.0.0.1", 4550, "F 145500000")
+with patch("cat_control._rigctld_set_command") as set_command:
+    frequency_manager.set_frequency_and_mode(21_260_000, "USB")
+    assert [item.args for item in set_command.call_args_list] == [
+        ("127.0.0.1", 4550, "F 21260000"),
+        ("127.0.0.1", 4550, "M USB 0"),
+    ]
+frequency_manager.stop()
+
 print("CAT SELFTEST OK")
 
 # Release discovery must compare project versions correctly and remain silent
@@ -513,3 +532,258 @@ assert find_newer_release("0.12.0-rc1", opener=offline) is None
 assert find_newer_release("not-a-version", opener=offline) is None
 
 print("UPDATE CHECK SELFTEST OK")
+
+# WSJT-X native UDP and generic ADIF-over-UDP parsing. No network or running
+# WSJT-X instance is required for these deterministic protocol tests.
+import struct
+from datetime import datetime, timezone
+from external_logging import (
+    WSJTX_HEARTBEAT, WSJTX_LOGGED_ADIF, WSJTX_MAGIC, WSJTX_QSO_LOGGED,
+    UdpLogConfig, build_heartbeat, decode_udp_datagram, find_duplicate_qso,
+    qso_identity,
+)
+
+def qt_bytes(value):
+    raw = value.encode("utf-8") if isinstance(value, str) else value
+    return struct.pack(">I", len(raw)) + raw
+
+def wsjtx_header(message_type, client_id="WSJT-X", schema=3):
+    return struct.pack(">III", WSJTX_MAGIC, schema, message_type) + qt_bytes(client_id)
+
+def qt_datetime(value):
+    julian_day = value.date().toordinal() + 1721425
+    milliseconds = ((value.hour * 60 + value.minute) * 60 + value.second) * 1000
+    return struct.pack(">qIB", julian_day, milliseconds, 1)  # Qt::UTC
+
+adif_payload = (
+    "<ADIF_VER:5>3.1.7<EOH>"
+    "<CALL:6>DL1ABC<QSO_DATE:8>20260813<TIME_ON:6>121314"
+    "<BAND:3>20m<FREQ:6>14.074<MODE:4>MFSK<SUBMODE:3>FT8"
+    "<RST_SENT:3>-10<RST_RCVD:3>-07<STATION_CALLSIGN:5>DA6IT<EOR>"
+)
+
+native_adif = decode_udp_datagram(
+    wsjtx_header(WSJTX_LOGGED_ADIF) + qt_bytes(adif_payload), app_version="0.13-test"
+)
+assert native_adif.source == "WSJT-X ADIF" and len(native_adif.qsos) == 1
+assert native_adif.qsos[0]["call"] == "DL1ABC"
+assert native_adif.qsos[0]["mode"] == "FT8"
+
+raw_adif = decode_udp_datagram(adif_payload.encode("utf-8"))
+assert raw_adif.source == "ADIF-UDP" and raw_adif.qsos[0]["freq"] == "14.074"
+
+heartbeat = decode_udp_datagram(
+    wsjtx_header(WSJTX_HEARTBEAT, client_id="WSJT-X")
+    + struct.pack(">I", 3) + qt_bytes("2.7.0") + qt_bytes("r1"),
+    app_version="0.13-test",
+)
+assert heartbeat.heartbeat_reply
+assert struct.unpack(">III", heartbeat.heartbeat_reply[:12]) == (WSJTX_MAGIC, 3, WSJTX_HEARTBEAT)
+assert heartbeat.heartbeat_reply == build_heartbeat("WSJT-X", 3, "0.13-test")
+
+qso_logged_packet = b"".join((
+    wsjtx_header(WSJTX_QSO_LOGGED),
+    qt_datetime(datetime(2026, 8, 13, 12, 35, 0, tzinfo=timezone.utc)),
+    qt_bytes("DL2XYZ"), qt_bytes("JO31AA"), struct.pack(">Q", 14_074_000),
+    qt_bytes("FT8"), qt_bytes("-12"), qt_bytes("-08"), qt_bytes("10"),
+    qt_bytes("Test"), qt_bytes("Daniel"),
+    qt_datetime(datetime(2026, 8, 13, 12, 34, 56, tzinfo=timezone.utc)),
+    qt_bytes("DA6IT"), qt_bytes("DK0GN"), qt_bytes("JO31EJ"),
+    qt_bytes("001"), qt_bytes("002"), qt_bytes(""),
+))
+native_qso = decode_udp_datagram(qso_logged_packet).qsos[0]
+assert native_qso["call"] == "DL2XYZ" and native_qso["freq"] == "14.074"
+assert native_qso["qso_date"] == "2026-08-13" and native_qso["time_on"] == "123456"
+assert native_qso["qso_date_off"] == "2026-08-13" and native_qso["time_off"] == "123500"
+assert native_qso["station_call"] == "DK0GN" and native_qso["operator_call"] == "DA6IT"
+
+legacy_qso_logged = b"".join((
+    wsjtx_header(WSJTX_QSO_LOGGED, schema=1),
+    qt_datetime(datetime(2026, 8, 13, 12, 35, 0, tzinfo=timezone.utc)),
+    qt_bytes("DL3OLD"), qt_bytes("JO40"), struct.pack(">Q", 7_074_000),
+    qt_bytes("FT8"), qt_bytes("-05"), qt_bytes("-11"), qt_bytes("5"),
+    qt_bytes(""), qt_bytes(""),
+))
+legacy_qso = decode_udp_datagram(legacy_qso_logged).qsos[0]
+assert legacy_qso["call"] == "DL3OLD" and legacy_qso["time_on"] == "123500"
+
+same_qso = dict(native_qso, local_id="another-id", freq="14.074000")
+assert qso_identity(same_qso) == qso_identity(native_qso)
+assert find_duplicate_qso([native_qso], same_qso) is native_qso
+
+with TemporaryDirectory() as directory:
+    udp_store = LogStore(Path(directory) / "logs")
+    udp_db = MetadataDB(Path(directory) / "metadata.db")
+    stored_udp_qso = udp_store.add(native_qso)
+    udp_db.ensure_local(stored_udp_qso["local_id"], qso_hash(stored_udp_qso))
+    reloaded_udp_qso = udp_store.find(stored_udp_qso["local_id"])
+    assert reloaded_udp_qso and reloaded_udp_qso["time_off"] == "123500"
+    assert udp_db.get_meta(stored_udp_qso["local_id"])["status"] == "local_only"
+    assert find_duplicate_qso(udp_store.scan(), same_qso) is not None
+    udp_db.close()
+
+udp_settings = UdpLogConfig("127.0.0.1", 1234)
+udp_settings.validate()
+assert udp_settings.settings() == {"udp_log_host": "127.0.0.1", "udp_log_port": "1234"}
+
+print("UDP LOGGING SELFTEST OK")
+
+# DX Cluster parsing and Telnet transport. The socket test runs only against a
+# local fake cluster and therefore never publishes a real spot.
+import socket
+from dx_cluster import (
+    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DxClusterClient, DxClusterConfig,
+    DxClusterError, infer_spot_mode, normalize_worked_mode, parse_dx_spot,
+    spot_sort_value, spotter_region_for_continent, worked_flags,
+)
+
+cluster_settings = DxClusterConfig.from_getter(lambda key, default="": {
+    "dx_cluster_host": "cluster.example.test",
+    "dx_cluster_port": "9000",
+    "dx_cluster_callsign": "da6it",
+}.get(key, default))
+cluster_settings.validate()
+assert cluster_settings.settings() == {
+    "dx_cluster_host": "cluster.example.test",
+    "dx_cluster_port": "9000",
+    "dx_cluster_callsign": "DA6IT",
+}
+assert DxClusterConfig().host == DEFAULT_CLUSTER_HOST
+assert DxClusterConfig().port == DEFAULT_CLUSTER_PORT
+
+fm_spot = parse_dx_spot("DX de DL1AAA-2: 145500.0 DA0TEST FM simplex 1234Z JO31")
+assert fm_spot and fm_spot.call == "DA0TEST" and fm_spot.frequency_hz == 145_500_000
+assert fm_spot.band == "2m" and fm_spot.mode == "FM" and fm_spot.time_utc == "1234"
+assert fm_spot.locator == "JO31" and fm_spot.frequency_mhz == "145.5"
+ft8_spot = parse_dx_spot("DX de G4ABC: 14074.0 ZS6XYZ FT8 -10 dB 2359Z KG44")
+assert ft8_spot and ft8_spot.mode == "FT8" and ft8_spot.band == "20m"
+assert parse_dx_spot("This is not a spot") is None
+assert infer_spot_mode("working RTTY now") == "RTTY"
+assert infer_spot_mode("Calling CQ", 21_275_000) == "USB"
+assert infer_spot_mode("", 7_100_000) == "LSB"
+reference_now = datetime(2026, 8, 14, 0, 5, tzinfo=timezone.utc)
+usb_spot = parse_dx_spot(
+    "DX de F6GPX/P: 21260.0 EA2DT/P SSB POTA 2359Z IN83", now=reference_now,
+)
+lsb_spot = parse_dx_spot(
+    "DX de DL1AAA: 7100.0 G3ABC SSB CQ 0001Z IO91", now=reference_now,
+)
+assert usb_spot and usb_spot.mode == "USB", usb_spot
+assert lsb_spot and lsb_spot.mode == "LSB", lsb_spot
+assert usb_spot.spotted_at_utc.isoformat() == "2026-08-13T23:59:00+00:00"
+assert lsb_spot.spotted_at_utc.isoformat() == "2026-08-14T00:01:00+00:00"
+spots_for_sort = [
+    (usb_spot, "Spain", "France"),
+    (lsb_spot, "United Kingdom", "Germany"),
+]
+assert [row[1] for row in sorted(
+    spots_for_sort, key=lambda row: spot_sort_value(row[0], "dx_country", row[1], row[2]),
+)] == ["Spain", "United Kingdom"]
+assert [row[2] for row in sorted(
+    spots_for_sort, key=lambda row: spot_sort_value(row[0], "spotter_country", row[1], row[2]),
+)] == ["France", "Germany"]
+assert sorted(
+    spots_for_sort, key=lambda row: spot_sort_value(row[0], "time"), reverse=True,
+)[0][0] is lsb_spot
+assert spotter_region_for_continent("EU") == "Europa"
+assert spotter_region_for_continent("NA") == "Nordamerika"
+assert spotter_region_for_continent("SA") == "Südamerika"
+assert spotter_region_for_continent("AS") == "Asien/Pazifik"
+assert spotter_region_for_continent("OC") == "Asien/Pazifik"
+assert spotter_region_for_continent("AF") == "Afrika"
+assert spotter_region_for_continent("") == "Unbekannt"
+assert normalize_worked_mode("SSB", 7_100_000, "40m") == "LSB"
+assert normalize_worked_mode("SSB", 21_260_000, "15m") == "USB"
+assert worked_flags("I1NEW", "Italy", "USB", set(), set()) == (False, False)
+assert worked_flags("I1NEW", "Italy", "USB", set(), {("Italy", "USB")}) == (False, True)
+assert worked_flags(
+    "I1ABC", "Italy", "USB", {("I1ABC", "USB")}, {("Italy", "USB")},
+) == (True, True)
+# A worked callsign necessarily marks its resolved country in the same mode too.
+assert worked_flags("I1ABC", "Italy", "USB", {("I1ABC", "USB")}, set()) == (True, True)
+# Work in a different mode must not colour the current spot.
+assert worked_flags(
+    "I1ABC", "Italy", "USB", {("I1ABC", "FT8")}, {("Italy", "FT8")},
+) == (False, False)
+assert worked_flags(
+    "I1ABC", "Italy", "FT8", {("I1ABC", "FT8")}, {("Italy", "FT8")},
+) == (True, True)
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("127.0.0.1", 0))
+server.listen(1)
+server.settimeout(3.0)
+server_port = server.getsockname()[1]
+server_received = []
+server_errors = []
+server_done = threading.Event()
+
+
+def fake_cluster_server():
+    connection = None
+    try:
+        connection, _address = server.accept()
+        connection.settimeout(3.0)
+        connection.sendall(bytes((255, 251, 1)) + b"login: ")
+        login_data = b""
+        while b"DA6IT\n" not in login_data:
+            login_data += connection.recv(1024)
+        server_received.append(login_data)
+        connection.sendall(
+            b"Welcome\r\n"
+            b"DX de DL1AAA: 145500.0 DA0TEST FM simplex 1234Z JO31\r\n"
+            b"DX de F6GPX: 21260.0 EA2DT/P SSB POTA 1235Z IN83\r\n"
+        )
+        command_data = b""
+        while b"DX 145500 DA0TEST portable test ignored-newline\n" not in command_data:
+            command_data += connection.recv(1024)
+        server_received.append(command_data)
+    except Exception as exc:
+        server_errors.append(exc)
+    finally:
+        if connection:
+            connection.close()
+        server.close()
+        server_done.set()
+
+
+server_thread = threading.Thread(target=fake_cluster_server, daemon=True)
+server_thread.start()
+spot_received = threading.Event()
+received_spots = []
+cluster_errors = []
+
+
+def receive_live_spot(spot):
+    received_spots.append(spot)
+    if len(received_spots) >= 2:
+        spot_received.set()
+
+
+cluster_client = DxClusterClient()
+cluster_client.start(
+    DxClusterConfig("127.0.0.1", server_port, "DA6IT"),
+    receive_live_spot,
+    on_error=cluster_errors.append,
+)
+assert spot_received.wait(3.0), (received_spots, cluster_errors, server_errors)
+assert cluster_client.connected
+cluster_client.send_spot("DA0TEST", 145_500_000, "portable test\nignored-newline")
+assert server_done.wait(3.0), (server_received, server_errors)
+cluster_client.stop()
+server_thread.join(1.0)
+assert not server_errors, server_errors
+assert [spot.call for spot in received_spots] == ["DA0TEST", "EA2DT/P"]
+assert received_spots[1].mode == "USB"
+assert b"\xff\xfe\x01" in server_received[0], "client must refuse unsupported Telnet WILL ECHO"
+assert b"DX 145500 DA0TEST portable test ignored-newline\n" in server_received[1]
+assert not cluster_client.running and not cluster_client.connected
+try:
+    cluster_client.send_spot("DA0TEST", 145_500_000)
+except DxClusterError:
+    pass
+else:
+    raise AssertionError("spotting while disconnected must fail")
+
+print("DX CLUSTER SELFTEST OK")
