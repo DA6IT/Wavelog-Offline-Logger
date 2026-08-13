@@ -4,6 +4,8 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-14
+
 ### Added
 
 - Reproduzierbare GitHub-Actions-Builds für eigenständige macOS-App-Bundles auf Apple Silicon und Intel
