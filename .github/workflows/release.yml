@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    name: Build and publish Windows release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.10'
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.23.2'
+          cache: false
+
+      - name: Test and package
+        shell: pwsh
+        run: .\scripts\package-release.ps1 -OutputDirectory dist
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem -LiteralPath dist -File | Where-Object {
+            $_.Extension -in '.exe', '.zip' -or $_.Name -eq 'SHA256SUMS.txt'
+          }
+          $arguments = @(
+            'release', 'create', '${{ github.ref_name }}',
+            '--title', 'DA6IT.de Wavelog Offline Logger ${{ github.ref_name }}',
+            '--generate-notes'
+          )
+          if ('${{ github.ref_name }}'.Contains('-')) {
+            $arguments += '--prerelease'
+          }
+          $arguments += $assets.FullName
+          gh @arguments

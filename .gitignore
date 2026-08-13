@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Builds and release artifacts
+build/
+dist/
+*.spec
+*.exe
+*.msi
+*.zip
+SHA256SUMS.txt
+
+# Local application and logbook data
+*.adi
+*.adif
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+logs/
+runtime/
+settings.json
+config.json
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local scratch files
+work/
+tmp/
+*.bak
+*.tmp
+
+# Local development-agent handover
+AGENTS.md

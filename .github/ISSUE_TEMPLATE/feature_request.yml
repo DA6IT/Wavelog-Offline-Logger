@@ -1,0 +1,25 @@
+name: Funktionswunsch
+description: Eine neue Funktion oder Verbesserung vorschlagen
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Welches Problem soll gelöst werden?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Gewünschte Lösung
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Auswirkungen auf ADI-Daten und Synchronisation
+      description: Falls nicht zutreffend, bitte „keine“ eintragen.
+    validations:
+      required: true
