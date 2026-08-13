@@ -67,13 +67,35 @@ Release Candidates verwenden einen eigenen versionsabhängigen Programmordner un
 2. Wavelog-URL und API-v2-Token eintragen.
 3. Verbindung testen und ein Wavelog-Stationsprofil auswählen.
 4. Stationsrufzeichen, Operator und optional Locator/QTH ergänzen.
-5. Optional unter **CAT Setup** Funkgerät, COM-Port und serielle Parameter wählen, Verbindung testen und CAT aktivieren.
+5. Optional unter **CAT Setup** Funkgerät, COM-Port und serielle Parameter wählen, Einstellungen speichern und CAT starten.
 6. Ein QSO erfassen und speichern.
 7. Bei vorhandener Internetverbindung die Synchronisation starten.
 
-CAT-Einstellungen sind profilbezogen. Bei aktiver Verbindung aktualisiert der Logger Frequenz, Band und Mode fortlaufend. Hamlib-Modi wie `FMN` werden für das ADIF-Log korrekt als `FM` übernommen.
+## CAT-Steuerung mit Hamlib
 
-CAT startet nach jedem Programmstart bewusst ausgeschaltet. Einstellungen speichern, CAT starten und CAT stoppen sind getrennte Aktionen; das Funkgerät wird erst nach einem ausdrücklichen Start verbunden.
+Der Windows-Build enthält Hamlib 4.7.2 und unterstützt damit mehr als 300 Funkgerätemodelle, ohne dass Hamlib oder eine zusätzliche CAT-Anwendung installiert werden muss. Benötigt wird lediglich der passende Windows-Treiber für die USB- beziehungsweise serielle Schnittstelle des Funkgeräts.
+
+### CAT einrichten
+
+1. **CAT Setup** öffnen.
+2. Hersteller oder Modell suchen und das passende Hamlib-Funkgerät auswählen.
+3. COM-Port, Baudrate, Datenbits, Stoppbits, Parität und gegebenenfalls Handshake/DTR/RTS entsprechend der Funkgerätekonfiguration einstellen.
+4. **Einstellungen speichern** auswählen.
+5. Optional mit **Verbindung testen** Frequenz und Mode probeweise auslesen.
+6. Mit **CAT starten** die laufende Verbindung herstellen.
+
+### Verhalten
+
+- CAT-Einstellungen werden getrennt für jedes Logger-Profil gespeichert.
+- Frequenz, Band und Mode werden fortlaufend in das normale QSO- und Contest-Logging übernommen.
+- Hamlib-Modi wie `FMN` werden für das ADIF-Log korrekt als `FM` zugeordnet.
+- Ein ausdrücklich gewählter Digitalmodus wie FT8 bleibt bei passenden USB-/LSB-Datenmodi erhalten.
+- CAT startet nach jedem Programmstart bewusst ausgeschaltet und verbindet sich erst nach **CAT starten** mit dem Funkgerät.
+- **CAT stoppen** oder das Beenden des Loggers beendet auch den von der Anwendung gestarteten `rigctld`-Prozess.
+
+Weitere Einzelheiten stehen im Abschnitt CAT des [Benutzerhandbuchs](docs/USER_GUIDE.md#5-cat-einrichten). Die Lizenzhinweise zu den eingebetteten Hamlib-Dateien enthält [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Updates
 
 Beim Start prüft die Anwendung im Hintergrund die öffentliche Release-Liste dieses GitHub-Projekts. Gibt es eine neuere passende Version, kann deren Downloadseite direkt geöffnet werden. Ohne Internet oder bei einem nicht erreichbaren GitHub bleibt die Prüfung still und beeinträchtigt das Offline-Logging nicht. Stabile Versionen bieten keine Vorabversionen an; Release Candidates können auf neuere Release Candidates hinweisen.
 
