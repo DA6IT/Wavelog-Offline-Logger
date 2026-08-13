@@ -4,6 +4,15 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+### Added
+
+- Reproduzierbare GitHub-Actions-Builds für eigenständige macOS-App-Bundles auf Apple Silicon und Intel
+- Plattformgerecht kompiliertes und im macOS-App-Bundle eingebettetes Hamlib 4.7.2 einschließlich Prüfsummen- und Portabilitätskontrolle
+
+### Changed
+
+- CAT findet die eingebettete Hamlib-Laufzeit jetzt auch in einem eingefrorenen PyInstaller-App-Bundle
+
 ## [0.14.0] - 2026-08-13
 
 ### Added

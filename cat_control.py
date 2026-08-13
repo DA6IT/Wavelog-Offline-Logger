@@ -138,8 +138,10 @@ def find_hamlib_dir() -> Path:
     if override:
         candidates.append(Path(override))
     here = Path(__file__).resolve().parent
+    bundle_root = Path(getattr(sys, "_MEIPASS", here))
     candidates.extend(
         [
+            bundle_root / "hamlib",
             here / "hamlib",
             here / "build" / "embedded" / "hamlib" / "windows-x64",
         ]
@@ -150,7 +152,7 @@ def find_hamlib_dir() -> Path:
             return candidate
     raise CatError(
         "Die gebündelte Hamlib-Laufzeit wurde nicht gefunden. "
-        "Bitte den Windows-Build über scripts/build-windows.ps1 erstellen."
+        "Bitte das passende Windows- oder macOS-Release-Paket verwenden."
     )
 
 

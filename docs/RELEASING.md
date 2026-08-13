@@ -4,6 +4,7 @@
 
 - Python 3.12.10
 - Go 1.23.2
+- für lokale macOS-Pakete: macOS 11 oder neuer mit Xcode Command Line Tools
 - saubere Arbeitskopie
 - erfolgreich abgeschlossener praktischer Start- und Sync-Test
 
@@ -41,8 +42,9 @@ Der Workflow:
 
 1. führt die Selftests aus,
 2. baut den Windows-x64-Bootstrapper,
-3. erzeugt ZIP und SHA-256-Prüfsummen,
-4. erstellt das GitHub-Release mit automatisch erzeugten Release Notes.
+3. erstellt das GitHub-Release mit Windows-EXE, ZIP und SHA-256-Prüfsummen,
+4. baut anschließend auf echten GitHub-macOS-Runnern getrennte App-Bundles für Apple Silicon und Intel,
+5. lädt beide macOS-ZIPs und ihre SHA-256-Dateien in dasselbe Release.
 
 Tags mit Bindestrich wie `v0.11.2-rc1` werden als Vorabversion veröffentlicht.
 
@@ -56,5 +58,7 @@ Tags mit Bindestrich wie `v0.11.2-rc1` werden als Vorabversion veröffentlicht.
 - Profilwechsel und Profilduplikat
 - Contest-Session
 - Prüfsummen aus dem Release
+- macOS Apple Silicon: Entpacken, Erststart per Rechtsklick **Öffnen**, lokales QSO und CAT
+- macOS Intel: Entpacken, Erststart per Rechtsklick **Öffnen**, lokales QSO und CAT
 
-macOS-Artefakte sind in diesem Repository-Stand noch nicht automatisiert, weil der dafür dokumentierte Launcher beziehungsweise das App-Bundle hier noch nicht als vollständiger Buildquelltext vorliegt.
+Die macOS-Pakete sind ad-hoc signiert, aber ohne Apple-Developer-Zertifikat nicht notarisiert. Vor jeder stabilen Freigabe müssen deshalb mindestens die erzeugten CI-Artefakte praktisch auf einem Apple-Silicon-Mac und einem Intel-Mac getestet werden.

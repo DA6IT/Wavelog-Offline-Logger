@@ -55,3 +55,39 @@ jobs:
             dist/*.exe
             dist/SHA256SUMS.txt
           if-no-files-found: error
+
+  macos-build:
+    name: macOS ${{ matrix.package_arch }} build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            python_arch: arm64
+            package_arch: arm64
+          - runner: macos-15-intel
+            python_arch: x64
+            package_arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.10'
+          architecture: ${{ matrix.python_arch }}
+
+      - name: Test and build app bundle
+        shell: bash
+        run: ./scripts/build-macos.sh dist
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-${{ matrix.package_arch }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error

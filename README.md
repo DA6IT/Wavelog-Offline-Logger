@@ -1,8 +1,8 @@
 # DA6IT.de Wavelog Offline Logger
 
-Offlinefähiger Windows-Logger für Funkamateure. QSOs werden zuerst lokal gespeichert und erst auf Wunsch mit Wavelog synchronisiert.
+Offlinefähiger Desktop-Logger für Funkamateure. QSOs werden zuerst lokal gespeichert und erst auf Wunsch mit Wavelog synchronisiert.
 
-**Download:** [Aktuelle Windows-Version](https://github.com/DA6IT/Wavelog-Offline-Logger/releases/latest)
+**Download:** [Aktuelle Version für Windows und macOS](https://github.com/DA6IT/Wavelog-Offline-Logger/releases/latest)
 
 ## Funktionen
 
@@ -36,7 +36,19 @@ Anwendungsdaten liegen unter:
 %LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\
 ```
 
-Offizielle Releases werden derzeit für **Windows x64** bereitgestellt.
+## macOS installieren
+
+GitHub erzeugt getrennte Pakete für Apple Silicon (`macos-arm64`) und Intel-Macs (`macos-x64`). Das passende ZIP herunterladen, entpacken und `DA6IT.de Wavelog Offline Logger.app` nach **Programme** verschieben. Python und Hamlib sind im App-Bundle enthalten.
+
+Die kostenlose macOS-Fassung ist derzeit nur technisch ad-hoc signiert und nicht von Apple notarisiert. Beim ersten Start deshalb im Finder mit Rechtsklick **Öffnen** wählen und die Rückfrage bestätigen. Es werden keine Systemeinstellungen oder Sicherheitsmechanismen automatisch verändert.
+
+Die Anwendungsdaten liegen kompatibel zu bestehenden Installationen unter:
+
+```text
+~/Library/Application Support/AFU-Tools/WavelogOfflineLogger/
+```
+
+Offizielle Releases werden für **Windows x64**, **macOS Apple Silicon** und **macOS Intel** gebaut.
 
 ## Schnelleinstieg
 
@@ -120,6 +132,12 @@ Der reproduzierbare Windows-Build verwendet zusätzlich Go 1.23.2:
 
 ```powershell
 .\scripts\package-release.ps1
+```
+
+Die macOS-App wird auf einem echten Mac beziehungsweise durch die beiden GitHub-macOS-Runner gebaut:
+
+```bash
+./scripts/build-macos.sh dist
 ```
 
 ## Lizenz
