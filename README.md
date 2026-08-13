@@ -1,205 +1,127 @@
 # DA6IT.de Wavelog Offline Logger
 
-Offlinefähiger Desktop-Logger für Funkamateure mit sicherer Synchronisation zu Wavelog.
+Offlinefähiger Windows-Logger für Funkamateure. QSOs werden zuerst lokal gespeichert und erst auf Wunsch mit Wavelog synchronisiert.
 
-> Aktuelle Vorabversion: **v0.13.0-rc1**. Sie ergänzt die praktisch getestete CAT-Steuerung um UDP-Logging für WSJT-X und andere Programme sowie einen integrierten Telnet-DX-Cluster.
-
-## Zweck
-
-Der Logger ermöglicht das Erfassen und Bearbeiten von QSOs ohne dauerhafte Internetverbindung. Sobald Wavelog erreichbar ist, können lokale und entfernte Änderungen abgeglichen werden.
-
-Das Programm ersetzt Wavelog nicht. Wavelog bleibt das zentrale Online-Logbuch; lokal sind die ADI-Dateien das primäre Logbuchformat. SQLite enthält ausschließlich Einstellungen, Zuordnungen sowie Sync- und Cache-Metadaten.
+**Download:** [Aktuelle Windows-Version](https://github.com/DA6IT/Wavelog-Offline-Logger/releases/latest)
 
 ## Funktionen
 
-- Offline-QSO-Erfassung in täglichen ADI-Dateien
-- Mehrere vollständig getrennte Logger-Profile
-- Wavelog API v2 für Upload, Download und bidirektionalen Abgleich
+- Normales QSO-Logging vollständig ohne Internet
+- **Fast Log / DXpedition:** Rufzeichen eingeben, Enter drücken, nächstes QSO
+- Tägliche ADI-Dateien als primäres lokales Logbuch
+- Mehrere getrennte Stations- und Operatorprofile
+- Bidirektionaler Abgleich mit Wavelog API v2
 - Sichtbare Konflikte statt stiller Überschreibungen
-- Offline-DXCC- und Ländererkennung über `cty.dat`
-- POTA-, SOTA- und WWFF-Felder
-- Contest-Presets, Seriennummern und Operatorwechsel
-- Profilbezogenes CAT Setup mit gebündeltem Hamlib 4.7.2 und mehr als 300 unterstützten Funkgerätemodellen
-- Automatische Übernahme von Frequenz, Band und Mode in normales und Contest-Logging
-- Profilbezogener Telnet-DX-Cluster mit Spot-Filtern, QSO-Übernahme, optionaler CAT-Abstimmung und bewusst bestätigtem Spotversand
-- Profilbezogener UDP-Empfänger für native WSJT-X-QSOs und ADIF-Broadcasts anderer Logprogramme
-- QRZ-, LoTW-, eQSL- und DCL-Status im Logbuch
-- Statistiken und Operatorauswertung
-- Schutz des Wavelog-Tokens über Windows DPAPI
-- Unaufdringlicher Hinweis beim Programmstart, wenn ein neueres GitHub-Release verfügbar ist
-
-## Sicherheitsmodell für Logdaten
-
-Der Sync arbeitet bewusst konservativ:
-
-- Ein außerhalb der Anwendung aus einer ADI-Datei verschwundenes QSO wird nicht automatisch in Wavelog gelöscht. Wenn es dort noch existiert, wird es lokal wiederhergestellt.
-- Nur eine ausdrücklich in der Anwendung ausgelöste QSO-Löschung erzeugt eine Remote-Löschanforderung.
-- Wurden lokale und entfernte Daten gleichzeitig verändert, entsteht ein sichtbarer Konflikt.
-- Das Löschen eines Logger-Profils wirkt ausschließlich lokal und löscht niemals Wavelog-QSOs oder Wavelog-Stationsprofile.
-
-Trotzdem sollten Logordner und Anwendungsdaten regelmäßig gesichert werden.
+- Offline-Länder-, DXCC-, Zonen- und Kontinenterkennung
+- POTA-, SOTA-, WWFF- und Contest-Felder
+- CAT-Steuerung über das mitgelieferte Hamlib
+- Telnet-DX-Cluster mit Filtern, CAT-Abstimmung und Spotversand
+- WSJT-X- und ADIF-Empfang über einen frei wählbaren UDP-Port
+- QRZ-, LoTW-, eQSL- und DCL-Status sowie lokale Statistiken
+- Automatischer Hinweis auf neue Releases, ohne Fehlermeldung bei fehlendem Internet
 
 ## Windows installieren
 
-1. Im GitHub-Release die Datei `DA6IT.de-Wavelog-Offline-Logger-v<VERSION>-windows-x64.exe` herunterladen.
-2. Optional die SHA-256-Prüfsumme mit der beigefügten `SHA256SUMS.txt` vergleichen.
-3. Die EXE starten.
+1. Im [GitHub-Release](https://github.com/DA6IT/Wavelog-Offline-Logger/releases) die Datei `DA6IT.de-Wavelog-Offline-Logger-v<VERSION>-windows-x64.exe` herunterladen.
+2. Optional die Prüfsumme aus `SHA256SUMS.txt` vergleichen.
+3. EXE starten.
 
-Beim ersten Start lädt der Bootstrapper den von der Python Software Foundation signierten Python-3.12.10-Installer über HTTPS. Vor der unbeaufsichtigten Einrichtung einer privaten Laufzeit wird dessen SHA-256-Prüfsumme geprüft. Eine systemweite Python-Installation ist nicht erforderlich.
+Beim ersten Start richtet der Bootstrapper eine private Python-3.12.10-Laufzeit ein. Dafür wird einmalig Internet benötigt; Python muss nicht systemweit installiert sein. Download und Prüfsumme werden vor der Einrichtung geprüft.
 
-Hamlib ist im Windows-Build bereits enthalten. Für CAT muss deshalb keine zusätzliche CAT- oder Hamlib-Software installiert werden; benötigt wird lediglich die passende Windows-Treiberunterstützung für die Schnittstelle des Funkgeräts.
+Hamlib ist vollständig im Windows-Build enthalten. Für CAT wird nur der passende Windows-Treiber des Funkgeräts benötigt.
 
-Anwendungsdaten liegen standardmäßig unter:
+Anwendungsdaten liegen unter:
 
 ```text
 %LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\
 ```
 
-Release Candidates verwenden einen eigenen versionsabhängigen Programmordner und überschreiben keinen stabilen Programmstand.
+Offizielle Releases werden derzeit für **Windows x64** bereitgestellt.
 
-## Plattformstatus
+## Schnelleinstieg
 
-- **Windows x64:** automatisierter Build und Release-Paket vorhanden
-- **macOS:** im aktuellen Repository noch kein vollständig reproduzierbarer Buildquelltext enthalten
-- **Linux:** derzeit kein offizielles Release-Artefakt; ein Start aus dem Python-Quellcode kann je nach Tk-Installation möglich sein
+1. Logger-Profil anlegen oder bearbeiten.
+2. Stationsrufzeichen, Operator und lokalen ADI-Ordner festlegen.
+3. Optional Wavelog-URL, API-v2-Token und Stationsprofil eintragen.
+4. QSO lokal speichern.
+5. Erst bei vorhandener Verbindung **Synchronisieren** auswählen.
 
-## Erste Schritte
+Der Logger ersetzt Wavelog nicht. Er ergänzt Wavelog für portable Einsätze, Pileups, Fielddays und andere Situationen ohne zuverlässiges Internet.
 
-1. Ein Logger-Profil anlegen oder das Standardprofil bearbeiten.
-2. Wavelog-URL und API-v2-Token eintragen.
-3. Verbindung testen und ein Wavelog-Stationsprofil auswählen.
-4. Stationsrufzeichen, Operator und optional Locator/QTH ergänzen.
-5. Optional unter **CAT Setup** Funkgerät, COM-Port und serielle Parameter wählen, Einstellungen speichern und CAT starten.
-6. Optional unter **DX Cluster** den vorbelegten Telnet-Server oder einen eigenen Server konfigurieren und manuell verbinden.
-7. Optional unter **UDP Logging** eine freie Portnummer wählen und den Empfänger starten.
-8. Ein QSO erfassen und speichern.
-9. Bei vorhandener Internetverbindung die Synchronisation starten.
+## Fast Log / DXpedition
 
-## CAT-Steuerung mit Hamlib
+Band, Mode, Frequenz, Rapporte und Leistung werden einmal festgelegt. Danach genügt für jedes QSO:
 
-Der Windows-Build enthält Hamlib 4.7.2 und unterstützt damit mehr als 300 Funkgerätemodelle, ohne dass Hamlib oder eine zusätzliche CAT-Anwendung installiert werden muss. Benötigt wird lediglich der passende Windows-Treiber für die USB- beziehungsweise serielle Schnittstelle des Funkgeräts.
+```text
+Rufzeichen + Enter
+```
 
-### CAT einrichten
+Datum und UTC-Zeit werden automatisch gesetzt. Jedes QSO landet sofort als `LOCAL ONLY` in der lokalen ADI-Datei. Wavelog wird erst beim manuellen Sync angesprochen. Das letzte noch nicht synchronisierte Fast-Log-QSO kann kontrolliert zurückgenommen werden.
 
-1. **CAT Setup** öffnen.
-2. Hersteller oder Modell suchen und das passende Hamlib-Funkgerät auswählen.
-3. COM-Port, Baudrate, Datenbits, Stoppbits, Parität und gegebenenfalls Handshake/DTR/RTS entsprechend der Funkgerätekonfiguration einstellen.
-4. **Einstellungen speichern** auswählen.
-5. Optional mit **Verbindung testen** Frequenz und Mode probeweise auslesen.
-6. Mit **CAT starten** die laufende Verbindung herstellen.
+## CAT mit Hamlib
 
-### Verhalten
+Unter **CAT Setup** stehen mehr als 300 Hamlib-Funkgerätemodelle zur Verfügung. Frequenz, Band und Mode können automatisch in normales Logging, Fast Log und Contest-Logging übernommen werden.
 
-- CAT-Einstellungen werden getrennt für jedes Logger-Profil gespeichert.
-- Frequenz, Band und Mode werden fortlaufend in das normale QSO- und Contest-Logging übernommen.
-- Hamlib-Modi wie `FMN` werden für das ADIF-Log korrekt als `FM` zugeordnet.
-- Ein ausdrücklich gewählter Digitalmodus wie FT8 bleibt bei passenden USB-/LSB-Datenmodi erhalten.
-- CAT startet nach jedem Programmstart bewusst ausgeschaltet und verbindet sich erst nach **CAT starten** mit dem Funkgerät.
-- **CAT stoppen** oder das Beenden des Loggers beendet auch den von der Anwendung gestarteten `rigctld`-Prozess.
+CAT startet nach jedem Programmstart bewusst ausgeschaltet. **CAT stoppen** und das Beenden des Loggers beenden auch den von der Anwendung gestarteten `rigctld`-Prozess.
 
-Weitere Einzelheiten stehen im Abschnitt CAT des [Benutzerhandbuchs](docs/USER_GUIDE.md#5-cat-einrichten). Die Lizenzhinweise zu den eingebetteten Hamlib-Dateien enthält [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+## DX Cluster
 
-## DX Cluster über Telnet
+Für den Empfang ist standardmäßig `dxcluster.afu-tools.de:7300` eingetragen. Spots erscheinen live und können nach Band, Mode, Zeitraum und Spotter-Region gefiltert sowie über jede Tabellenspalte sortiert werden.
 
-Unter **DX Cluster** steht eine direkte Telnet-Anbindung zur Verfügung. Standardmäßig sind `dxcluster.afu-tools.de` und Port `7300` eingetragen; Host, Port und Login-Rufzeichen können für jedes Logger-Profil frei geändert werden.
+- Doppelklick stimmt bei aktivem CAT den TRX auf Frequenz und erkannten Mode ab.
+- **QSO übernehmen** füllt anschließend das normale QSO-Formular.
+- Neue Spots werden kurz hellblau markiert.
+- Bereits gearbeitete Rufzeichen und Länder werden nur für dasselbe **Band und denselben Mode** grün markiert.
+- Fehlende Modes werden aus Kommentar, typischen FT8-Frequenzen und eindeutigen Bereichen des IARU-Region-1-Bandplans abgeleitet; mehrdeutige Bereiche verwenden weiterhin LSB oder USB.
 
-1. Login-Rufzeichen prüfen und **Verbinden** auswählen.
-2. Spots nach Band, Mode, Zeitraum und Spotter-Region filtern; voreingestellt sind die letzten 30 Minuten. Für die Region stehen Europa, Nordamerika, Südamerika, Asien/Pazifik, Afrika und Unbekannt zur Auswahl. Neu empfangene Telnet-Spots erscheinen ohne manuelles Neuladen sofort in der Liste.
-3. Einen Spot doppelt anklicken, um den TRX bei laufendem CAT auf Frequenz und den erkannten Mode abzustimmen. Die Cluster-Seite bleibt dabei geöffnet.
-4. **QSO übernehmen** auswählen, um Rufzeichen, Frequenz, Band und Mode in das normale QSO-Formular zu laden.
+Zum eigenen Spotten dient getrennt die DXSpider-Verbindung `dxcluster.afu-tools.de:7301`. Beide Server und Ports sind profilbezogen änderbar; das Login-Rufzeichen kommt automatisch aus dem aktiven Stationsprofil. Ein Spot wird nur nach ausdrücklicher Bestätigung gesendet.
 
-Die Übernahme speichert niemals automatisch ein QSO. Ein generisches `SSB` im Spot-Kommentar wird auf 160, 80 und 40 Metern als `LSB`, auf den übrigen Bändern als `USB` behandelt. Fehlt die Mode-Angabe vollständig, verwendet der Logger dieselbe bandabhängige SSB-Vorgabe. Eindeutige Modes wie FT8, CW oder FM haben Vorrang und bleiben erhalten.
-
-DX-Rufzeichen, DX-Land und das Land des Spotters werden mit der lokalen `cty.dat` bestimmt. Ein Klick auf eine beliebige Tabellenüberschrift sortiert die Liste nach dieser Spalte – einschließlich DX-Land und Spotter-Land; ein zweiter Klick kehrt die Reihenfolge um. Standardmäßig steht der jüngste Spot oben. Neue Spots besitzen zwei Minuten lang einen hellblauen Zeilenhintergrund. Die grüne Worked-Markierung gilt immer nur für denselben Mode: Ein in FT8 gearbeitetes Land wird bei einem USB-Spot daher nicht grün. Wurde das Land im Spot-Mode bereits gearbeitet, erscheint nur der Ländertext grün; wurde auch das konkrete Rufzeichen in diesem Mode gearbeitet, erscheinen Rufzeichen und Land grün.
-
-Über **DX-Spot senden** im QSO-Formular können Rufzeichen und Frequenz an den verbundenen Cluster gemeldet werden. Vor dem öffentlichen Versand werden ein optionaler Kommentar und eine ausdrückliche Bestätigung abgefragt. Es werden weder beim Start noch automatisch beim Loggen Spots gesendet.
-
-Der DX Cluster benötigt Internet, die übrigen Offline-Funktionen jedoch nicht. Die Telnet-Verbindung startet stets manuell und wird bei Profilwechsel oder Programmende beendet.
+Empfang und Versand von DX-Spots benötigen Internet. Alle lokalen Logfunktionen bleiben offline nutzbar.
 
 ## WSJT-X und ADIF über UDP
 
-Unter **UDP Logging** kann das aktive Profil geloggte QSOs direkt von WSJT-X empfangen. Der Empfänger erkennt sowohl das native WSJT-X-Netzwerkprotokoll als auch vollständige ADIF-Datensätze mit `<EOR>`, die andere Programme per UDP senden.
+Unter **UDP Logging** kann ein freier Port gewählt werden. Unterstützt werden:
 
-1. Als Bind-Adresse für Programme auf demselben PC `127.0.0.1` beibehalten.
-2. Einen freien UDP-Port wählen, beispielsweise `2237`, und die Einstellungen speichern.
-3. In WSJT-X unter **File > Settings > Reporting** dieselbe Adresse und Portnummer als UDP Server eintragen.
-4. Im Offline Logger **UDP starten** auswählen.
+- native geloggte QSOs von WSJT-X
+- vollständige ADIF-Datensätze mit `<EOR>` anderer Programme
+- Duplikatschutz bei mehrfach übertragenen QSOs
 
-Ist der primäre WSJT-X-Port bereits von JTAlert, GridTracker oder einer anderen Anwendung belegt, kann der zusätzliche „logged contact ADIF broadcast“ von WSJT-X auf einen separaten freien Port zeigen, beispielsweise `2333`. Ein belegter Port wird beim Start verständlich gemeldet. Nach einer Portänderung genügt **UDP stoppen** und erneutes **UDP starten**; ein Programmneustart ist nicht nötig.
+Der Empfänger startet bewusst manuell. Eingehende QSOs werden lokal gespeichert und später über den normalen Wavelog-Sync abgeglichen.
 
-Empfangene QSOs werden direkt in der ADI-Datei des aktiven Profils gespeichert, im Logbuch als `LOCAL ONLY` angezeigt und später mit dem normalen Wavelog-Abgleich synchronisiert. Identische Mehrfachübertragungen werden nicht doppelt gespeichert. Der UDP-Empfänger bleibt nach einem Programmstart ausgeschaltet, bis er ausdrücklich gestartet wird.
+## Daten und Sync-Sicherheit
 
-## Updates
+- ADI bleibt das primäre lokale QSO-Logbuch.
+- SQLite speichert nur Einstellungen, Zuordnungen und Sync-Metadaten.
+- Gleichzeitige lokale und entfernte Änderungen erzeugen einen sichtbaren Konflikt.
+- Ein außerhalb der App fehlendes lokales QSO wird nicht ungefragt aus Wavelog gelöscht.
+- Profil-Löschung wirkt ausschließlich lokal und löscht keine Wavelog-Daten.
+- Es erfolgen keine heimlichen Online-Callbook-Abfragen.
 
-Beim Start prüft die Anwendung im Hintergrund die öffentliche Release-Liste dieses GitHub-Projekts. Gibt es eine neuere passende Version, kann deren Downloadseite direkt geöffnet werden. Ohne Internet oder bei einem nicht erreichbaren GitHub bleibt die Prüfung still und beeinträchtigt das Offline-Logging nicht. Stabile Versionen bieten keine Vorabversionen an; Release Candidates können auf neuere Release Candidates hinweisen.
+Regelmäßige Sicherungen der ADI-Ordner und des Anwendungsordners werden empfohlen.
 
-Eine ausführlichere Anleitung steht im [Benutzerhandbuch](docs/USER_GUIDE.md). Häufige Start- und Sync-Probleme behandelt die [Fehlerhilfe](docs/TROUBLESHOOTING.md).
+## Dokumentation
+
+- [Benutzerhandbuch](docs/USER_GUIDE.md)
+- [Fehlerhilfe](docs/TROUBLESHOOTING.md)
+- [Architektur](docs/ARCHITECTURE.md)
+- [Mitwirken](CONTRIBUTING.md)
+- [Sicherheit](SECURITY.md)
 
 ## Aus dem Quellcode starten
 
-Voraussetzungen:
-
-- Python 3.12 mit Tk-Unterstützung
-- keine externen Python-Pakete
+Benötigt wird Python 3.12 mit Tk-Unterstützung; externe Python-Pakete sind nicht erforderlich.
 
 ```powershell
 python app.py
-```
-
-Die Tests laufen ohne Wavelog-Zugang:
-
-```powershell
 python selftest.py
 ```
 
-## Windows-Build
-
-Voraussetzungen:
-
-- Python 3.12.10
-- Go 1.23.2
-
-```powershell
-.\scripts\build-windows.ps1
-```
-
-Ein vollständiges lokales Release-Paket entsteht mit:
+Der reproduzierbare Windows-Build verwendet zusätzlich Go 1.23.2:
 
 ```powershell
 .\scripts\package-release.ps1
 ```
 
-Die Ausgabe liegt in `dist\`. Details zum Tag- und Releaseablauf enthält [RELEASING.md](docs/RELEASING.md).
-
-Die empfohlenen GitHub-Einstellungen für Maintainer beschreibt [GITHUB_SETUP.md](docs/GITHUB_SETUP.md).
-
-## Projektstruktur
-
-| Pfad | Aufgabe |
-| --- | --- |
-| `app.py` | Tkinter-Oberfläche und Benutzerinteraktion |
-| `logger_core.py` | ADI-, Profil-, Metadaten-, Sync- und Statistiklogik |
-| `cat_control.py` | Hamlib-Modellliste, `rigctld`-Prozess, CAT-Abfragen und Mode-Zuordnung |
-| `dx_cluster.py` | Telnet-Verbindung, DX-Spot-Parser, Login und expliziter Spotversand |
-| `external_logging.py` | WSJT-X- und ADIF-Empfang über UDP |
-| `update_check.py` | Fehlertolerante Prüfung auf neuere GitHub-Releases |
-| `bootstrap_windows.go` | Kleiner Windows-Launcher mit eingebetteter Anwendung |
-| `cty.dat` | Offline-Länder- und DXCC-Daten |
-| `selftest.py` | Regressions- und Migrations-Selftests |
-| `scripts/` | Reproduzierbare Build- und Paket-Skripte |
-| `.github/workflows/` | Automatische Tests, Windows-Builds und Tag-Releases |
-| `docs/` | Benutzer-, Architektur-, Fehler- und Release-Dokumentation |
-
-Technische Hintergründe stehen in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Mitwirken und Sicherheit
-
-Beiträge sind willkommen. Bitte zuerst [CONTRIBUTING.md](CONTRIBUTING.md) lesen. Sicherheitsprobleme bitte nicht öffentlich als normales Issue melden; der vorgesehene Meldeweg steht in [SECURITY.md](SECURITY.md).
-
 ## Lizenz
 
-Dieses Projekt steht unter der [MIT-Lizenz](LICENSE).
-
-## Hinweis zu Wavelog
-
-Dieses Projekt ist ein unabhängiges Community-Projekt und nicht Bestandteil des Wavelog-Projekts. Für die Nutzung werden eine erreichbare Wavelog-Instanz und passende API-Berechtigungen benötigt.
+Dieses Projekt steht unter der [MIT-Lizenz](LICENSE). Es ist ein unabhängiges Community-Projekt und kein Bestandteil des Wavelog-Projekts.

@@ -4,6 +4,26 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-13
+
+### Added
+
+- Neuer Fast-Log-/DXpedition-Modus für schnelle lokale Pileup-Erfassung mit festem Band, Mode, Frequenz, Rapport und Leistung
+- Sitzungsübersicht, QSO-Rate, Dupe-Hinweis nach Band und Mode sowie kontrolliertes Zurücknehmen des letzten ausschließlich lokalen Fast-Log-QSOs
+- Getrennte profilbezogene DXSpider-Verbindung für den öffentlichen Spotversand; Standard ist `dxcluster.afu-tools.de:7301`
+- Erweiterte lokale Mode-Erkennung aus Spot-Kommentaren, üblichen FT8-Frequenzen und eindeutigen Bereichen des IARU-Region-1-Bandplans
+
+### Changed
+
+- DX-Cluster- und Spotter-Login verwenden automatisch das Stationsrufzeichen beziehungsweise den Operator des aktiven Profils
+- Worked-Markierungen für DX-Rufzeichen und Länder vergleichen jetzt Band und Mode
+- Beim öffentlichen Spotversand wird der gewählte Mode als DXSpider-Kommentarhinweis mitgesendet
+- Ein erneuter GitHub-Release-Lauf für einen vorhandenen Tag ersetzt die Assets, statt wegen eines bereits vorhandenen Releases abzubrechen
+
+### Fixed
+
+- Schreibweisen wie `FT-8`, `JS8Call`, `FMN`, `D-STAR` und weitere gebräuchliche Mode-Hinweise werden beim Spot-Empfang zuverlässig erkannt
+
 ## [0.13.0-rc1] - 2026-08-13
 
 ### Added

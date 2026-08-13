@@ -2,26 +2,17 @@
 
 ## 1. Grundidee
 
-Der Offline Logger schreibt QSOs zuerst in lokale ADI-Dateien. Wavelog wird bei vorhandener Verbindung synchronisiert. Dadurch bleibt das Erfassen auch ohne Internet möglich.
+Der Offline Logger schreibt QSOs zuerst in lokale ADI-Dateien. Wavelog wird ausschließlich über den manuellen Sync angesprochen. Dadurch bleibt das Erfassen auch ohne Internet möglich.
 
 ## 2. Erststart unter Windows
 
-Beim ersten Start richtet der kleine Windows-Bootstrapper eine private Python-Laufzeit unter `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\runtime\python312` ein. Der Download kommt von python.org und wird vor der Installation per SHA-256 geprüft.
+Beim ersten Start richtet der Windows-Bootstrapper eine private Python-Laufzeit unter `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\runtime\python312` ein. Der Download kommt von python.org und wird vor der Installation per SHA-256 geprüft.
 
-Dieser Vorgang benötigt einmalig eine Internetverbindung und kann je nach Verbindung einige Minuten dauern. Spätere Starts benötigen für das lokale Logging kein Internet.
+Dieser Vorgang benötigt einmalig eine Internetverbindung. Spätere Starts und das lokale Logging funktionieren offline.
 
 ## 3. Logger-Profil einrichten
 
-Ein Profil trennt Station, Zugangsdaten, Logpfad und Sync-Metadaten vollständig von anderen Profilen.
-
-Für ein neues Profil werden mindestens benötigt:
-
-- frei wählbarer Profilname
-- Wavelog-Basis-URL
-- Wavelog API-v2-Token
-- Wavelog-Stationsprofil
-- Stationsrufzeichen und Operator
-- Ordner für die lokalen ADI-Dateien
+Ein Profil trennt Station, Zugangsdaten, Logpfad und Sync-Metadaten vollständig von anderen Profilen. Benötigt werden insbesondere Stationsrufzeichen beziehungsweise Operator und ein Ordner für die lokalen ADI-Dateien. Für den Sync kommen Wavelog-URL, API-v2-Token und Wavelog-Stationsprofil hinzu.
 
 Profile können umbenannt oder dupliziert werden. Beim Duplizieren werden Einstellungen übernommen, aber keine QSO- oder Sync-Zuordnungen kopiert.
 
@@ -30,90 +21,96 @@ Profile können umbenannt oder dupliziert werden. Beim Duplizieren werden Einste
 1. Rufzeichen eingeben.
 2. Band, Mode, Datum und UTC-Zeit prüfen.
 3. RST und optionale Angaben ergänzen.
-4. Bei Aktivierungen POTA-, SOTA- oder WWFF-Referenz eintragen.
-5. QSO speichern.
+4. QSO speichern.
 
 Die Anwendung legt Tagesdateien im Format `CALLSIGN.YYYY-MM-DD.adi` an.
 
-## 5. CAT einrichten
+## 5. Fast Log / DXpedition
+
+Fast Log ist für Pileups und schnelle QSO-Folgen gedacht:
+
+1. **Fast Log / DXpedition** öffnen.
+2. Band, Mode, Frequenz, Rapporte und Leistung einmal festlegen.
+3. Rufzeichen eingeben und Enter drücken.
+4. Für das nächste QSO sofort das nächste Rufzeichen eingeben.
+
+Datum und UTC-Zeit werden automatisch gesetzt. Jedes QSO wird unmittelbar lokal als `LOCAL ONLY` gespeichert. Wavelog wird dabei nicht kontaktiert. Ein Dupe-Hinweis vergleicht Rufzeichen, Band und Mode, verhindert das Speichern aber nicht.
+
+**Werte aus QSO/CAT** übernimmt die aktuellen Frequenz-, Band-, Mode- und Leistungswerte. **Letztes QSO zurücknehmen** löscht nach Bestätigung ausschließlich das letzte noch nicht synchronisierte QSO dieser Sitzung.
+
+## 6. CAT einrichten
 
 Der Windows-Build enthält Hamlib bereits. Eine zusätzliche Hamlib- oder CAT-Anwendung muss nicht installiert werden.
 
-1. Funkgerät per USB oder serieller Schnittstelle mit Windows verbinden.
-2. **CAT Setup** öffnen und das Funkgerätemodell suchen.
-3. COM-Port sowie die vom Funkgerät verwendete Baudrate und die seriellen Parameter auswählen.
-4. **Einstellungen speichern** auswählen.
-5. Optional **Verbindung testen** ausführen.
-6. **CAT starten** auswählen.
+1. Funkgerät verbinden und **CAT Setup** öffnen.
+2. Funkgerätemodell, COM-Port und serielle Parameter auswählen.
+3. **Einstellungen speichern** und optional **Verbindung testen** auswählen.
+4. Mit **CAT starten** die Verbindung aufbauen.
 
-Die CAT-Konfiguration gehört immer zum aktiven Logger-Profil. Bei erfolgreicher Verbindung werden Frequenz, Band und Mode sowohl im normalen QSO-Formular als auch im Contest-Logging aktualisiert. Digitale Untermodi, die der Nutzer ausdrücklich ausgewählt hat, bleiben bei passenden USB-/LSB-Datenmodi erhalten.
+CAT gehört zum aktiven Logger-Profil und startet nach jedem Programmstart bewusst ausgeschaltet. Frequenz, Band und Mode werden in normales QSO-, Fast- und Contest-Logging übernommen. **CAT stoppen** oder das Beenden des Loggers beendet auch den gestarteten `rigctld`-Prozess.
 
-**Einstellungen speichern**, **CAT starten** und **CAT stoppen** sind bewusst getrennte Aktionen. Der Logger startet CAT nach jedem Programmstart ausgeschaltet; die gespeicherten Geräte- und Schnittstellenwerte bleiben erhalten, die Verbindung wird aber erst nach einem ausdrücklichen Klick auf **CAT starten** aufgebaut.
+## 7. DX Cluster über Telnet
 
-## 6. DX Cluster über Telnet
+Der DX Cluster ist eine optionale Online-Funktion. Ohne Internet bleibt der Logger für lokale QSOs vollständig nutzbar.
 
-Der DX Cluster ist eine optionale Online-Funktion. Ohne Internet bleibt der Logger vollständig für Offline-QSOs nutzbar und zeigt beim Start keinen Clusterfehler.
+### Spots empfangen
 
 1. **DX Cluster** öffnen.
-2. Den Standardserver `dxcluster.afu-tools.de` mit Telnet-Port `7300` verwenden oder eigene Serverdaten eintragen.
-3. Das Login-Rufzeichen des aktiven Profils eintragen und **Einstellungen speichern** auswählen.
-4. Mit **Verbinden** die Telnet-Sitzung bewusst starten.
-5. Eingehende Spots nach Band, Mode, Zeitraum und Spotter-Region filtern. Die Region grenzt die meldende Station ein: Europa, Nordamerika, Südamerika, Asien/Pazifik, Afrika oder Unbekannt. Die Auswahl wird im aktiven Profil gespeichert. Standardmäßig sind nur die letzten 30 Minuten sichtbar. Neue Telnet-Spots werden während der Verbindung automatisch und ohne manuelles Neuladen ergänzt.
+2. `dxcluster.afu-tools.de:7300` verwenden oder eigene Empfangsdaten eintragen.
+3. **Einstellungen speichern** und anschließend **Verbinden** auswählen.
+4. Spots nach Band, Mode, Zeitraum und Spotter-Region filtern.
 
-Ein Doppelklick stimmt bei laufendem CAT ausschließlich den TRX auf Spot-Frequenz und erkannten Mode ab und lässt die Cluster-Seite geöffnet. **QSO übernehmen** füllt anschließend Rufzeichen, Frequenz, Band und Mode im normalen QSO-Formular; gespeichert wird erst durch die normale QSO-Speicheraktion. `SSB` wird bandabhängig zu `LSB` oder `USB` aufgelöst. Fehlt im Spot jede Mode-Angabe, gilt dieselbe Vorgabe: LSB auf 160, 80 und 40 Metern, USB auf den höheren Bändern. Explizite Angaben wie FM, CW oder FT8 haben immer Vorrang.
+Das Login-Rufzeichen wird automatisch aus dem aktiven Stationsprofil übernommen. Neue Spots erscheinen live; standardmäßig sind die letzten 30 Minuten sichtbar. Die Tabelle lässt sich über jede Überschrift sortieren.
 
-Die Offline-Länderdatenbank ergänzt das DX-Land und Spotter-Land. Die Tabelle kann über jede Überschrift sortiert werden, also auch nach beiden Ländern. Ein zweiter Klick kehrt die Sortierrichtung um; beim Öffnen steht der jüngste Spot oben. Neue Spots werden zwei Minuten hellblau hinterlegt. Bereits gearbeitete Länder erhalten nur dann grüne Schrift, wenn sie im selben Mode wie der Spot gearbeitet wurden; bei einem in diesem Mode bereits gearbeiteten Rufzeichen werden sowohl Rufzeichen als auch Land grün dargestellt. Maßgeblich sind ausschließlich die lokalen ADI-Dateien des aktiven Profils.
+Ein Doppelklick stimmt bei laufendem CAT den TRX auf Spot-Frequenz und erkannten Mode ab. **QSO übernehmen** füllt danach das normale QSO-Formular, speichert aber noch kein QSO.
 
-Um selbst zu spotten, Rufzeichen und Frequenz im QSO-Formular eintragen und **DX-Spot senden** auswählen. Danach kann ein optionaler Kommentar ergänzt werden. Erst die anschließende Bestätigung sendet den Spot öffentlich. Zeilenumbrüche werden entfernt und Kommentare gekürzt; ein Spot wird niemals automatisch beim Speichern eines QSOs gesendet.
+Explizite Mode-Hinweise im Kommentar haben Vorrang. Fehlt der Mode, prüft der Logger typische FT8-Frequenzen und eindeutige Bereiche des IARU-Region-1-Bandplans. In mehrdeutigen Bereichen gilt weiterhin LSB auf 160, 80 und 40 Metern, sonst USB.
 
-Serverdaten und Login-Rufzeichen werden pro Logger-Profil gespeichert. Die Verbindung selbst bleibt nach jedem Programmstart aus und wird bei Profilwechsel oder Programmende geschlossen.
+Neue Spots werden kurz hellblau markiert. Grüne Worked-Markierungen gelten ausschließlich für dasselbe Band und denselben Mode. Die Informationen stammen aus den lokalen ADI-Dateien des aktiven Profils.
 
-## 7. WSJT-X und andere Programme über UDP
+### Selbst spotten
 
-Unter **UDP Logging** können externe Programme ein fertig geloggtes QSO direkt an den Offline Logger senden. Unterstützt werden das native WSJT-X-Protokoll sowie vollständige ADIF-Datensätze mit `<EOR>` über UDP.
+Die Spotter-Verbindung ist vom Empfang getrennt. Unter **Einstellungen** sind standardmäßig `dxcluster.afu-tools.de:7301` und das Rufzeichen des aktiven Profils eingetragen.
 
-1. Im Offline Logger **UDP Logging** öffnen.
-2. Für Programme auf demselben PC die Bind-Adresse `127.0.0.1` verwenden.
-3. Einen freien UDP-Port eintragen, beispielsweise `2237`, und **Einstellungen speichern** auswählen.
-4. In WSJT-X unter **File > Settings > Reporting** beim UDP Server dieselbe Adresse und Portnummer eintragen.
-5. Im Offline Logger **UDP starten** auswählen.
+Im QSO-Formular **DX-Spot senden** auswählen, optional einen Kommentar eingeben und den öffentlichen Versand bestätigen. Die Spotter-Verbindung wird nur dafür aufgebaut. Der gewählte Mode wird als Hinweis in den DXSpider-Kommentar aufgenommen. Es wird niemals automatisch beim Loggen gespottet.
 
-Wenn der primäre Port bereits von JTAlert, GridTracker oder einem anderen Programm verwendet wird, kann der zusätzliche „logged contact ADIF broadcast“ von WSJT-X an einen anderen freien Port gesendet werden, beispielsweise `2333`. Der Port ist pro Logger-Profil frei wählbar. Eine Änderung wird nach **UDP stoppen** und erneutem **UDP starten** wirksam; ein Neustart des gesamten Programms ist nicht erforderlich.
+## 8. WSJT-X und andere Programme über UDP
 
-Jedes akzeptierte QSO wird in der ADI-Datei des aktiven Profils als `LOCAL ONLY` gespeichert. Identische Mehrfachübertragungen werden ignoriert. Der Empfänger startet nach jedem Programmstart bewusst ausgeschaltet und wird bei einem Profilwechsel oder beim Beenden sicher gestoppt.
+Unter **UDP Logging** können das native WSJT-X-Protokoll und vollständige ADIF-Datensätze mit `<EOR>` empfangen werden.
 
-## 8. Synchronisieren
+1. Bind-Adresse `127.0.0.1` und einen freien Port eintragen.
+2. In WSJT-X dieselbe Adresse und Portnummer konfigurieren.
+3. **UDP starten** auswählen.
 
-Vor dem ersten Sync sollte die Verbindung in den Profileinstellungen getestet werden.
+Bei einer Portänderung genügen **UDP stoppen** und **UDP starten**. Empfangene QSOs werden lokal als `LOCAL ONLY` gespeichert; identische Mehrfachübertragungen werden ignoriert.
+
+## 9. Synchronisieren
 
 Der Abgleich unterscheidet:
 
 - nur lokal geändert: Upload zu Wavelog
 - nur in Wavelog geändert: lokale ADI-Aktualisierung
 - auf beiden Seiten geändert: sichtbarer Konflikt
-- remote gelöscht und lokal unverändert: lokale Entfernung
 - ausdrücklich lokal gelöscht: Remote-Löschanforderung
 - außerhalb der App lokal verschwunden: Wiederherstellung aus Wavelog
 
-Clubtokens können abhängig von ihren Berechtigungen nur einen Teil der QSOs sehen. Eine unvollständige Sicht darf nicht als Beweis für Remote-Löschungen behandelt werden.
+Eine unvollständige Sicht eines Clubtokens darf nicht als Beweis für Remote-Löschungen behandelt werden.
 
-## 9. Konflikte
+## 10. Konflikte
 
-Ein Konflikt bedeutet, dass lokale und entfernte Daten seit der letzten gemeinsamen Version verändert wurden. Prüfe beide Fassungen bewusst und entscheide, welche Werte übernommen werden sollen. Die Anwendung wählt absichtlich keine Seite automatisch aus.
+Ein Konflikt bedeutet, dass lokale und entfernte Daten seit der letzten gemeinsamen Version verändert wurden. Die Anwendung wählt absichtlich keine Seite automatisch aus.
 
-## 10. Profil löschen
+## 11. Profil löschen
 
-Das Löschen eines Profils ist immer lokal. Es löscht weder ein Wavelog-Stationsprofil noch Wavelog-QSOs.
+Das Löschen eines Profils ist immer lokal. Es löscht weder ein Wavelog-Stationsprofil noch Wavelog-QSOs. Das optionale Entfernen lokaler ADI-Dateien wird verweigert, wenn ein anderes Profil denselben Logordner verwendet.
 
-Optional können die lokalen ADI-Dateien des Profils entfernt werden. Diese Option greift nur für `.adi`-Dateien und wird verweigert, wenn ein anderes Profil denselben Logordner verwendet.
+## 12. Update-Hinweis
 
-## 11. Update-Hinweis
+Beim Programmstart prüft die Anwendung im Hintergrund die öffentliche GitHub-Release-Liste. Ohne Internet oder bei einem Netzwerkfehler erscheint keine Fehlermeldung.
 
-Beim Programmstart prüft die Anwendung im Hintergrund die öffentliche GitHub-Release-Liste. Ist eine neuere passende Version verfügbar, erscheint ein Hinweis mit einem Link zur Downloadseite. Ohne Internet oder bei einem Netzwerkfehler erscheint keine Fehlermeldung; das Offline-Logging funktioniert unverändert weiter.
+## 13. Datensicherung
 
-## 12. Datensicherung
-
-Vor Updates und regelmäßig im Betrieb sollten gesichert werden:
+Regelmäßig gesichert werden sollten:
 
 - alle verwendeten ADI-Ordner
 - `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\`

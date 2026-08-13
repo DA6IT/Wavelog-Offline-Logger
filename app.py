@@ -18,7 +18,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from logger_core import (
     APP_NAME, VERSION, BANDS, MODES, LogStore, MetadataDB, WavelogClient,
     WavelogError, SyncEngine, app_data_dir, default_log_dir, band_from_mhz,
-    qso_hash, CountryDB, ProfileManager,
+    qso_hash, CountryDB, ProfileManager, build_fast_log_qso,
 )
 from cat_control import (
     CAT_BAUD_RATES, CAT_DATA_BITS, CAT_HANDSHAKES, CAT_LINE_STATES,
@@ -31,9 +31,11 @@ from external_logging import (
     find_duplicate_qso,
 )
 from dx_cluster import (
-    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DxClusterClient, DxClusterConfig,
+    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DEFAULT_SPOTTER_HOST,
+    DEFAULT_SPOTTER_PORT, DxClusterClient, DxClusterConfig, DxSpotterConfig,
     DxClusterError, DxSpot, SPOTTER_REGION_OPTIONS, normalize_worked_mode,
-    spot_sort_value, spotter_region_for_continent, worked_flags,
+    spot_comment_with_mode, spot_sort_value, spotter_region_for_continent,
+    worked_flags,
 )
 from update_check import ReleaseInfo, find_newer_release
 
@@ -109,19 +111,26 @@ class LoggerApp(tk.Tk):
         self.dx_cluster = DxClusterClient()
         atexit.register(self.dx_cluster.stop)
         self.dx_cluster_generation = 0
+        self.dx_spotter = DxClusterClient()
+        atexit.register(self.dx_spotter.stop)
+        self.dx_spotter_generation = 0
+        self.dx_spotter_active_config: DxSpotterConfig | None = None
         self.dx_cluster_spots: list[tuple[str, DxSpot]] = []
         self.dx_cluster_spot_by_id: dict[str, DxSpot] = {}
         self.dx_cluster_sequence = 0
         self.dx_cluster_country_cache: dict[str, str] = {}
         self.dx_cluster_continent_cache: dict[str, str] = {}
-        self.dx_cluster_worked_calls: set[tuple[str, str]] = set()
-        self.dx_cluster_worked_countries: set[tuple[str, str]] = set()
+        self.dx_cluster_worked_calls: set[tuple[str, str, str]] = set()
+        self.dx_cluster_worked_countries: set[tuple[str, str, str]] = set()
         self.dx_cluster_filter_job = None
         self.dx_cluster_session_received = 0
         self.dx_cluster_last_spot_utc: datetime | None = None
         self.dx_cluster_seen_keys: set[tuple] = set()
         self.dx_cluster_sort_key = "time"
         self.dx_cluster_sort_descending = True
+        self.fast_log_session_started = datetime.now(timezone.utc)
+        self.fast_log_session_ids: list[str] = []
+        self.fast_log_worked_keys: set[tuple[str, str, str]] = set()
 
         self.data_dir = app_data_dir()
         self.country_db = CountryDB(Path(__file__).resolve().parent / "cty.dat")
@@ -135,6 +144,7 @@ class LoggerApp(tk.Tk):
         self._setup_style()
         self._build_shell()
         self._build_log_page()
+        self._build_fast_log_page()
         self._build_contest_page()
         self._build_qsos_page()
         self._build_stats_page()
@@ -215,6 +225,7 @@ class LoggerApp(tk.Tk):
         tk.Label(side, text="DA6IT.de", bg=SIDEBAR, fg="white", font=("Segoe UI Semibold", 17)).pack(anchor="w", padx=20, pady=(24, 2))
         tk.Label(side, text="Wavelog Offline Logger", bg=SIDEBAR, fg="#aebdca", font=("Segoe UI", 9)).pack(anchor="w", padx=20, pady=(0, 24))
         ttk.Button(side, text="  QSO loggen", style="Nav.TButton", command=lambda: self._show_page("log")).pack(fill="x")
+        ttk.Button(side, text="  Fast Log / DXpedition", style="Nav.TButton", command=lambda: self._show_page("fast_log")).pack(fill="x")
         ttk.Button(side, text="  Contest Logging", style="Nav.TButton", command=lambda: self._show_page("contest")).pack(fill="x")
         ttk.Button(side, text="  Logbuch & Sync", style="Nav.TButton", command=lambda: self._show_page("qsos")).pack(fill="x")
         ttk.Button(side, text="  Statistiken", style="Nav.TButton", command=lambda: self._show_page("stats")).pack(fill="x")
@@ -315,6 +326,7 @@ class LoggerApp(tk.Tk):
             old = self._current_profile().get("name", "")
             self._stop_cat_runtime(update_ui=False)
             self._stop_dx_cluster_runtime(update_ui=False)
+            self._stop_dx_spotter_runtime(update_ui=False)
             self._stop_udp_log_runtime(update_ui=False)
             if self.db:
                 self.db.close()
@@ -325,6 +337,9 @@ class LoggerApp(tk.Tk):
                 self.station_combo.configure(values=[])
             self._load_settings_to_ui()
             self.clear_qso_form()
+            self.fast_log_session_started = datetime.now(timezone.utc)
+            self.fast_log_session_ids.clear()
+            self.refresh_fast_log_page()
             if hasattr(self, "contest_power_var"):
                 self.contest_power_var.set(self.db.get_setting("default_power", ""))
             self.refresh_contest_page()
@@ -401,10 +416,13 @@ class LoggerApp(tk.Tk):
         return f
 
     def _show_page(self, name: str):
-        titles = {"log": "QSO loggen", "contest": "Contest Logging", "qsos": "Logbuch & Sync", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "udp_log": "UDP Logging", "settings": "Einstellungen"}
+        titles = {"log": "QSO loggen", "fast_log": "Fast Log / DXpedition", "contest": "Contest Logging", "qsos": "Logbuch & Sync", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "udp_log": "UDP Logging", "settings": "Einstellungen"}
         self.page_title.configure(text=titles[name])
         self.pages[name].tkraise()
-        if name == "contest":
+        if name == "fast_log":
+            self.refresh_fast_log_page()
+            self.fast_log_call_entry.focus_set()
+        elif name == "contest":
             self.refresh_contest_page()
         elif name == "qsos":
             self.refresh_qsos()
@@ -593,6 +611,11 @@ class LoggerApp(tk.Tk):
         if hasattr(self, "live_time_var") and self.live_time_var.get():
             self.qso_date_var.set(n.strftime("%Y-%m-%d"))
             self.qso_time_var.set(n.strftime("%H:%M:%S"))
+        if hasattr(self, "fast_log_utc_label"):
+            fast_now = datetime.now(timezone.utc)
+            self.fast_log_utc_label.configure(
+                text=fast_now.strftime("UTC · %Y-%m-%d · %H:%M:%S"),
+            )
         self._update_logfile_preview()
         self.after(250, self._tick_clock)
 
@@ -703,6 +726,270 @@ class LoggerApp(tk.Tk):
         self.form_vars["tx_pwr"].set(self.db.get_setting("default_power", ""))
         if self.live_time_var.get():
             self._set_current_qso_time()
+
+    # ---------- Fast Log / DXpedition ----------
+    def _build_fast_log_page(self):
+        p = self._new_page("fast_log")
+        p.columnconfigure(0, weight=1)
+        p.rowconfigure(1, weight=1)
+
+        setup = self._card(p, row=0, column=0, sticky="ew", pady=(0, 10))
+        for column in range(7):
+            setup.columnconfigure(column, weight=1)
+        ttk.Label(setup, text="Feste QSO-Daten", style="CardTitle.TLabel").grid(
+            row=0, column=0, columnspan=5, sticky="w",
+        )
+        self.fast_log_utc_label = tk.Label(
+            setup, text="", bg=CARD, fg=TEXT, font=("Segoe UI Semibold", 11), anchor="e",
+        )
+        self.fast_log_utc_label.grid(row=0, column=5, columnspan=2, sticky="e")
+        ttk.Label(
+            setup,
+            text=(
+                "Band, Mode, Frequenz und Rapporte einmal festlegen. Danach genügt: "
+                "Rufzeichen eingeben und Enter. Jedes QSO wird sofort lokal in ADI gespeichert; "
+                "Wavelog wird erst über den manuellen Sync angesprochen."
+            ),
+            style="Muted.Card.TLabel", wraplength=1050,
+        ).grid(row=1, column=0, columnspan=7, sticky="w", pady=(3, 10))
+
+        self.fast_log_band_var = tk.StringVar(value="20m")
+        self.fast_log_mode_var = tk.StringVar(value="USB")
+        self.fast_log_freq_var = tk.StringVar()
+        self.fast_log_rst_sent_var = tk.StringVar(value="59")
+        self.fast_log_rst_rcvd_var = tk.StringVar(value="59")
+        self.fast_log_power_var = tk.StringVar()
+        fields = (
+            ("Band", self.fast_log_band_var, BANDS, True),
+            ("Mode", self.fast_log_mode_var, MODES, True),
+            ("Frequenz (MHz)", self.fast_log_freq_var, (), False),
+            ("RST gesendet", self.fast_log_rst_sent_var, (), False),
+            ("RST empfangen", self.fast_log_rst_rcvd_var, (), False),
+            ("Leistung (W)", self.fast_log_power_var, (), False),
+        )
+        for column, (label, variable, values, combo) in enumerate(fields):
+            ttk.Label(setup, text=label, style="Card.TLabel").grid(
+                row=2, column=column, sticky="w", padx=(0, 8), pady=(2, 3),
+            )
+            if combo:
+                widget = ttk.Combobox(setup, textvariable=variable, values=values, state="readonly")
+            else:
+                widget = ttk.Entry(setup, textvariable=variable)
+            widget.grid(row=3, column=column, sticky="ew", padx=(0, 8))
+        self.fast_log_freq_var.trace_add("write", lambda *_args: self._fast_log_freq_changed())
+        self.fast_log_mode_var.trace_add("write", lambda *_args: self._fast_log_mode_changed())
+        ttk.Button(
+            setup, text="Werte aus QSO/CAT", style="Secondary.TButton",
+            command=self._fast_log_take_current_values,
+        ).grid(row=3, column=6, sticky="e")
+
+        body = self._card(p, row=1, column=0, sticky="nsew")
+        body.columnconfigure(0, weight=3)
+        body.columnconfigure(1, weight=2)
+        body.rowconfigure(2, weight=1)
+        ttk.Label(body, text="Pileup-Eingabe", style="CardTitle.TLabel").grid(
+            row=0, column=0, sticky="w",
+        )
+        self.fast_log_station_label = tk.Label(
+            body, text="", bg=CARD, fg=MUTED, font=("Segoe UI", 9), anchor="e",
+        )
+        self.fast_log_station_label.grid(row=0, column=1, sticky="e")
+
+        entry_box = ttk.Frame(body, style="Card.TFrame")
+        entry_box.grid(row=1, column=0, sticky="new", padx=(0, 14), pady=(10, 0))
+        entry_box.columnconfigure(0, weight=1)
+        self.fast_log_call_var = tk.StringVar()
+        self.fast_log_call_entry = ttk.Entry(
+            entry_box, textvariable=self.fast_log_call_var, style="Call.TEntry",
+        )
+        self.fast_log_call_entry.grid(row=0, column=0, sticky="ew")
+        self.fast_log_call_entry.bind("<KeyRelease>", self._fast_log_call_changed)
+        self.fast_log_call_entry.bind("<Return>", self.save_fast_log_qso)
+        ttk.Label(
+            entry_box, text="Nur Rufzeichen + Enter", style="Muted.Card.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.fast_log_duplicate_label = tk.Label(
+            entry_box, text="", bg=CARD, fg=WARN, font=("Segoe UI Semibold", 10), anchor="w",
+        )
+        self.fast_log_duplicate_label.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+        self.fast_log_stats_label = tk.Label(
+            entry_box, text="", bg=CARD, fg=TEXT, font=("Segoe UI Semibold", 12),
+            justify="left", anchor="w",
+        )
+        self.fast_log_stats_label.grid(row=3, column=0, sticky="ew", pady=(18, 0))
+        buttons = ttk.Frame(entry_box, style="Card.TFrame")
+        buttons.grid(row=4, column=0, sticky="ew", pady=(18, 0))
+        ttk.Button(
+            buttons, text="QSO lokal speichern", style="Primary.TButton",
+            command=self.save_fast_log_qso,
+        ).pack(side="left")
+        ttk.Button(
+            buttons, text="Letztes QSO zurücknehmen", style="Secondary.TButton",
+            command=self.undo_last_fast_log_qso,
+        ).pack(side="left", padx=8)
+
+        recent_box = ttk.Frame(body, style="Card.TFrame")
+        recent_box.grid(row=1, column=1, rowspan=2, sticky="nsew", pady=(10, 0))
+        recent_box.columnconfigure(0, weight=1)
+        recent_box.rowconfigure(1, weight=1)
+        ttk.Label(recent_box, text="QSOs dieser Fast-Log-Sitzung", style="CardTitle.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 6),
+        )
+        self.fast_log_recent = tk.Listbox(
+            recent_box, font=("Consolas", 10), relief="solid", borderwidth=1,
+            activestyle="none",
+        )
+        self.fast_log_recent.grid(row=1, column=0, sticky="nsew")
+
+    def _fast_log_take_current_values(self):
+        if self.freq_var.get().strip():
+            self.fast_log_freq_var.set(self.freq_var.get().strip())
+        if self.band_var.get() in BANDS:
+            self.fast_log_band_var.set(self.band_var.get())
+        if self.mode_var.get() in MODES:
+            self.fast_log_mode_var.set(self.mode_var.get())
+        self.fast_log_power_var.set(
+            self.form_vars["tx_pwr"].get().strip() or self.db.get_setting("default_power", ""),
+        )
+        self.status_var.set("Fast Log: aktuelle QSO-/CAT-Werte übernommen")
+        self.fast_log_call_entry.focus_set()
+
+    def _fast_log_freq_changed(self):
+        try:
+            band = band_from_mhz(float(self.fast_log_freq_var.get().strip().replace(",", ".")))
+            if band:
+                self.fast_log_band_var.set(band)
+        except (TypeError, ValueError):
+            pass
+
+    def _fast_log_mode_changed(self):
+        if not hasattr(self, "fast_log_rst_sent_var"):
+            return
+        default = "59" if self.fast_log_mode_var.get() in ("SSB", "USB", "LSB", "FM", "AM") else "599"
+        self.fast_log_rst_sent_var.set(default)
+        self.fast_log_rst_rcvd_var.set(default)
+        if hasattr(self, "fast_log_call_var"):
+            self._fast_log_call_changed()
+
+    def _fast_log_call_changed(self, _event=None):
+        if not hasattr(self, "fast_log_call_var"):
+            return
+        value = self.fast_log_call_var.get().upper()
+        if value != self.fast_log_call_var.get():
+            self.fast_log_call_var.set(value)
+        call = value.strip()
+        if not call:
+            self.fast_log_duplicate_label.configure(text="")
+            return
+        band = self.fast_log_band_var.get()
+        mode = normalize_worked_mode(self.fast_log_mode_var.get(), band=band)
+        duplicate = (call, band, mode) in self.fast_log_worked_keys
+        self.fast_log_duplicate_label.configure(
+            text=(f"Hinweis: {call} wurde auf {band} / {mode} bereits gearbeitet · Enter speichert trotzdem"
+                  if duplicate else "Noch nicht auf diesem Band und Mode gearbeitet"),
+            fg=(WARN if duplicate else OK),
+        )
+
+    def refresh_fast_log_page(self):
+        if not hasattr(self, "fast_log_recent"):
+            return
+        profile = self._profile_values()
+        station = profile.get("station_call") or profile.get("operator_call") or "—"
+        self.fast_log_station_label.configure(
+            text=f"Station: {station} · Zeit automatisch in UTC · LOCAL ONLY",
+        )
+        if not self.fast_log_power_var.get().strip():
+            self.fast_log_power_var.set(self.db.get_setting("default_power", ""))
+        by_id = {q.get("local_id"): q for q in self.store.scan()}
+        worked_keys: set[tuple[str, str, str]] = set()
+        for qso in by_id.values():
+            qso_call = str(qso.get("call") or "").strip().upper()
+            qso_band = str(qso.get("band") or "").strip()
+            qso_mode = normalize_worked_mode(
+                str(qso.get("mode") or ""), band=qso_band,
+            )
+            if qso_call and qso_band and qso_mode:
+                worked_keys.add((qso_call, qso_band, qso_mode))
+        self.fast_log_worked_keys = worked_keys
+        self.fast_log_session_ids = [
+            local_id for local_id in self.fast_log_session_ids if local_id in by_id
+        ]
+        self.fast_log_recent.delete(0, "end")
+        for local_id in reversed(self.fast_log_session_ids[-30:]):
+            qso = by_id[local_id]
+            self.fast_log_recent.insert(
+                "end",
+                f"{str(qso.get('time_on') or '')[:4]:4}  "
+                f"{str(qso.get('call') or ''):12}  "
+                f"{str(qso.get('band') or ''):6}  {str(qso.get('mode') or '')}",
+            )
+        elapsed = max(60.0, (datetime.now(timezone.utc) - self.fast_log_session_started).total_seconds())
+        count = len(self.fast_log_session_ids)
+        rate = round(count * 3600.0 / elapsed)
+        self.fast_log_stats_label.configure(
+            text=f"{count} QSO(s) in dieser Sitzung\nØ {rate} QSO/h",
+        )
+        self._fast_log_call_changed()
+
+    def save_fast_log_qso(self, _event=None):
+        try:
+            profile = self._profile_values()
+            call = self.fast_log_call_var.get().strip().upper()
+            qso = build_fast_log_qso(
+                call,
+                self.fast_log_band_var.get(),
+                self.fast_log_mode_var.get(),
+                self.fast_log_freq_var.get(),
+                self.fast_log_rst_sent_var.get(),
+                self.fast_log_rst_rcvd_var.get(),
+                self.fast_log_power_var.get(),
+                profile,
+                self._country_fields_for_call(call),
+            )
+            saved = self.store.add(qso)
+            self.db.ensure_local(saved["local_id"], qso_hash(saved))
+            self.fast_log_session_ids.append(saved["local_id"])
+            self.fast_log_call_var.set("")
+            self.refresh_fast_log_page()
+            self.status_var.set(
+                f"Fast Log: {saved['call']} · {saved['band']} · {saved['mode']} lokal gespeichert",
+            )
+            self.fast_log_call_entry.focus_set()
+        except Exception as exc:
+            messagebox.showerror("Fast-Log-QSO konnte nicht gespeichert werden", str(exc), parent=self)
+            self.fast_log_call_entry.focus_set()
+        return "break"
+
+    def undo_last_fast_log_qso(self):
+        if not self.fast_log_session_ids:
+            messagebox.showinfo("Fast Log", "In dieser Sitzung wurde noch kein QSO gespeichert.", parent=self)
+            return
+        local_id = self.fast_log_session_ids[-1]
+        qso = self.store.find(local_id)
+        if not qso:
+            self.fast_log_session_ids.pop()
+            self.refresh_fast_log_page()
+            return
+        meta = self.db.get_meta(local_id) or {}
+        if meta.get("status") != "local_only" or meta.get("wavelog_id") is not None:
+            messagebox.showwarning(
+                "Fast Log",
+                "Dieses QSO ist nicht mehr ausschließlich lokal und kann hier nicht zurückgenommen werden.",
+                parent=self,
+            )
+            return
+        if not messagebox.askyesno(
+            "Letztes Fast-Log-QSO zurücknehmen",
+            f"{qso.get('call', '—')} · {qso.get('band', '—')} · {qso.get('mode', '—')} wirklich lokal löschen?",
+            parent=self,
+        ):
+            return
+        if self.store.delete(local_id):
+            self.db.delete_meta(local_id)
+            self.fast_log_session_ids.pop()
+            self.refresh_fast_log_page()
+            self.status_var.set(f"Fast Log: {qso.get('call', 'QSO')} lokal zurückgenommen")
+        self.fast_log_call_entry.focus_set()
 
     # ---------- contest logging ----------
     def _contest_presets(self) -> list[dict]:
@@ -1950,7 +2237,7 @@ class LoggerApp(tk.Tk):
         ttk.Label(setup, text="Telnet-Verbindung", style="CardTitle.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
         ttk.Label(
             setup,
-            text="Online-Funktion: Empfang und Versand von DX-Spots funktionieren nur bei bestehender Internetverbindung. Server, Port und Login-Rufzeichen gehören zum aktiven Profil; die Verbindung wird nach jedem Programmstart bewusst manuell hergestellt.",
+            text="Online-Funktion: Der Empfang funktioniert nur bei bestehender Internetverbindung. Host und Port gehören zum aktiven Profil; das Login-Rufzeichen kommt immer aus dessen Stationsdaten. Die Empfangsverbindung wird nach jedem Programmstart bewusst manuell hergestellt.",
             style="Muted.Card.TLabel", wraplength=950,
         ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(3, 10))
 
@@ -1964,7 +2251,10 @@ class LoggerApp(tk.Tk):
         )
         for column, (label, variable) in enumerate(fields):
             ttk.Label(setup, text=label, style="Card.TLabel").grid(row=2, column=column, sticky="w", padx=(0, 10), pady=(2, 3))
-            ttk.Entry(setup, textvariable=variable).grid(row=3, column=column, sticky="ew", padx=(0, 10))
+            state = "readonly" if variable is self.dx_cluster_call_var else "normal"
+            ttk.Entry(setup, textvariable=variable, state=state).grid(
+                row=3, column=column, sticky="ew", padx=(0, 10),
+            )
 
         buttons = ttk.Frame(setup, style="Card.TFrame")
         buttons.grid(row=3, column=3, sticky="e")
@@ -2060,9 +2350,13 @@ class LoggerApp(tk.Tk):
         ).pack(side="right")
         self.dx_cluster_filter_job = self.after(10_000, self._dx_cluster_filter_tick)
 
+    def _active_station_callsign(self) -> str:
+        profile = self._profile_values()
+        return (profile.get("station_call") or profile.get("operator_call") or "").strip().upper()
+
     def _load_dx_cluster_settings_to_ui(self):
-        config = DxClusterConfig.from_getter(self.db.get_setting)
-        login_call = config.callsign or self.db.get_setting("operator_call", "").strip().upper()
+        login_call = self._active_station_callsign()
+        config = DxClusterConfig.from_getter(self.db.get_setting, login_call)
         self.dx_cluster_host_var.set(config.host)
         self.dx_cluster_port_var.set(str(config.port))
         self.dx_cluster_call_var.set(login_call)
@@ -2089,7 +2383,7 @@ class LoggerApp(tk.Tk):
         config = DxClusterConfig(
             host=self.dx_cluster_host_var.get().strip(),
             port=port,
-            callsign=self.dx_cluster_call_var.get().strip().upper(),
+            callsign=self._active_station_callsign(),
         )
         config.validate()
         return config
@@ -2097,6 +2391,42 @@ class LoggerApp(tk.Tk):
     def _store_dx_cluster_config(self, config: DxClusterConfig):
         for key, value in config.settings().items():
             self.db.set_setting(key, value)
+
+    def _load_dx_spotter_settings_to_ui(self):
+        callsign = self._active_station_callsign()
+        config = DxSpotterConfig.from_getter(self.db.get_setting, callsign)
+        self.dx_spotter_host_var.set(config.host)
+        self.dx_spotter_port_var.set(str(config.port))
+        self.dx_spotter_call_var.set(callsign)
+        self.dx_spotter_status_label.configure(
+            text="Spotter-Verbindung wird erst beim Senden aufgebaut.", fg=MUTED,
+        )
+
+    def _dx_spotter_config_from_ui(self) -> DxSpotterConfig:
+        try:
+            port = int(self.dx_spotter_port_var.get().strip())
+        except ValueError as exc:
+            raise DxClusterError("Der DX-Spotter-Port muss eine ganze Zahl sein.") from exc
+        config = DxSpotterConfig(
+            host=self.dx_spotter_host_var.get().strip(),
+            port=port,
+            callsign=self._active_station_callsign(),
+        )
+        config.validate()
+        return config
+
+    def _store_dx_spotter_config(self, config: DxSpotterConfig):
+        for key, value in config.settings().items():
+            self.db.set_setting(key, value)
+
+    def _stop_dx_spotter_runtime(self, *, update_ui: bool = True):
+        self.dx_spotter_generation += 1
+        self.dx_spotter.stop()
+        self.dx_spotter_active_config = None
+        if update_ui and hasattr(self, "dx_spotter_status_label"):
+            self.dx_spotter_status_label.configure(
+                text="Spotter-Verbindung ist getrennt.", fg=MUTED,
+            )
 
     def save_dx_cluster_settings(self):
         try:
@@ -2253,8 +2583,8 @@ class LoggerApp(tk.Tk):
         self.dx_cluster_filter_job = self.after(10_000, self._dx_cluster_filter_tick)
 
     def _update_dx_cluster_worked_cache(self, qsos: list[dict]):
-        calls: set[tuple[str, str]] = set()
-        countries: set[tuple[str, str]] = set()
+        calls: set[tuple[str, str, str]] = set()
+        countries: set[tuple[str, str, str]] = set()
         for qso in qsos:
             call = str(qso.get("call") or "").strip().upper()
             country = str(qso.get("country") or "").strip()
@@ -2266,15 +2596,18 @@ class LoggerApp(tk.Tk):
                 frequency_hz = int(round(float(str(qso.get("freq") or "0").replace(",", ".")) * 1_000_000))
             except (TypeError, ValueError):
                 pass
+            band = str(qso.get("band") or "").strip()
+            if not band and frequency_hz:
+                band = band_from_mhz(frequency_hz / 1_000_000) or ""
             mode = normalize_worked_mode(
-                str(qso.get("mode") or ""), frequency_hz, str(qso.get("band") or ""),
+                str(qso.get("mode") or ""), frequency_hz, band,
             )
-            if not mode:
+            if not band or not mode:
                 continue
             if call:
-                calls.add((call, mode))
+                calls.add((call, band, mode))
             if country:
-                countries.add((country, mode))
+                countries.add((country, band, mode))
         self.dx_cluster_worked_calls = calls
         self.dx_cluster_worked_countries = countries
         if hasattr(self, "dx_cluster_tree"):
@@ -2357,7 +2690,7 @@ class LoggerApp(tk.Tk):
 
         for item_id, spot, dx_country, spotter_country, comment, age_seconds in rows:
             worked_call, worked_country = worked_flags(
-                spot.call, dx_country, spot.mode,
+                spot.call, dx_country, spot.band, spot.mode,
                 self.dx_cluster_worked_calls, self.dx_cluster_worked_countries,
             )
             line_number = len(self.dx_cluster_visible_ids) + 2
@@ -2480,13 +2813,6 @@ class LoggerApp(tk.Tk):
         self.status_var.set(f"CAT abgestimmt: {spot.call} · {spot.frequency_mhz} MHz{mode}")
 
     def send_current_dx_spot(self):
-        if not self.dx_cluster.connected:
-            messagebox.showinfo(
-                "DX-Spot senden",
-                "Bitte zuerst im Menü DX Cluster eine Telnet-Verbindung herstellen.",
-                parent=self,
-            )
-            return
         try:
             call = self.call_var.get().strip().upper()
             if not call:
@@ -2495,7 +2821,23 @@ class LoggerApp(tk.Tk):
             if frequency_hz <= 0:
                 raise ValueError
         except ValueError:
-            messagebox.showerror("DX-Spot senden", "Bitte Rufzeichen und eine gültige Frequenz im QSO-Formular eintragen.", parent=self)
+            messagebox.showerror(
+                "DX-Spot senden",
+                "Bitte Rufzeichen und eine gültige Frequenz im QSO-Formular eintragen.",
+                parent=self,
+            )
+            return
+        try:
+            config = DxSpotterConfig.from_getter(
+                self.db.get_setting, self._active_station_callsign(),
+            )
+            config.validate()
+        except Exception as exc:
+            messagebox.showerror(
+                "DX-Spotter-Verbindung",
+                str(exc) + "\n\nBitte die Spotter-Verbindung in den Einstellungen prüfen.",
+                parent=self,
+            )
             return
         comment = simpledialog.askstring(
             "DX-Spot senden",
@@ -2505,33 +2847,70 @@ class LoggerApp(tk.Tk):
         )
         if comment is None:
             return
+        mode = self.mode_var.get().strip().upper()
+        transmitted_comment = spot_comment_with_mode(comment, mode)
         frequency_mhz = f"{frequency_hz / 1_000_000:.6f}".rstrip("0").rstrip(".")
         if not messagebox.askyesno(
             "DX-Spot öffentlich senden",
-            f"Folgenden Spot wirklich öffentlich an den verbundenen DX Cluster senden?\n\n"
-            f"Rufzeichen: {call}\nFrequenz: {frequency_mhz} MHz\nKommentar: {comment.strip() or '—'}",
+            f"Folgenden Spot wirklich öffentlich über {config.host}:{config.port} senden?\n\n"
+            f"Rufzeichen: {call}\nFrequenz: {frequency_mhz} MHz\nMode: {mode or '—'}\n"
+            f"Login: {config.callsign}\nÜbertragener Kommentar: {transmitted_comment or '—'}",
             parent=self,
         ):
             return
-        generation = self.dx_cluster_generation
+        self.dx_spotter_generation += 1
+        generation = self.dx_spotter_generation
+        self.dx_spotter_status_label.configure(
+            text=f"Verbinde zum Spotten mit {config.host}:{config.port} …", fg=MUTED,
+        )
+        self.status_var.set("DX-Spotter verbindet …")
 
         def worker():
             try:
-                self.dx_cluster.send_spot(call, frequency_hz, comment)
+                if self.dx_spotter_active_config != config or not self.dx_spotter.connected:
+                    self.dx_spotter.start(config, lambda _spot: None)
+                    self.dx_spotter_active_config = config
+                    self.dx_spotter.wait_until_connected()
+                self.dx_spotter.send_spot(call, frequency_hz, comment, mode)
                 if not self.closing:
-                    self.after(0, lambda: self._dx_spot_sent(generation, call, frequency_mhz))
+                    self.after(
+                        0, lambda: self._dx_spot_sent(
+                            generation, call, frequency_mhz, config,
+                        ),
+                    )
             except Exception as exc:
                 message = str(exc)
+                self.dx_spotter.stop()
+                self.dx_spotter_active_config = None
                 if not self.closing:
-                    self.after(0, lambda message=message: messagebox.showerror("DX-Spot senden", message, parent=self))
+                    self.after(
+                        0, lambda message=message: self._dx_spot_failed(generation, message),
+                    )
 
-        threading.Thread(target=worker, name="dx-cluster-send-spot", daemon=True).start()
+        threading.Thread(target=worker, name="dx-spotter-send", daemon=True).start()
 
-    def _dx_spot_sent(self, generation: int, call: str, frequency_mhz: str):
-        if generation != self.dx_cluster_generation or self.closing:
+    def _dx_spot_sent(
+        self, generation: int, call: str, frequency_mhz: str, config: DxSpotterConfig,
+    ):
+        if generation != self.dx_spotter_generation or self.closing:
             return
         self.status_var.set(f"DX-Spot gesendet: {call} · {frequency_mhz} MHz")
-        self.dx_cluster_status_label.configure(text=f"✓ DX-Spot gesendet: {call} · {frequency_mhz} MHz", fg=OK)
+        self.dx_spotter_status_label.configure(
+            text=(
+                f"✓ DX-Spot gesendet: {call} · {frequency_mhz} MHz · "
+                f"{config.host}:{config.port} als {config.callsign}"
+            ),
+            fg=OK,
+        )
+
+    def _dx_spot_failed(self, generation: int, message: str):
+        if generation != self.dx_spotter_generation or self.closing:
+            return
+        self.dx_spotter_status_label.configure(
+            text="DX-Spot konnte nicht gesendet werden: " + message, fg=ERR,
+        )
+        self.status_var.set("DX-Spot konnte nicht gesendet werden")
+        messagebox.showerror("DX-Spot senden", message, parent=self)
 
 
     # ---------- WSJT-X / external UDP logging ----------
@@ -2892,6 +3271,44 @@ class LoggerApp(tk.Tk):
         savebar.grid(row=14, column=0, sticky="ew", pady=(18, 0))
         ttk.Button(savebar, text="Einstellungen speichern", style="Primary.TButton", command=self.save_settings).pack(side="left")
 
+        spotter = self._card(p, row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        spotter.columnconfigure(0, weight=2)
+        spotter.columnconfigure(1, weight=1)
+        spotter.columnconfigure(2, weight=2)
+        spotter.columnconfigure(3, weight=2)
+        ttk.Label(spotter, text="DX-Spotter-Verbindung", style="CardTitle.TLabel").grid(
+            row=0, column=0, columnspan=4, sticky="w",
+        )
+        ttk.Label(
+            spotter,
+            text=(
+                "Getrennt vom reinen Empfangs-Cluster. Beim öffentlichen Spotten wird diese "
+                "DXSpider-Verbindung automatisch aufgebaut. Sie benötigt Internet; ohne Verbindung "
+                "wird nichts gesendet. Das Login-Rufzeichen kommt immer aus dem aktiven Stationsprofil."
+            ),
+            style="Muted.Card.TLabel", wraplength=1050,
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(3, 8))
+        self.dx_spotter_host_var = tk.StringVar(value=DEFAULT_SPOTTER_HOST)
+        self.dx_spotter_port_var = tk.StringVar(value=str(DEFAULT_SPOTTER_PORT))
+        self.dx_spotter_call_var = tk.StringVar()
+        for column, (label, variable) in enumerate((
+            ("DXSpider-Host zum Spotten", self.dx_spotter_host_var),
+            ("Telnet-Port", self.dx_spotter_port_var),
+            ("Login-Rufzeichen aus Logbuch", self.dx_spotter_call_var),
+        )):
+            ttk.Label(spotter, text=label, style="Card.TLabel").grid(
+                row=2, column=column, sticky="w", padx=(0, 10), pady=(2, 3),
+            )
+            state = "readonly" if variable is self.dx_spotter_call_var else "normal"
+            ttk.Entry(spotter, textvariable=variable, state=state).grid(
+                row=3, column=column, sticky="ew", padx=(0, 10),
+            )
+        self.dx_spotter_status_label = tk.Label(
+            spotter, text="Spotter-Verbindung wird erst beim Senden aufgebaut.",
+            bg=CARD, fg=MUTED, font=("Segoe UI", 9), anchor="w",
+        )
+        self.dx_spotter_status_label.grid(row=3, column=3, sticky="ew")
+
     def _settings_row(self, parent, label, var, row):
         ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", padx=(0,12), pady=7)
         ttk.Entry(parent, textvariable=var).grid(row=row, column=1, sticky="ew", pady=7)
@@ -2914,6 +3331,7 @@ class LoggerApp(tk.Tk):
         self._set_current_qso_time()
         self._load_cat_settings_to_ui()
         self._load_dx_cluster_settings_to_ui()
+        self._load_dx_spotter_settings_to_ui()
         self._load_udp_log_settings_to_ui()
 
         # If Wavelog was configured before, profile labels are loaded only on explicit test.
@@ -2925,6 +3343,24 @@ class LoggerApp(tk.Tk):
         try:
             if self.set_power.get().strip():
                 float(self.set_power.get().replace(",", "."))
+            old_station_call = self._active_station_callsign()
+            proposed_station_call = (
+                self.set_station.get().strip().upper()
+                or self.set_operator.get().strip().upper()
+            )
+            try:
+                spotter_port = int(self.dx_spotter_port_var.get().strip())
+            except ValueError as exc:
+                raise ValueError("Der DX-Spotter-Port muss eine ganze Zahl sein.") from exc
+            spotter_config = DxSpotterConfig(
+                self.dx_spotter_host_var.get().strip(),
+                spotter_port,
+                proposed_station_call,
+            )
+            if proposed_station_call:
+                spotter_config.validate()
+            else:
+                DxClusterConfig(spotter_config.host, spotter_config.port, "N0CALL").validate()
             self.db.set_setting("operator_call", self.set_operator.get().strip().upper())
             self.db.set_setting("station_call", self.set_station.get().strip().upper())
             self.db.set_setting("locator", self.set_locator.get().strip().upper())
@@ -2936,6 +3372,7 @@ class LoggerApp(tk.Tk):
             self.db.set_setting("wavelog_url", self.set_url.get().strip())
             self.db.set_token(self.set_token.get().strip())
             self.db.set_setting("log_dir", self.set_log_dir.get().strip())
+            self._store_dx_spotter_config(spotter_config)
             selected = self.station_by_label.get(self.set_station_profile.get())
             if selected:
                 self.db.set_setting("station_profile_id", selected.get("id"))
@@ -2944,6 +3381,14 @@ class LoggerApp(tk.Tk):
             self.form_vars["tx_pwr"].set(self.db.get_setting("default_power", ""))
             self._update_profile_summary()
             self._update_logfile_preview()
+            self.dx_cluster_call_var.set(self._active_station_callsign())
+            self.dx_spotter_call_var.set(self._active_station_callsign())
+            if self._active_station_callsign() != old_station_call:
+                self._stop_dx_cluster_runtime(update_ui=True)
+                self._stop_dx_spotter_runtime(update_ui=True)
+            elif self.dx_spotter_active_config != spotter_config:
+                self._stop_dx_spotter_runtime(update_ui=True)
+            self.refresh_fast_log_page()
             self.status_var.set("Einstellungen gespeichert")
             messagebox.showinfo("Einstellungen", "Einstellungen wurden gespeichert.", parent=self)
         except Exception as e:
@@ -3034,6 +3479,7 @@ class LoggerApp(tk.Tk):
             write_startup_log("Programm wird geschlossen")
             self._stop_cat_runtime(update_ui=False)
             self._stop_dx_cluster_runtime(update_ui=False)
+            self._stop_dx_spotter_runtime(update_ui=False)
             self._stop_udp_log_runtime(update_ui=False)
             # Every database operation is committed immediately.
             if not self.sync_busy:

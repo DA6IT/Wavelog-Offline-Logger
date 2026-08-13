@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.13.0-rc1"
+VERSION = "0.14.0"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -339,6 +339,67 @@ def band_from_mhz(mhz: float) -> str | None:
         if lo <= mhz <= hi:
             return band
     return None
+
+
+def build_fast_log_qso(
+    call: str,
+    band: str,
+    mode: str,
+    freq: str,
+    rst_sent: str,
+    rst_rcvd: str,
+    tx_pwr: str,
+    profile: dict[str, Any],
+    country_fields: dict[str, str] | None = None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Build a minimal local QSO for the DXpedition/Fast-Log workflow."""
+    normalized_call = (call or "").strip().upper()
+    if not normalized_call:
+        raise ValueError("Bitte ein Rufzeichen eingeben")
+    normalized_band = (band or "").strip()
+    normalized_mode = (mode or "").strip().upper()
+    if normalized_band not in BANDS:
+        raise ValueError("Bitte ein gültiges Band auswählen")
+    if normalized_mode not in MODES:
+        raise ValueError("Bitte einen gültigen Mode auswählen")
+    normalized_freq = (freq or "").strip().replace(",", ".")
+    if normalized_freq and float(normalized_freq) <= 0:
+        raise ValueError("Die Frequenz muss größer als 0 sein")
+    normalized_power = (tx_pwr or "").strip().replace(",", ".")
+    if normalized_power and float(normalized_power) < 0:
+        raise ValueError("Die Leistung darf nicht negativ sein")
+    station_call = str(profile.get("station_call") or profile.get("operator_call") or "").strip().upper()
+    if not station_call:
+        raise ValueError("Bitte in den Einstellungen mindestens das eigene/Stations-Rufzeichen eintragen")
+    timestamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    country = dict(country_fields or {})
+    return {
+        "call": normalized_call,
+        "country": country.get("country", ""),
+        "cont": country.get("cont", ""),
+        "cqz": country.get("cqz", ""),
+        "ituz": country.get("ituz", ""),
+        "band": normalized_band,
+        "mode": normalized_mode,
+        "freq": normalized_freq,
+        "qso_date": timestamp.strftime("%Y-%m-%d"),
+        "time_on": timestamp.strftime("%H%M%S"),
+        "rst_sent": (rst_sent or "").strip(),
+        "rst_rcvd": (rst_rcvd or "").strip(),
+        "gridsquare": "",
+        "name": "",
+        "qth": "",
+        "pota_ref": "",
+        "sota_ref": "",
+        "wwff_ref": "",
+        "comment": "",
+        "notes": "",
+        "tx_pwr": normalized_power,
+        **profile,
+        "station_call": station_call,
+    }
 
 
 def sanitize_call_for_filename(call: str) -> str:
