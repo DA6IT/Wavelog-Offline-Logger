@@ -362,3 +362,87 @@ with TemporaryDirectory() as d:
     assert s.conflicts == 0, s
     db.close()
 print("HASH MIGRATION SELFTEST OK")
+
+# CAT/Hamlib configuration, model parsing and logger-field mapping. These
+# tests deliberately need neither a connected radio nor a Hamlib installation.
+from cat_control import (
+    CatConfig, build_rigctld_args, format_frequency_mhz, map_hamlib_mode,
+    parse_rigctld_models,
+)
+
+model_output = """\
+ Rig #  Mfg                    Model                   Version         Status      Macro
+     1  Hamlib                 Dummy                   20240709.0      Stable      RIG_MODEL_DUMMY
+  1035  Yaesu                  FT-991A                 20260301.0      Stable      RIG_MODEL_FT991A
+  3073  Icom                   IC-7300                 20260101.0      Stable      RIG_MODEL_IC7300
+"""
+models = parse_rigctld_models(model_output)
+assert [m.model_id for m in models] == [1, 1035, 3073], models
+assert models[1].manufacturer == "Yaesu" and models[1].model == "FT-991A"
+assert models[2].label == "Icom · IC-7300 [ID 3073]"
+
+settings = {
+    "cat_enabled": "1", "cat_model_id": "1035", "cat_device": "COM7",
+    "cat_baud": "38400", "cat_data_bits": "8", "cat_stop_bits": "1",
+    "cat_parity": "None", "cat_handshake": "Hardware",
+    "cat_dtr_state": "OFF", "cat_rts_state": "ON",
+    "cat_port": "4538", "cat_poll_interval_ms": "750",
+}
+config = CatConfig.from_getter(lambda key, default="": settings.get(key, default))
+config.validate()
+assert config.settings() == settings
+args = build_rigctld_args(config)
+assert args[:6] == ["-m", "1035", "-r", "COM7", "-s", "38400"], args
+serial_arg = args[args.index("-C") + 1]
+assert "serial_handshake=Hardware" in serial_arg
+assert "dtr_state=OFF" in serial_arg and "rts_state=ON" in serial_arg
+
+assert format_frequency_mhz(14_074_000) == "14.074"
+assert format_frequency_mhz(145_500_000) == "145.5"
+assert map_hamlib_mode("USB", "FT8") == "FT8", "CAT must preserve an explicitly selected digital submode"
+assert map_hamlib_mode("USB", "SSB") == "USB"
+assert map_hamlib_mode("PKTLSB", "FT4") == "FT4"
+assert map_hamlib_mode("CWR", "SSB") == "CW"
+assert map_hamlib_mode("RTTYR", "SSB") == "RTTY"
+assert map_hamlib_mode("FMN", "SSB") == "FM", "FTX-1 narrow FM must be logged as FM"
+assert map_hamlib_mode("NFM", "SSB") == "FM"
+
+print("CAT SELFTEST OK")
+
+# Release discovery must compare project versions correctly and remain silent
+# when the computer is offline or GitHub returns unusable data.
+import json
+import urllib.error
+from update_check import find_newer_release, is_prerelease, version_key
+
+assert version_key("v0.12.0-rc2") > version_key("0.12.0-rc1")
+assert version_key("0.12.0") > version_key("0.12.0-rc9")
+assert version_key("0.12.0-rc1") > version_key("0.12.0-dev2")
+assert is_prerelease("0.12.0-rc1") and not is_prerelease("0.12.0")
+
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = json.dumps(payload).encode("utf-8")
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        return False
+    def read(self):
+        return self.payload
+
+releases = [
+    {"tag_name": "v0.12.0", "name": "Stable", "html_url": "https://example/stable", "draft": False, "prerelease": False},
+    {"tag_name": "v0.13.0-rc1", "name": "Preview", "html_url": "https://example/preview", "draft": False, "prerelease": True},
+]
+stable_update = find_newer_release("0.11.2", opener=lambda *args, **kwargs: FakeResponse(releases))
+assert stable_update and stable_update.version == "0.12.0"
+preview_update = find_newer_release("0.12.0-rc1", opener=lambda *args, **kwargs: FakeResponse(releases))
+assert preview_update and preview_update.version == "0.13.0-rc1"
+
+def offline(*args, **kwargs):
+    raise urllib.error.URLError("offline")
+
+assert find_newer_release("0.12.0-rc1", opener=offline) is None
+assert find_newer_release("not-a-version", opener=offline) is None
+
+print("UPDATE CHECK SELFTEST OK")

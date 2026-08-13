@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import json
 import threading
@@ -18,6 +19,13 @@ from logger_core import (
     WavelogError, SyncEngine, app_data_dir, default_log_dir, band_from_mhz,
     qso_hash, CountryDB, ProfileManager,
 )
+from cat_control import (
+    CAT_BAUD_RATES, CAT_DATA_BITS, CAT_HANDSHAKES, CAT_LINE_STATES,
+    CAT_PARITIES, CAT_STOP_BITS, CatConfig, CatError, HamlibManager,
+    RigModel, format_frequency_mhz, hamlib_version, list_rig_models,
+    list_serial_ports, map_hamlib_mode,
+)
+from update_check import ReleaseInfo, find_newer_release
 
 
 BG = "#f3f5f7"
@@ -76,6 +84,12 @@ class LoggerApp(tk.Tk):
         self.sync_busy = False
         self.station_rows: list[dict] = []
         self.station_by_label: dict[str, dict] = {}
+        self.cat_manager = HamlibManager()
+        self.cat_models: list[RigModel] = []
+        self.cat_model_by_label: dict[str, RigModel] = {}
+        self.cat_generation = 0
+        self.cat_poll_job = None
+        self.cat_poll_busy = False
 
         self.data_dir = app_data_dir()
         self.country_db = CountryDB(Path(__file__).resolve().parent / "cty.dat")
@@ -92,13 +106,41 @@ class LoggerApp(tk.Tk):
         self._build_contest_page()
         self._build_qsos_page()
         self._build_stats_page()
+        self._build_cat_page()
         self._build_settings_page()
         self._load_settings_to_ui()
         self._show_page("log")
         self._tick_clock()
         self.refresh_qsos()
         self.after(250, lambda: self.call_entry.focus_set())
+        self.after(500, self._start_saved_cat)
+        self.after(1500, self._start_update_check)
         write_startup_log(f"{APP_NAME} {VERSION} gestartet")
+
+    def _start_update_check(self):
+        """Look for a newer release without ever blocking or disturbing startup."""
+        def worker():
+            release = find_newer_release(VERSION)
+            if release is not None and not self.closing:
+                self.after(0, lambda: self._show_update_available(release))
+
+        threading.Thread(target=worker, name="release-check", daemon=True).start()
+
+    def _show_update_available(self, release: ReleaseInfo):
+        if self.closing:
+            return
+        kind = "Release Candidate" if release.prerelease else "Version"
+        open_page = messagebox.askyesno(
+            "Update verfügbar",
+            f"Eine neue {kind} ist verfügbar: v{release.version}\n\n"
+            "Möchtest du die GitHub-Downloadseite jetzt öffnen?",
+            parent=self,
+        )
+        if open_page:
+            try:
+                webbrowser.open(release.url)
+            except Exception:
+                pass
 
     # ---------- UI shell ----------
     def _setup_style(self):
@@ -143,6 +185,7 @@ class LoggerApp(tk.Tk):
         ttk.Button(side, text="  Contest Logging", style="Nav.TButton", command=lambda: self._show_page("contest")).pack(fill="x")
         ttk.Button(side, text="  Logbuch & Sync", style="Nav.TButton", command=lambda: self._show_page("qsos")).pack(fill="x")
         ttk.Button(side, text="  Statistiken", style="Nav.TButton", command=lambda: self._show_page("stats")).pack(fill="x")
+        ttk.Button(side, text="  CAT Setup", style="Nav.TButton", command=lambda: self._show_page("cat")).pack(fill="x")
         ttk.Button(side, text="  Einstellungen", style="Nav.TButton", command=lambda: self._show_page("settings")).pack(fill="x")
         tk.Label(side, text=f"v{VERSION}", bg=SIDEBAR, fg="#8297a6", font=("Segoe UI", 8)).pack(side="bottom", anchor="w", padx=20, pady=18)
 
@@ -235,6 +278,7 @@ class LoggerApp(tk.Tk):
                 return
         try:
             old = self._current_profile().get("name", "")
+            self._stop_cat_runtime(update_ui=False)
             if self.db:
                 self.db.close()
             self._open_profile_storage(profile_id)
@@ -251,6 +295,7 @@ class LoggerApp(tk.Tk):
             self.refresh_stats()
             self._refresh_profile_selector()
             self.status_var.set(f"Profil gewechselt: {old} → {self._current_profile()['name']}")
+            self.after(100, self._start_saved_cat)
         except Exception as e:
             messagebox.showerror("Profil wechseln", str(e), parent=self)
             self._refresh_profile_selector()
@@ -320,7 +365,7 @@ class LoggerApp(tk.Tk):
         return f
 
     def _show_page(self, name: str):
-        titles = {"log": "QSO loggen", "contest": "Contest Logging", "qsos": "Logbuch & Sync", "stats": "Statistiken", "settings": "Einstellungen"}
+        titles = {"log": "QSO loggen", "contest": "Contest Logging", "qsos": "Logbuch & Sync", "stats": "Statistiken", "cat": "CAT Setup", "settings": "Einstellungen"}
         self.page_title.configure(text=titles[name])
         self.pages[name].tkraise()
         if name == "contest":
@@ -329,6 +374,8 @@ class LoggerApp(tk.Tk):
             self.refresh_qsos()
         elif name == "stats":
             self.refresh_stats()
+        elif name == "cat":
+            self._refresh_cat_ports()
 
     def _card(self, parent, **grid):
         outer = tk.Frame(parent, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
@@ -1400,6 +1447,461 @@ class LoggerApp(tk.Tk):
         self._render_stat_rank(self.stats_operators_frame, operator_counts, 8)
         self._render_sync_stats(qsos)
 
+    # ---------- CAT / Hamlib ----------
+    def _build_cat_page(self):
+        p = self._new_page("cat")
+        p.columnconfigure(0, weight=1)
+        p.columnconfigure(1, weight=1)
+        p.rowconfigure(0, weight=1)
+
+        left = self._card(p, row=0, column=0, sticky="nsew", padx=(0, 8))
+        left.columnconfigure(0, weight=1)
+        ttk.Label(left, text="Funkgerät & Schnittstelle", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            left,
+            text="CAT-Einstellungen gehören zum aktiven Logger-Profil. Hamlib wird von der Anwendung selbst verwaltet.",
+            style="Muted.Card.TLabel",
+            wraplength=470,
+        ).grid(row=1, column=0, sticky="w", pady=(3, 10))
+
+        self.cat_enabled_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            left,
+            text="CAT für dieses Profil aktivieren",
+            variable=self.cat_enabled_var,
+        ).grid(row=2, column=0, sticky="w", pady=(2, 10))
+
+        self.cat_model_search_var = tk.StringVar()
+        self.cat_model_var = tk.StringVar()
+        self.cat_saved_model_id = 0
+        ttk.Label(left, text="Funkgerät suchen", style="Card.TLabel").grid(row=3, column=0, sticky="w", pady=(5, 3))
+        model_search = ttk.Entry(left, textvariable=self.cat_model_search_var)
+        model_search.grid(row=4, column=0, sticky="ew")
+        model_search.bind("<KeyRelease>", lambda _event: self._filter_cat_models())
+        ttk.Label(left, text="Hamlib-Funkgerät", style="Card.TLabel").grid(row=5, column=0, sticky="w", pady=(8, 3))
+        self.cat_model_combo = ttk.Combobox(left, textvariable=self.cat_model_var, state="readonly")
+        self.cat_model_combo.grid(row=6, column=0, sticky="ew")
+        self.cat_model_combo.bind("<<ComboboxSelected>>", self._cat_model_selected)
+
+        ttk.Label(left, text="CAT-/COM-Schnittstelle", style="Card.TLabel").grid(row=7, column=0, sticky="w", pady=(10, 3))
+        port_row = ttk.Frame(left, style="Card.TFrame")
+        port_row.grid(row=8, column=0, sticky="ew")
+        port_row.columnconfigure(0, weight=1)
+        self.cat_device_var = tk.StringVar()
+        self.cat_device_combo = ttk.Combobox(port_row, textvariable=self.cat_device_var, state="normal")
+        self.cat_device_combo.grid(row=0, column=0, sticky="ew")
+        ttk.Button(port_row, text="Neu laden", style="Secondary.TButton", command=self._refresh_cat_ports).grid(row=0, column=1, padx=(6, 0))
+
+        ttk.Label(left, text="Baudrate", style="Card.TLabel").grid(row=9, column=0, sticky="w", pady=(10, 3))
+        self.cat_baud_var = tk.StringVar(value="9600")
+        ttk.Combobox(
+            left,
+            textvariable=self.cat_baud_var,
+            values=[str(x) for x in CAT_BAUD_RATES],
+            state="readonly",
+        ).grid(row=10, column=0, sticky="ew")
+
+        serial = ttk.LabelFrame(left, text="Serielle Parameter", padding=10)
+        serial.grid(row=11, column=0, sticky="ew", pady=(14, 0))
+        for column in range(2):
+            serial.columnconfigure(column, weight=1)
+        self.cat_data_bits_var = tk.StringVar(value="8")
+        self.cat_stop_bits_var = tk.StringVar(value="1")
+        self.cat_parity_var = tk.StringVar(value="None")
+        self.cat_handshake_var = tk.StringVar(value="None")
+        pairs = (
+            ("Datenbits", self.cat_data_bits_var, [str(x) for x in CAT_DATA_BITS]),
+            ("Stoppbits", self.cat_stop_bits_var, [str(x) for x in CAT_STOP_BITS]),
+            ("Parität", self.cat_parity_var, list(CAT_PARITIES)),
+            ("Flusssteuerung", self.cat_handshake_var, list(CAT_HANDSHAKES)),
+        )
+        for index, (label, variable, values) in enumerate(pairs):
+            row, column = divmod(index, 2)
+            ttk.Label(serial, text=label, style="Card.TLabel").grid(row=row * 2, column=column, sticky="w", padx=(0, 8), pady=(0 if row == 0 else 8, 3))
+            ttk.Combobox(serial, textvariable=variable, values=values, state="readonly", width=16).grid(row=row * 2 + 1, column=column, sticky="ew", padx=(0, 8))
+
+        right = self._card(p, row=0, column=1, sticky="nsew", padx=(8, 0))
+        right.columnconfigure(0, weight=1)
+        ttk.Label(right, text="Interne Hamlib-Steuerung", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.cat_hamlib_info = tk.Label(
+            right,
+            text="Hamlib wird geprüft …",
+            bg=CARD,
+            fg=MUTED,
+            font=("Segoe UI", 9),
+            justify="left",
+            anchor="w",
+            wraplength=470,
+        )
+        self.cat_hamlib_info.grid(row=1, column=0, sticky="ew", pady=(4, 12))
+
+        advanced = ttk.LabelFrame(right, text="Erweitert", padding=10)
+        advanced.grid(row=2, column=0, sticky="ew")
+        advanced.columnconfigure(1, weight=1)
+        self.cat_port_var = tk.StringVar(value="4532")
+        self.cat_poll_var = tk.StringVar(value="1000")
+        self.cat_dtr_var = tk.StringVar(value="Unset")
+        self.cat_rts_var = tk.StringVar(value="Unset")
+        advanced_fields = (
+            ("Lokaler rigctld-Port", self.cat_port_var, None),
+            ("Abfrageintervall (ms)", self.cat_poll_var, ("250", "500", "750", "1000", "1500", "2000")),
+            ("DTR", self.cat_dtr_var, CAT_LINE_STATES),
+            ("RTS", self.cat_rts_var, CAT_LINE_STATES),
+        )
+        for row, (label, variable, values) in enumerate(advanced_fields):
+            ttk.Label(advanced, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", padx=(0, 12), pady=5)
+            if values:
+                widget = ttk.Combobox(advanced, textvariable=variable, values=list(values), state="readonly")
+            else:
+                widget = ttk.Entry(advanced, textvariable=variable)
+            widget.grid(row=row, column=1, sticky="ew", pady=5)
+
+        ttk.Separator(right).grid(row=3, column=0, sticky="ew", pady=16)
+        ttk.Label(right, text="CAT-Status", style="CardTitle.TLabel").grid(row=4, column=0, sticky="w")
+        self.cat_status_label = tk.Label(
+            right,
+            text="CAT ist deaktiviert.",
+            bg=CARD,
+            fg=MUTED,
+            font=("Segoe UI", 10),
+            justify="left",
+            anchor="nw",
+            wraplength=470,
+        )
+        self.cat_status_label.grid(row=5, column=0, sticky="ew", pady=(6, 12))
+
+        buttons = ttk.Frame(right, style="Card.TFrame")
+        buttons.grid(row=6, column=0, sticky="ew")
+        self.cat_start_button = ttk.Button(buttons, text="Speichern & CAT starten", style="Primary.TButton", command=self.save_cat_settings)
+        self.cat_start_button.pack(side="left")
+        ttk.Button(buttons, text="Verbindung testen", style="Secondary.TButton", command=self.test_cat_connection).pack(side="left", padx=8)
+        ttk.Button(buttons, text="CAT deaktivieren", style="Secondary.TButton", command=self.disable_cat).pack(side="left")
+
+        hint = tk.Label(
+            right,
+            text=(
+                "Frequenz und der vom Funkgerät gemeldete Modus werden automatisch in normales und Contest-Logging übernommen. "
+                "Digitale Betriebsarten wie FT8 kann CAT allein nicht sicher erkennen; ein bereits gewählter Digitalmodus bleibt deshalb erhalten."
+            ),
+            bg=CARD,
+            fg=MUTED,
+            font=("Segoe UI", 9),
+            justify="left",
+            wraplength=470,
+        )
+        hint.grid(row=7, column=0, sticky="w", pady=(16, 0))
+        self.after(50, self._load_cat_runtime_info)
+
+    def _load_cat_runtime_info(self):
+        def worker():
+            try:
+                models = list_rig_models()
+                version = hamlib_version()
+                if not self.closing:
+                    self.after(0, lambda: self._cat_runtime_loaded(models, version))
+            except Exception as exc:
+                if not self.closing:
+                    self.after(0, lambda: self._cat_runtime_failed(str(exc)))
+
+        threading.Thread(target=worker, name="cat-runtime-info", daemon=True).start()
+
+    def _cat_runtime_loaded(self, models: list[RigModel], version: str):
+        self.cat_models = models
+        self.cat_hamlib_info.configure(
+            text=f"✓ {version}\n{len(models)} Funkgerätemodelle · vollständig lokal gebündelt · keine separate Installation",
+            fg=OK,
+        )
+        self._filter_cat_models()
+        self._select_cat_model_id(self.cat_saved_model_id)
+
+    def _cat_runtime_failed(self, message: str):
+        self.cat_hamlib_info.configure(text="✕ " + message, fg=ERR)
+        self.cat_status_label.configure(text="Hamlib ist nicht verfügbar.", fg=ERR)
+
+    def _filter_cat_models(self):
+        query = self.cat_model_search_var.get().strip().casefold()
+        selected_id = self._selected_cat_model_id() or self.cat_saved_model_id
+        models = self.cat_models
+        if query:
+            models = [
+                model for model in models
+                if query in model.manufacturer.casefold()
+                or query in model.model.casefold()
+                or query == str(model.model_id)
+            ]
+        self.cat_model_by_label = {model.label: model for model in models}
+        labels = list(self.cat_model_by_label)
+        self.cat_model_combo.configure(values=labels)
+        if selected_id:
+            self._select_cat_model_id(selected_id, labels_only=True)
+
+    def _select_cat_model_id(self, model_id: int, labels_only: bool = False):
+        if not model_id:
+            return
+        pool = self.cat_model_by_label if labels_only else {model.label: model for model in self.cat_models}
+        for label, model in pool.items():
+            if model.model_id == model_id:
+                self.cat_model_var.set(label)
+                self.cat_saved_model_id = model_id
+                return
+
+    def _selected_cat_model_id(self) -> int:
+        selected = self.cat_model_by_label.get(self.cat_model_var.get())
+        if selected:
+            return selected.model_id
+        match = re.search(r"\[ID\s+(\d+)\]", self.cat_model_var.get())
+        return int(match.group(1)) if match else 0
+
+    def _cat_model_selected(self, _event=None):
+        selected_id = self._selected_cat_model_id()
+        if selected_id:
+            self.cat_saved_model_id = selected_id
+
+    def _refresh_cat_ports(self):
+        if not hasattr(self, "cat_device_combo"):
+            return
+        ports = list_serial_ports()
+        current = self.cat_device_var.get().strip()
+        if current and current not in ports:
+            ports.append(current)
+        self.cat_device_combo.configure(values=ports)
+        if not current and len(ports) == 1:
+            self.cat_device_var.set(ports[0])
+
+    def _load_cat_settings_to_ui(self):
+        config = CatConfig.from_getter(self.db.get_setting)
+        self.cat_enabled_var.set(config.enabled)
+        self.cat_saved_model_id = config.model_id
+        self.cat_device_var.set(config.device)
+        self.cat_baud_var.set(str(config.baud))
+        self.cat_data_bits_var.set(str(config.data_bits))
+        self.cat_stop_bits_var.set(str(config.stop_bits))
+        self.cat_parity_var.set(config.parity)
+        self.cat_handshake_var.set(config.handshake)
+        self.cat_dtr_var.set(config.dtr_state)
+        self.cat_rts_var.set(config.rts_state)
+        self.cat_port_var.set(str(config.port))
+        self.cat_poll_var.set(str(config.poll_interval_ms))
+        self.cat_model_search_var.set("")
+        self._filter_cat_models()
+        self._select_cat_model_id(config.model_id)
+        self._refresh_cat_ports()
+
+    def _cat_config_from_ui(self, *, enabled: bool | None = None) -> CatConfig:
+        model_id = self._selected_cat_model_id() or self.cat_saved_model_id
+        return CatConfig(
+            enabled=self.cat_enabled_var.get() if enabled is None else enabled,
+            model_id=model_id,
+            device=self.cat_device_var.get().strip(),
+            baud=int(self.cat_baud_var.get().strip()),
+            data_bits=int(self.cat_data_bits_var.get().strip()),
+            stop_bits=int(self.cat_stop_bits_var.get().strip()),
+            parity=self.cat_parity_var.get(),
+            handshake=self.cat_handshake_var.get(),
+            dtr_state=self.cat_dtr_var.get(),
+            rts_state=self.cat_rts_var.get(),
+            port=int(self.cat_port_var.get().strip()),
+            poll_interval_ms=int(self.cat_poll_var.get().strip()),
+        )
+
+    def _store_cat_config(self, config: CatConfig):
+        for key, value in config.settings().items():
+            self.db.set_setting(key, value)
+
+    def save_cat_settings(self):
+        try:
+            config = self._cat_config_from_ui()
+            if config.enabled:
+                config.validate()
+            self._store_cat_config(config)
+            if config.enabled:
+                self._start_cat_runtime(config, notify=True)
+            else:
+                self._stop_cat_runtime()
+                self.cat_status_label.configure(text="CAT-Einstellungen gespeichert · CAT ist deaktiviert.", fg=MUTED)
+                self.status_var.set("CAT-Einstellungen gespeichert")
+        except Exception as exc:
+            messagebox.showerror("CAT Setup", str(exc), parent=self)
+
+    def _start_saved_cat(self):
+        if self.closing:
+            return
+        config = CatConfig.from_getter(self.db.get_setting)
+        if not config.enabled:
+            self.cat_status_label.configure(text="CAT ist für dieses Profil deaktiviert.", fg=MUTED)
+            return
+        try:
+            config.validate()
+        except CatError as exc:
+            self.cat_status_label.configure(text="CAT-Konfiguration unvollständig: " + str(exc), fg=ERR)
+            return
+        self._start_cat_runtime(config, notify=False)
+
+    def _start_cat_runtime(self, config: CatConfig, *, notify: bool):
+        self.cat_generation += 1
+        generation = self.cat_generation
+        self._cancel_cat_poll()
+        self.cat_start_button.configure(state="disabled")
+        self.cat_status_label.configure(text="CAT wird gestartet …", fg=MUTED)
+        self.status_var.set("CAT wird gestartet …")
+
+        def worker():
+            try:
+                self.cat_manager.start(config)
+                if not self.closing:
+                    self.after(0, lambda: self._cat_started(generation, config, notify))
+            except Exception as exc:
+                if not self.closing:
+                    self.after(0, lambda: self._cat_start_failed(generation, str(exc), notify))
+
+        threading.Thread(target=worker, name="cat-start", daemon=True).start()
+
+    def _cat_started(self, generation: int, config: CatConfig, notify: bool):
+        if generation != self.cat_generation or self.closing:
+            return
+        self.cat_start_button.configure(state="normal")
+        self.cat_status_label.configure(text="✓ CAT verbunden · warte auf Funkgerätedaten …", fg=OK)
+        self.status_var.set("CAT verbunden")
+        self._schedule_cat_poll(0, config.poll_interval_ms)
+        if notify:
+            messagebox.showinfo("CAT Setup", "CAT wurde gespeichert und erfolgreich gestartet.", parent=self)
+
+    def _cat_start_failed(self, generation: int, message: str, notify: bool):
+        if generation != self.cat_generation or self.closing:
+            return
+        self.cat_start_button.configure(state="normal")
+        self.cat_status_label.configure(text="✕ " + message, fg=ERR)
+        self.status_var.set("CAT-Verbindung fehlgeschlagen")
+        if notify:
+            messagebox.showerror("CAT-Verbindung", message, parent=self)
+
+    def _schedule_cat_poll(self, delay_ms: int, interval_ms: int):
+        self._cancel_cat_poll()
+        if not self.closing:
+            self.cat_poll_job = self.after(delay_ms, lambda: self._cat_poll(interval_ms))
+
+    def _cancel_cat_poll(self):
+        if self.cat_poll_job is not None:
+            try:
+                self.after_cancel(self.cat_poll_job)
+            except Exception:
+                pass
+            self.cat_poll_job = None
+
+    def _cat_poll(self, interval_ms: int):
+        self.cat_poll_job = None
+        if self.closing or not self.cat_manager.running:
+            return
+        if self.cat_poll_busy:
+            self._schedule_cat_poll(interval_ms, interval_ms)
+            return
+        self.cat_poll_busy = True
+        generation = self.cat_generation
+        current_mode = self.mode_var.get()
+
+        def worker():
+            try:
+                reading = self.cat_manager.read(current_mode)
+                if not self.closing:
+                    self.after(0, lambda: self._cat_poll_ok(generation, reading, interval_ms))
+            except Exception as exc:
+                if not self.closing:
+                    self.after(0, lambda: self._cat_poll_failed(generation, str(exc), interval_ms))
+
+        threading.Thread(target=worker, name="cat-poll", daemon=True).start()
+
+    def _cat_poll_ok(self, generation: int, reading, interval_ms: int):
+        self.cat_poll_busy = False
+        if generation != self.cat_generation or self.closing:
+            return
+        frequency = format_frequency_mhz(reading.frequency_hz)
+        if frequency:
+            self.freq_var.set(frequency)
+            self.contest_freq_var.set(frequency)
+            band = band_from_mhz(reading.frequency_hz / 1_000_000)
+            if band:
+                self.band_var.set(band)
+                self.contest_band_var.set(band)
+        normal_mode = map_hamlib_mode(reading.raw_mode, self.mode_var.get())
+        contest_mode = map_hamlib_mode(reading.raw_mode, self.contest_mode_var.get())
+        if normal_mode in MODES:
+            self.mode_var.set(normal_mode)
+        if contest_mode in MODES:
+            self.contest_mode_var.set(contest_mode)
+        display_mode = normal_mode if normal_mode == contest_mode else f"{normal_mode} / Contest {contest_mode}"
+        self.cat_status_label.configure(
+            text=f"✓ CAT verbunden\nFrequenz: {frequency or '—'} MHz\nHamlib-Modus: {reading.raw_mode} · Logger-Modus: {display_mode or 'unverändert'}",
+            fg=OK,
+        )
+        self._schedule_cat_poll(interval_ms, interval_ms)
+
+    def _cat_poll_failed(self, generation: int, message: str, interval_ms: int):
+        self.cat_poll_busy = False
+        if generation != self.cat_generation or self.closing:
+            return
+        self.cat_status_label.configure(text="CAT-Lesefehler: " + message, fg=WARN)
+        self._schedule_cat_poll(max(interval_ms, 1500), interval_ms)
+
+    def test_cat_connection(self):
+        try:
+            config = self._cat_config_from_ui(enabled=True)
+            config.validate()
+        except Exception as exc:
+            messagebox.showerror("CAT-Verbindung", str(exc), parent=self)
+            return
+        self.cat_generation += 1
+        generation = self.cat_generation
+        self._cancel_cat_poll()
+        self.cat_status_label.configure(text="CAT-Test läuft …", fg=MUTED)
+
+        def worker():
+            try:
+                self.cat_manager.start(config)
+                reading = self.cat_manager.read(self.mode_var.get())
+                self.cat_manager.stop()
+                if not self.closing:
+                    self.after(0, lambda: self._cat_test_ok(generation, reading))
+            except Exception as exc:
+                self.cat_manager.stop()
+                if not self.closing:
+                    self.after(0, lambda: self._cat_start_failed(generation, str(exc), True))
+
+        threading.Thread(target=worker, name="cat-test", daemon=True).start()
+
+    def _cat_test_ok(self, generation: int, reading):
+        if generation != self.cat_generation or self.closing:
+            return
+        frequency = format_frequency_mhz(reading.frequency_hz)
+        self.cat_status_label.configure(
+            text=f"✓ CAT-Test erfolgreich\nFrequenz: {frequency} MHz\nModus: {reading.raw_mode}",
+            fg=OK,
+        )
+        messagebox.showinfo(
+            "CAT-Verbindung",
+            f"Verbindung erfolgreich.\n\nFrequenz: {frequency} MHz\nHamlib-Modus: {reading.raw_mode}",
+            parent=self,
+        )
+        self._start_saved_cat()
+
+    def disable_cat(self):
+        try:
+            self.cat_enabled_var.set(False)
+            config = self._cat_config_from_ui(enabled=False)
+            self._store_cat_config(config)
+        except Exception:
+            self.db.set_setting("cat_enabled", "0")
+        self._stop_cat_runtime()
+        self.cat_status_label.configure(text="CAT ist für dieses Profil deaktiviert.", fg=MUTED)
+        self.status_var.set("CAT deaktiviert")
+
+    def _stop_cat_runtime(self, *, update_ui: bool = True):
+        self.cat_generation += 1
+        self._cancel_cat_poll()
+        self.cat_poll_busy = False
+        self.cat_manager.stop()
+        if update_ui and hasattr(self, "cat_status_label"):
+            self.cat_status_label.configure(text="CAT ist gestoppt.", fg=MUTED)
+
     # ---------- settings ----------
     def _build_settings_page(self):
         p = self._new_page("settings")
@@ -1485,6 +1987,7 @@ class LoggerApp(tk.Tk):
         self.form_vars["tx_pwr"].set(self.db.get_setting("default_power", ""))
         self._update_profile_summary()
         self._set_current_qso_time()
+        self._load_cat_settings_to_ui()
 
         # If Wavelog was configured before, profile labels are loaded only on explicit test.
         sid = self.db.get_setting("station_profile_id", "")
@@ -1599,7 +2102,8 @@ class LoggerApp(tk.Tk):
         self.closing = True
         try:
             write_startup_log("Programm wird geschlossen")
-            # Every database operation is committed immediately. No child processes are launched by the Python app.
+            self._stop_cat_runtime(update_ui=False)
+            # Every database operation is committed immediately.
             if not self.sync_busy:
                 self.db.close()
         except Exception as e:

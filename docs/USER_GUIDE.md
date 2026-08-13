@@ -35,7 +35,19 @@ Profile können umbenannt oder dupliziert werden. Beim Duplizieren werden Einste
 
 Die Anwendung legt Tagesdateien im Format `CALLSIGN.YYYY-MM-DD.adi` an.
 
-## 5. Synchronisieren
+## 5. CAT einrichten
+
+Der Windows-Build enthält Hamlib bereits. Eine zusätzliche Hamlib- oder CAT-Anwendung muss nicht installiert werden.
+
+1. Funkgerät per USB oder serieller Schnittstelle mit Windows verbinden.
+2. **CAT Setup** öffnen und das Funkgerätemodell suchen.
+3. COM-Port sowie die vom Funkgerät verwendete Baudrate und die seriellen Parameter auswählen.
+4. **Verbindung testen** ausführen.
+5. CAT aktivieren und die Einstellungen speichern.
+
+Die CAT-Konfiguration gehört immer zum aktiven Logger-Profil. Bei erfolgreicher Verbindung werden Frequenz, Band und Mode sowohl im normalen QSO-Formular als auch im Contest-Logging aktualisiert. Digitale Untermodi, die der Nutzer ausdrücklich ausgewählt hat, bleiben bei passenden USB-/LSB-Datenmodi erhalten.
+
+## 6. Synchronisieren
 
 Vor dem ersten Sync sollte die Verbindung in den Profileinstellungen getestet werden.
 
@@ -50,17 +62,21 @@ Der Abgleich unterscheidet:
 
 Clubtokens können abhängig von ihren Berechtigungen nur einen Teil der QSOs sehen. Eine unvollständige Sicht darf nicht als Beweis für Remote-Löschungen behandelt werden.
 
-## 6. Konflikte
+## 7. Konflikte
 
 Ein Konflikt bedeutet, dass lokale und entfernte Daten seit der letzten gemeinsamen Version verändert wurden. Prüfe beide Fassungen bewusst und entscheide, welche Werte übernommen werden sollen. Die Anwendung wählt absichtlich keine Seite automatisch aus.
 
-## 7. Profil löschen
+## 8. Profil löschen
 
 Das Löschen eines Profils ist immer lokal. Es löscht weder ein Wavelog-Stationsprofil noch Wavelog-QSOs.
 
 Optional können die lokalen ADI-Dateien des Profils entfernt werden. Diese Option greift nur für `.adi`-Dateien und wird verweigert, wenn ein anderes Profil denselben Logordner verwendet.
 
-## 8. Datensicherung
+## 9. Update-Hinweis
+
+Beim Programmstart prüft die Anwendung im Hintergrund die öffentliche GitHub-Release-Liste. Ist eine neuere passende Version verfügbar, erscheint ein Hinweis mit einem Link zur Downloadseite. Ohne Internet oder bei einem Netzwerkfehler erscheint keine Fehlermeldung; das Offline-Logging funktioniert unverändert weiter.
+
+## 10. Datensicherung
 
 Vor Updates und regelmäßig im Betrieb sollten gesichert werden:
 

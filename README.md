@@ -2,7 +2,7 @@
 
 Offlinefähiger Desktop-Logger für Funkamateure mit sicherer Synchronisation zu Wavelog.
 
-> Aktueller Entwicklungsstand: **v0.11.2-rc1 (Release Candidate)**. Vor der Freigabe als v0.11.2 ist ein praktischer Windows-Test vorgesehen.
+> Aktueller Entwicklungsstand: **v0.12.0-rc1 (Release Candidate)**. Die neue CAT-Steuerung wurde mit einem Yaesu FTX-1 praktisch getestet.
 
 ## Zweck
 
@@ -19,9 +19,12 @@ Das Programm ersetzt Wavelog nicht. Wavelog bleibt das zentrale Online-Logbuch; 
 - Offline-DXCC- und Ländererkennung über `cty.dat`
 - POTA-, SOTA- und WWFF-Felder
 - Contest-Presets, Seriennummern und Operatorwechsel
+- Profilbezogenes CAT Setup mit gebündeltem Hamlib 4.7.2 und mehr als 300 unterstützten Funkgerätemodellen
+- Automatische Übernahme von Frequenz, Band und Mode in normales und Contest-Logging
 - QRZ-, LoTW-, eQSL- und DCL-Status im Logbuch
 - Statistiken und Operatorauswertung
 - Schutz des Wavelog-Tokens über Windows DPAPI
+- Unaufdringlicher Hinweis beim Programmstart, wenn ein neueres GitHub-Release verfügbar ist
 
 ## Sicherheitsmodell für Logdaten
 
@@ -41,6 +44,8 @@ Trotzdem sollten Logordner und Anwendungsdaten regelmäßig gesichert werden.
 3. Die EXE starten.
 
 Beim ersten Start lädt der Bootstrapper den von der Python Software Foundation signierten Python-3.12.10-Installer über HTTPS. Vor der unbeaufsichtigten Einrichtung einer privaten Laufzeit wird dessen SHA-256-Prüfsumme geprüft. Eine systemweite Python-Installation ist nicht erforderlich.
+
+Hamlib ist im Windows-Build bereits enthalten. Für CAT muss deshalb keine zusätzliche CAT- oder Hamlib-Software installiert werden; benötigt wird lediglich die passende Windows-Treiberunterstützung für die Schnittstelle des Funkgeräts.
 
 Anwendungsdaten liegen standardmäßig unter:
 
@@ -62,8 +67,13 @@ Release Candidates verwenden einen eigenen versionsabhängigen Programmordner un
 2. Wavelog-URL und API-v2-Token eintragen.
 3. Verbindung testen und ein Wavelog-Stationsprofil auswählen.
 4. Stationsrufzeichen, Operator und optional Locator/QTH ergänzen.
-5. Ein QSO erfassen und speichern.
-6. Bei vorhandener Internetverbindung die Synchronisation starten.
+5. Optional unter **CAT Setup** Funkgerät, COM-Port und serielle Parameter wählen, Verbindung testen und CAT aktivieren.
+6. Ein QSO erfassen und speichern.
+7. Bei vorhandener Internetverbindung die Synchronisation starten.
+
+CAT-Einstellungen sind profilbezogen. Bei aktiver Verbindung aktualisiert der Logger Frequenz, Band und Mode fortlaufend. Hamlib-Modi wie `FMN` werden für das ADIF-Log korrekt als `FM` übernommen.
+
+Beim Start prüft die Anwendung im Hintergrund die öffentliche Release-Liste dieses GitHub-Projekts. Gibt es eine neuere passende Version, kann deren Downloadseite direkt geöffnet werden. Ohne Internet oder bei einem nicht erreichbaren GitHub bleibt die Prüfung still und beeinträchtigt das Offline-Logging nicht. Stabile Versionen bieten keine Vorabversionen an; Release Candidates können auf neuere Release Candidates hinweisen.
 
 Eine ausführlichere Anleitung steht im [Benutzerhandbuch](docs/USER_GUIDE.md). Häufige Start- und Sync-Probleme behandelt die [Fehlerhilfe](docs/TROUBLESHOOTING.md).
 
@@ -111,6 +121,8 @@ Die empfohlenen GitHub-Einstellungen für Maintainer beschreibt [GITHUB_SETUP.md
 | --- | --- |
 | `app.py` | Tkinter-Oberfläche und Benutzerinteraktion |
 | `logger_core.py` | ADI-, Profil-, Metadaten-, Sync- und Statistiklogik |
+| `cat_control.py` | Hamlib-Modellliste, `rigctld`-Prozess, CAT-Abfragen und Mode-Zuordnung |
+| `update_check.py` | Fehlertolerante Prüfung auf neuere GitHub-Releases |
 | `bootstrap_windows.go` | Kleiner Windows-Launcher mit eingebetteter Anwendung |
 | `cty.dat` | Offline-Länder- und DXCC-Daten |
 | `selftest.py` | Regressions- und Migrations-Selftests |

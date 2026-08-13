@@ -6,18 +6,16 @@
 bootstrap_windows.go
         |
         v
-      app.py  <---->  logger_core.py
-                         |      |
-                         v      v
-                    ADI-Dateien SQLite-Metadaten
-                         |
-                         v
-                    Wavelog API v2
+      app.py  <---->  logger_core.py  <---->  ADI / SQLite / Wavelog API v2
+        |
+        +--------->  cat_control.py   <---->  rigctld / Funkgerät
+        |
+        +--------->  update_check.py <---->  GitHub Releases API
 ```
 
 ### `bootstrap_windows.go`
 
-Der Windows-GUI-Launcher enthält `app.py`, `logger_core.py` und `cty.dat` per `go:embed`. Er schreibt die Dateien in einen versionsabhängigen Anwendungsordner, richtet bei Bedarf eine private Python-3.12.10-Laufzeit ein und startet `pythonw.exe` in einem Windows-Job-Objekt.
+Der Windows-GUI-Launcher enthält die Python-Anwendung, `cty.dat` und die für Windows benötigten Hamlib-Dateien per `go:embed`. Er schreibt sie in einen versionsabhängigen Anwendungsordner, richtet bei Bedarf eine private Python-3.12.10-Laufzeit ein und startet `pythonw.exe` in einem Windows-Job-Objekt.
 
 ### `app.py`
 
@@ -34,9 +32,17 @@ Enthält die fachliche Logik:
 - Wavelog API v2 ansprechen
 - Statistiken und QSL-Status aufbereiten
 
+### `cat_control.py`
+
+Verwaltet den gebündelten `rigctld`-Prozess, liest die Hamlib-Modellliste, erkennt Windows-COM-Ports und ordnet Funkgerätemodi den Logger-/ADIF-Modi zu. CAT-Einstellungen werden über die bestehende profilbezogene Einstellungsdatenbank gespeichert.
+
+### `update_check.py`
+
+Fragt nach dem Programmstart in einem Hintergrundthread ausschließlich die öffentliche GitHub-Release-Liste ab. Netzwerk-, HTTP- und Formatfehler liefern still kein Ergebnis. Stabile Versionen ignorieren Vorabversionen.
+
 ### `selftest.py`
 
-Deckt Kernabläufe, lokale Verlustsicherheit, Profile, Migrationen, Contest-Felder und Hash-Migrationen ohne echte Wavelog-Instanz ab.
+Deckt Kernabläufe, lokale Verlustsicherheit, Profile, Migrationen, Contest-Felder, Hash-Migrationen, CAT-Zuordnungen und die fehlertolerante Release-Prüfung ohne echte Wavelog-Instanz ab.
 
 ## Datenmodell
 

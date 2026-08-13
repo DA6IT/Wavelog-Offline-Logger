@@ -18,7 +18,7 @@ Anschließend EXE und ZIP aus `dist\` auf einem Windows-Testsystem prüfen.
 
 ## Version finalisieren
 
-Für `v0.11.2` müssen mindestens diese Stellen konsistent von `0.11.2-rc1` auf `0.11.2` geändert werden:
+Für ein Release müssen mindestens diese Stellen konsistent auf dieselbe Version gesetzt werden:
 
 - `logger_core.py`: `VERSION`
 - `bootstrap_windows.go`: `appVersion`
@@ -33,8 +33,8 @@ Danach Tests und Paket-Build erneut ausführen.
 Der Workflow `.github/workflows/release.yml` reagiert auf Tags im Format `v*` und prüft, dass Tag und Quellversion übereinstimmen.
 
 ```powershell
-git tag -a v0.11.2 -m "DA6IT.de Wavelog Offline Logger v0.11.2"
-git push origin v0.11.2
+git tag -a v0.12.0-rc1 -m "DA6IT.de Wavelog Offline Logger v0.12.0-rc1"
+git push origin v0.12.0-rc1
 ```
 
 Der Workflow:
