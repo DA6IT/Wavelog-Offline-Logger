@@ -2,7 +2,7 @@ import base64
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
-from logger_core import LogStore, MetadataDB, SyncEngine, qso_hash
+from logger_core import LogStore, MetadataDB, SyncEngine, build_fast_log_qso, qso_hash
 
 class FakeClient:
     def __init__(self):
@@ -537,6 +537,38 @@ print("UPDATE CHECK SELFTEST OK")
 # WSJT-X instance is required for these deterministic protocol tests.
 import struct
 from datetime import datetime, timezone
+
+fast_qso = build_fast_log_qso(
+    "dk0gn/p", "20m", "USB", "14,250", "59", "57", "100",
+    {
+        "operator_call": "DA6IT",
+        "station_call": "DK0GN",
+        "my_gridsquare": "JO31",
+        "my_qth": "Test",
+        "my_pota_ref": "",
+        "my_sota_ref": "",
+        "my_wwff_ref": "",
+    },
+    {"country": "Germany", "cont": "EU", "cqz": "14", "ituz": "28"},
+    now=datetime(2026, 8, 13, 12, 34, 56, tzinfo=timezone.utc),
+)
+assert fast_qso["call"] == "DK0GN/P"
+assert fast_qso["station_call"] == "DK0GN"
+assert fast_qso["qso_date"] == "2026-08-13" and fast_qso["time_on"] == "123456"
+assert fast_qso["freq"] == "14.250" and fast_qso["country"] == "Germany"
+assert not fast_qso["comment"] and not fast_qso["notes"]
+try:
+    build_fast_log_qso(
+        "DL1ABC", "20m", "USB", "", "59", "59", "",
+        {"operator_call": "", "station_call": ""},
+    )
+except ValueError:
+    pass
+else:
+    raise AssertionError("Fast Log must require a station or operator callsign")
+
+print("FAST LOG SELFTEST OK")
+
 from external_logging import (
     WSJTX_HEARTBEAT, WSJTX_LOGGED_ADIF, WSJTX_MAGIC, WSJTX_QSO_LOGGED,
     UdpLogConfig, build_heartbeat, decode_udp_datagram, find_duplicate_qso,
@@ -632,24 +664,39 @@ print("UDP LOGGING SELFTEST OK")
 # local fake cluster and therefore never publishes a real spot.
 import socket
 from dx_cluster import (
-    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DxClusterClient, DxClusterConfig,
-    DxClusterError, infer_spot_mode, normalize_worked_mode, parse_dx_spot,
-    spot_sort_value, spotter_region_for_continent, worked_flags,
+    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DEFAULT_SPOTTER_HOST,
+    DEFAULT_SPOTTER_PORT, DxClusterClient, DxClusterConfig, DxSpotterConfig,
+    DxClusterError, bandplan_spot_mode, infer_spot_mode, normalize_worked_mode, parse_dx_spot,
+    spot_comment_with_mode, spot_sort_value, spotter_region_for_continent,
+    worked_flags,
 )
 
 cluster_settings = DxClusterConfig.from_getter(lambda key, default="": {
     "dx_cluster_host": "cluster.example.test",
     "dx_cluster_port": "9000",
-    "dx_cluster_callsign": "da6it",
-}.get(key, default))
+    # A stale setting must never override the active logbook profile.
+    "dx_cluster_callsign": "OLD1CALL",
+}.get(key, default), "dk0gn")
 cluster_settings.validate()
+assert cluster_settings.callsign == "DK0GN"
 assert cluster_settings.settings() == {
     "dx_cluster_host": "cluster.example.test",
     "dx_cluster_port": "9000",
-    "dx_cluster_callsign": "DA6IT",
 }
 assert DxClusterConfig().host == DEFAULT_CLUSTER_HOST
 assert DxClusterConfig().port == DEFAULT_CLUSTER_PORT
+spotter_settings = DxSpotterConfig.from_getter(lambda key, default="": {
+    "dx_spotter_host": "spotter.example.test",
+    "dx_spotter_port": "7301",
+}.get(key, default), "dk0gn")
+spotter_settings.validate()
+assert spotter_settings.callsign == "DK0GN"
+assert spotter_settings.settings() == {
+    "dx_spotter_host": "spotter.example.test",
+    "dx_spotter_port": "7301",
+}
+assert DxSpotterConfig().host == DEFAULT_SPOTTER_HOST
+assert DxSpotterConfig().port == DEFAULT_SPOTTER_PORT
 
 fm_spot = parse_dx_spot("DX de DL1AAA-2: 145500.0 DA0TEST FM simplex 1234Z JO31")
 assert fm_spot and fm_spot.call == "DA0TEST" and fm_spot.frequency_hz == 145_500_000
@@ -659,8 +706,24 @@ ft8_spot = parse_dx_spot("DX de G4ABC: 14074.0 ZS6XYZ FT8 -10 dB 2359Z KG44")
 assert ft8_spot and ft8_spot.mode == "FT8" and ft8_spot.band == "20m"
 assert parse_dx_spot("This is not a spot") is None
 assert infer_spot_mode("working RTTY now") == "RTTY"
+assert infer_spot_mode("FT-8 -12 dB", 14_074_000) == "FT8"
+assert infer_spot_mode("JS8Call", 7_078_000) == "JS8"
+assert infer_spot_mode("FM test", 144_525_000) == "FM"
+assert infer_spot_mode("DMR repeater", 145_500_000) == "DIGITALVOICE"
+assert infer_spot_mode("", 1_820_000) == "CW"
+assert infer_spot_mode("", 14_074_000) == "FT8"
+assert infer_spot_mode("", 14_090_000) == "MFSK"
+assert infer_spot_mode("", 29_600_000) == "FM"
+assert infer_spot_mode("", 145_500_000) == "FM"
+assert infer_spot_mode("", 433_500_000) == "FM"
+assert infer_spot_mode("", 144_300_000) == "USB"
+assert bandplan_spot_mode(7_020_000) == "CW"
+assert bandplan_spot_mode(21_275_000) == ""
 assert infer_spot_mode("Calling CQ", 21_275_000) == "USB"
 assert infer_spot_mode("", 7_100_000) == "LSB"
+assert spot_comment_with_mode("TEST", "FM") == "FM TEST"
+assert spot_comment_with_mode("FM TEST", "FM") == "FM TEST"
+assert spot_comment_with_mode("portable\nsecond line", "USB") == "USB portable second line"
 reference_now = datetime(2026, 8, 14, 0, 5, tzinfo=timezone.utc)
 usb_spot = parse_dx_spot(
     "DX de F6GPX/P: 21260.0 EA2DT/P SSB POTA 2359Z IN83", now=reference_now,
@@ -694,19 +757,31 @@ assert spotter_region_for_continent("AF") == "Afrika"
 assert spotter_region_for_continent("") == "Unbekannt"
 assert normalize_worked_mode("SSB", 7_100_000, "40m") == "LSB"
 assert normalize_worked_mode("SSB", 21_260_000, "15m") == "USB"
-assert worked_flags("I1NEW", "Italy", "USB", set(), set()) == (False, False)
-assert worked_flags("I1NEW", "Italy", "USB", set(), {("Italy", "USB")}) == (False, True)
+assert worked_flags("I1NEW", "Italy", "15m", "USB", set(), set()) == (False, False)
 assert worked_flags(
-    "I1ABC", "Italy", "USB", {("I1ABC", "USB")}, {("Italy", "USB")},
+    "I1NEW", "Italy", "15m", "USB", set(), {("Italy", "15m", "USB")},
+) == (False, True)
+assert worked_flags(
+    "I1ABC", "Italy", "15m", "USB",
+    {("I1ABC", "15m", "USB")}, {("Italy", "15m", "USB")},
 ) == (True, True)
-# A worked callsign necessarily marks its resolved country in the same mode too.
-assert worked_flags("I1ABC", "Italy", "USB", {("I1ABC", "USB")}, set()) == (True, True)
+# A worked callsign necessarily marks its resolved country on the same band/mode too.
+assert worked_flags(
+    "I1ABC", "Italy", "15m", "USB", {("I1ABC", "15m", "USB")}, set(),
+) == (True, True)
 # Work in a different mode must not colour the current spot.
 assert worked_flags(
-    "I1ABC", "Italy", "USB", {("I1ABC", "FT8")}, {("Italy", "FT8")},
+    "I1ABC", "Italy", "15m", "USB",
+    {("I1ABC", "15m", "FT8")}, {("Italy", "15m", "FT8")},
+) == (False, False)
+# Work on another band must not colour either callsign or country.
+assert worked_flags(
+    "I1ABC", "Italy", "20m", "USB",
+    {("I1ABC", "15m", "USB")}, {("Italy", "15m", "USB")},
 ) == (False, False)
 assert worked_flags(
-    "I1ABC", "Italy", "FT8", {("I1ABC", "FT8")}, {("Italy", "FT8")},
+    "I1ABC", "Italy", "15m", "FT8",
+    {("I1ABC", "15m", "FT8")}, {("Italy", "15m", "FT8")},
 ) == (True, True)
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -736,7 +811,7 @@ def fake_cluster_server():
             b"DX de F6GPX: 21260.0 EA2DT/P SSB POTA 1235Z IN83\r\n"
         )
         command_data = b""
-        while b"DX 145500 DA0TEST portable test ignored-newline\n" not in command_data:
+        while b"DX 145500 DA0TEST FM portable test ignored-newline\n" not in command_data:
             command_data += connection.recv(1024)
         server_received.append(command_data)
     except Exception as exc:
@@ -767,9 +842,12 @@ cluster_client.start(
     receive_live_spot,
     on_error=cluster_errors.append,
 )
+cluster_client.wait_until_connected(3.0)
 assert spot_received.wait(3.0), (received_spots, cluster_errors, server_errors)
 assert cluster_client.connected
-cluster_client.send_spot("DA0TEST", 145_500_000, "portable test\nignored-newline")
+cluster_client.send_spot(
+    "DA0TEST", 145_500_000, "portable test\nignored-newline", "FM",
+)
 assert server_done.wait(3.0), (server_received, server_errors)
 cluster_client.stop()
 server_thread.join(1.0)
@@ -777,7 +855,7 @@ assert not server_errors, server_errors
 assert [spot.call for spot in received_spots] == ["DA0TEST", "EA2DT/P"]
 assert received_spots[1].mode == "USB"
 assert b"\xff\xfe\x01" in server_received[0], "client must refuse unsupported Telnet WILL ECHO"
-assert b"DX 145500 DA0TEST portable test ignored-newline\n" in server_received[1]
+assert b"DX 145500 DA0TEST FM portable test ignored-newline\n" in server_received[1]
 assert not cluster_client.running and not cluster_client.connected
 try:
     cluster_client.send_spot("DA0TEST", 145_500_000)

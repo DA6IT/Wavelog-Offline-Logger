@@ -13,6 +13,8 @@ from logger_core import band_from_mhz
 
 DEFAULT_CLUSTER_HOST = "dxcluster.afu-tools.de"
 DEFAULT_CLUSTER_PORT = 7300
+DEFAULT_SPOTTER_HOST = "dxcluster.afu-tools.de"
+DEFAULT_SPOTTER_PORT = 7301
 
 
 class DxClusterError(RuntimeError):
@@ -26,7 +28,9 @@ class DxClusterConfig:
     callsign: str = ""
 
     @classmethod
-    def from_getter(cls, getter: Callable[[str, str], str]) -> "DxClusterConfig":
+    def from_getter(
+        cls, getter: Callable[[str, str], str], callsign: str = "",
+    ) -> "DxClusterConfig":
         try:
             port = int(str(getter("dx_cluster_port", str(DEFAULT_CLUSTER_PORT))).strip())
         except (TypeError, ValueError):
@@ -34,14 +38,13 @@ class DxClusterConfig:
         return cls(
             host=str(getter("dx_cluster_host", DEFAULT_CLUSTER_HOST) or DEFAULT_CLUSTER_HOST).strip(),
             port=port,
-            callsign=str(getter("dx_cluster_callsign", "") or "").strip().upper(),
+            callsign=(callsign or "").strip().upper(),
         )
 
     def settings(self) -> dict[str, str]:
         return {
             "dx_cluster_host": self.host,
             "dx_cluster_port": str(self.port),
-            "dx_cluster_callsign": self.callsign.upper(),
         }
 
     def validate(self) -> None:
@@ -53,6 +56,38 @@ class DxClusterConfig:
         call = self.callsign.strip().upper()
         if not re.fullmatch(r"[A-Z0-9][A-Z0-9/.-]{1,31}", call) or not re.search(r"[A-Z]", call):
             raise DxClusterError("Bitte ein gültiges Login-Rufzeichen für den DX Cluster eintragen.")
+
+
+
+
+@dataclass(frozen=True)
+class DxSpotterConfig:
+    host: str = DEFAULT_SPOTTER_HOST
+    port: int = DEFAULT_SPOTTER_PORT
+    callsign: str = ""
+
+    @classmethod
+    def from_getter(
+        cls, getter: Callable[[str, str], str], callsign: str = "",
+    ) -> "DxSpotterConfig":
+        try:
+            port = int(str(getter("dx_spotter_port", str(DEFAULT_SPOTTER_PORT))).strip())
+        except (TypeError, ValueError):
+            port = DEFAULT_SPOTTER_PORT
+        return cls(
+            host=str(getter("dx_spotter_host", DEFAULT_SPOTTER_HOST) or DEFAULT_SPOTTER_HOST).strip(),
+            port=port,
+            callsign=(callsign or "").strip().upper(),
+        )
+
+    def settings(self) -> dict[str, str]:
+        return {
+            "dx_spotter_host": self.host,
+            "dx_spotter_port": str(self.port),
+        }
+
+    def validate(self) -> None:
+        DxClusterConfig(self.host, self.port, self.callsign).validate()
 
 
 @dataclass(frozen=True)
@@ -86,29 +121,93 @@ def ssb_sideband_for_frequency(frequency_hz: int) -> str:
     return "LSB" if band in {"160m", "80m", "40m"} else "USB"
 
 
+_COMMENT_MODE_PATTERNS = (
+    (r"\bFT[\s-]*8\b", "FT8"),
+    (r"\bFT[\s-]*4\b", "FT4"),
+    (r"\bJS[\s-]*8(?:CALL)?\b", "JS8"),
+    (r"\bPSK[\s-]*31\b", "PSK31"),
+    (r"\bRTTY\b", "RTTY"),
+    (r"\b(?:MFSK\d*|OLIVIA|JT65|JT9|Q65|WSPR)\b", "MFSK"),
+    (r"\b(?:D[\s-]*STAR|DMR|C4FM|FUSION|DIGITAL[\s-]*VOICE|DV)\b", "DIGITALVOICE"),
+    (r"\b(?:NFM|WFM|FMN|FM)\b", "FM"),
+    (r"\bAM\b", "AM"),
+    (r"\bUSB\b", "USB"),
+    (r"\bLSB\b", "LSB"),
+    (r"\b(?:CW|MORSE)\b", "CW"),
+)
+
+# Conventional FT8 dial frequencies. A deliberately small tolerance avoids
+# confusing nearby FT4 or other digital activity with FT8.
+_FT8_DIAL_FREQUENCIES_HZ = (
+    1_840_000, 3_573_000, 5_357_000, 7_074_000, 10_136_000,
+    14_074_000, 18_100_000, 21_074_000, 24_915_000, 28_074_000,
+    50_313_000, 144_174_000,
+)
+
+# High-confidence parts of the IARU Region 1 band plans. All-mode or mixed
+# sections are intentionally omitted: there the normal sideband fallback is
+# safer than pretending to know an exact mode. Generic digimode sections map
+# to MFSK, which the logger uses as its neutral digital/CAT mode.
+_REGION1_SPOT_MODE_RANGES_HZ = (
+    (1_810_000, 1_838_000, "CW"),
+    (1_838_000, 1_843_000, "MFSK"),
+    (3_500_000, 3_570_000, "CW"),
+    (3_570_000, 3_620_000, "MFSK"),
+    (7_000_000, 7_040_000, "CW"),
+    (7_040_000, 7_060_000, "MFSK"),
+    (10_100_000, 10_130_000, "CW"),
+    (10_130_000, 10_150_000, "MFSK"),
+    (14_000_000, 14_070_000, "CW"),
+    (14_070_000, 14_112_000, "MFSK"),
+    (18_068_000, 18_095_000, "CW"),
+    (18_095_000, 18_120_000, "MFSK"),
+    (21_000_000, 21_070_000, "CW"),
+    (21_070_000, 21_149_000, "MFSK"),
+    (24_890_000, 24_915_000, "CW"),
+    (24_915_000, 24_940_000, "MFSK"),
+    (28_000_000, 28_070_000, "CW"),
+    (28_070_000, 28_190_000, "MFSK"),
+    (28_300_000, 28_320_000, "MFSK"),
+    (29_100_000, 29_200_000, "FM"),
+    (29_200_000, 29_300_000, "MFSK"),
+    (29_520_000, 29_700_001, "FM"),
+    (50_000_000, 50_100_000, "CW"),
+    (50_300_000, 50_500_000, "MFSK"),
+    (50_700_000, 50_900_000, "FM"),
+    (51_200_000, 51_400_000, "FM"),
+    (70_294_000, 70_500_001, "FM"),
+    (144_025_000, 144_100_000, "CW"),
+    (144_794_000, 144_975_000, "MFSK"),
+    (144_975_000, 145_806_001, "FM"),
+    (432_400_000, 432_500_000, "CW"),
+    (433_000_000, 433_587_501, "FM"),
+    (434_600_000, 434_987_501, "FM"),
+)
+
+
+def bandplan_spot_mode(frequency_hz: int) -> str:
+    if frequency_hz <= 0:
+        return ""
+    if any(abs(frequency_hz - dial_hz) <= 1_000 for dial_hz in _FT8_DIAL_FREQUENCIES_HZ):
+        return "FT8"
+    for start_hz, end_hz, mode in _REGION1_SPOT_MODE_RANGES_HZ:
+        if start_hz <= frequency_hz < end_hz:
+            return mode
+    return ""
+
+
 def infer_spot_mode(comment: str, frequency_hz: int = 0) -> str:
     text = (comment or "").upper()
-    patterns = (
-        (r"\bFT\s*8\b", "FT8"),
-        (r"\bFT\s*4\b", "FT4"),
-        (r"\bJS\s*8\b", "JS8"),
-        (r"\bPSK\s*31\b", "PSK31"),
-        (r"\bRTTY\b", "RTTY"),
-        (r"\bMFSK\b", "MFSK"),
-        (r"\b(?:D-?STAR|DMR|C4FM|DIGITAL\s*VOICE)\b", "DIGITALVOICE"),
-        (r"\b(?:NFM|WFM|FM)\b", "FM"),
-        (r"\bAM\b", "AM"),
-        (r"\bUSB\b", "USB"),
-        (r"\bLSB\b", "LSB"),
-        (r"\bCW\b", "CW"),
-    )
-    for pattern, mode in patterns:
+    for pattern, mode in _COMMENT_MODE_PATTERNS:
         if re.search(pattern, text):
             return mode
     if re.search(r"\bSSB\b", text):
         return ssb_sideband_for_frequency(frequency_hz)
-    # DX-Cluster-Zeilen enthalten häufig keinen Mode. In diesem Fall ist
-    # bandabhängiges SSB die sinnvollste CAT-Vorgabe.
+    bandplan_mode = bandplan_spot_mode(frequency_hz)
+    if bandplan_mode:
+        return bandplan_mode
+    # In all-mode/mixed segments, band-dependent SSB remains the conservative
+    # CAT default instead of claiming an exact digital or voice mode.
     return ssb_sideband_for_frequency(frequency_hz)
 
 
@@ -225,16 +324,22 @@ def spot_sort_value(
 def worked_flags(
     callsign: str,
     country: str,
+    band: str,
     mode: str,
-    worked_calls: set[tuple[str, str]],
-    worked_countries: set[tuple[str, str]],
+    worked_calls: set[tuple[str, str, str]],
+    worked_countries: set[tuple[str, str, str]],
 ) -> tuple[bool, bool]:
-    normalized_mode = normalize_worked_mode(mode)
-    if not normalized_mode:
+    normalized_band = (band or "").strip()
+    normalized_mode = normalize_worked_mode(mode, band=normalized_band)
+    if not normalized_band or not normalized_mode:
         return False, False
-    worked_call = ((callsign or "").strip().upper(), normalized_mode) in worked_calls
+    worked_call = (
+        (callsign or "").strip().upper(), normalized_band, normalized_mode,
+    ) in worked_calls
     worked_country = worked_call or (
-        bool(country) and country != "—" and (country, normalized_mode) in worked_countries
+        bool(country)
+        and country != "—"
+        and (country, normalized_band, normalized_mode) in worked_countries
     )
     return worked_call, worked_country
 
@@ -286,6 +391,19 @@ class _TelnetFilter:
         return bytes(clean), replies
 
 
+def spot_comment_with_mode(comment: str, mode: str) -> str:
+    """Return the DXSpider comment with an explicit mode token."""
+    safe_comment = re.sub(r"[\r\n]+", " ", comment or "").strip()
+    normalized_mode = (mode or "").strip().upper()
+    if normalized_mode and not re.search(
+        rf"(?<![A-Z0-9]){re.escape(normalized_mode)}(?![A-Z0-9])",
+        safe_comment,
+        re.IGNORECASE,
+    ):
+        safe_comment = f"{normalized_mode} {safe_comment}".strip()
+    return safe_comment[:80].rstrip()
+
+
 class DxClusterClient:
     def __init__(self):
         self._lock = threading.RLock()
@@ -294,6 +412,7 @@ class DxClusterClient:
         self._socket: socket.socket | None = None
         self._stop_event: threading.Event | None = None
         self._connected = False
+        self._last_error = ""
 
     @property
     def running(self) -> bool:
@@ -304,6 +423,19 @@ class DxClusterClient:
     def connected(self) -> bool:
         with self._lock:
             return self._connected
+
+    def wait_until_connected(self, timeout: float = 12.0) -> None:
+        deadline = time.monotonic() + max(0.1, timeout)
+        while time.monotonic() < deadline:
+            with self._lock:
+                if self._connected:
+                    return
+                thread = self._thread
+                last_error = self._last_error
+            if thread is None or not thread.is_alive():
+                raise DxClusterError(last_error or "Die Telnet-Verbindung konnte nicht hergestellt werden.")
+            time.sleep(0.05)
+        raise DxClusterError("Zeitüberschreitung beim Verbinden mit dem DX Cluster.")
 
     def start(
         self,
@@ -327,6 +459,7 @@ class DxClusterClient:
             self._stop_event = stop_event
             self._thread = thread
             self._connected = False
+            self._last_error = ""
         thread.start()
 
     def stop(self) -> None:
@@ -355,13 +488,15 @@ class DxClusterClient:
             if self._thread is thread:
                 self._thread = None
 
-    def send_spot(self, call: str, frequency_hz: int, comment: str = "") -> None:
+    def send_spot(
+        self, call: str, frequency_hz: int, comment: str = "", mode: str = "",
+    ) -> None:
         call = (call or "").strip().upper()
         if not re.fullmatch(r"[A-Z0-9][A-Z0-9/.-]{1,31}", call):
             raise DxClusterError("Das zu spottende Rufzeichen ist ungültig.")
         if frequency_hz <= 0:
             raise DxClusterError("Für den DX-Spot wird eine gültige Frequenz benötigt.")
-        safe_comment = re.sub(r"[\r\n]+", " ", comment or "").strip()[:80]
+        safe_comment = spot_comment_with_mode(comment, mode)
         frequency_khz = f"{frequency_hz / 1000.0:.1f}".rstrip("0").rstrip(".")
         command = f"DX {frequency_khz} {call}"
         if safe_comment:
@@ -447,6 +582,9 @@ class DxClusterClient:
                     continue
         except (OSError, DxClusterError) as exc:
             if self._is_current(generation, stop_event):
+                with self._lock:
+                    if generation == self._generation:
+                        self._last_error = str(exc)
                 self._callback(on_error, str(exc))
         finally:
             if connection:
