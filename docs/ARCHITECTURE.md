@@ -10,6 +10,10 @@ bootstrap_windows.go
         |
         +--------->  cat_control.py   <---->  rigctld / Funkgerät
         |
+        +--------->  dx_cluster.py <---->  DXSpider-kompatibler Telnet-Cluster
+        |
+        +--------->  external_logging.py <---->  WSJT-X / ADIF über UDP
+        |
         +--------->  update_check.py <---->  GitHub Releases API
 ```
 
@@ -36,13 +40,21 @@ Enthält die fachliche Logik:
 
 Verwaltet den gebündelten `rigctld`-Prozess, liest die Hamlib-Modellliste, erkennt Windows-COM-Ports und ordnet Funkgerätemodi den Logger-/ADIF-Modi zu. CAT-Einstellungen werden über die bestehende profilbezogene Einstellungsdatenbank gespeichert.
 
+### `dx_cluster.py`
+
+Implementiert eine manuell gestartete Telnet-Sitzung mit Aushandlung, profilbezogenen Serverdaten, DXSpider-Spot-Parser, Mode-Erkennung und explizitem DX-Spot-Versand. Empfangene Spots bleiben flüchtige UI-Daten; nur eine bewusste Übernahme füllt das QSO-Formular. CAT-Abstimmung läuft getrennt über `cat_control.py`, und kein Spot erzeugt automatisch ein ADI-QSO.
+
+### `external_logging.py`
+
+Implementiert den lokal start- und stoppbaren UDP-Empfänger, das native WSJT-X-Netzwerkprotokoll einschließlich Heartbeat-Antwort sowie ADIF-over-UDP. Empfangene Datensätze werden in normale QSO-Strukturen übersetzt; die GUI ergänzt Profil- und CTY-Daten und speichert sie über denselben `LogStore` wie manuell erfasste QSOs. Ein stabiler QSO-Schlüssel verhindert doppelte Einträge durch parallele WSJT-X-Nachrichten.
+
 ### `update_check.py`
 
 Fragt nach dem Programmstart in einem Hintergrundthread ausschließlich die öffentliche GitHub-Release-Liste ab. Netzwerk-, HTTP- und Formatfehler liefern still kein Ergebnis. Stabile Versionen ignorieren Vorabversionen.
 
 ### `selftest.py`
 
-Deckt Kernabläufe, lokale Verlustsicherheit, Profile, Migrationen, Contest-Felder, Hash-Migrationen, CAT-Zuordnungen und die fehlertolerante Release-Prüfung ohne echte Wavelog-Instanz ab.
+Deckt Kernabläufe, lokale Verlustsicherheit, Profile, Migrationen, Contest-Felder, Hash-Migrationen, CAT-Zuordnungen, DX-Cluster-Parsing und lokales Telnet-Verhalten, UDP-/WSJT-X-Protokolle und die fehlertolerante Release-Prüfung ohne echte Wavelog-Instanz ab.
 
 ## Datenmodell
 
