@@ -33,8 +33,8 @@ Danach Tests und Paket-Build erneut ausführen.
 Der Workflow `.github/workflows/release.yml` reagiert auf Tags im Format `v*` und prüft, dass Tag und Quellversion übereinstimmen.
 
 ```powershell
-git tag -a v0.12.0-rc1 -m "DA6IT.de Wavelog Offline Logger v0.12.0-rc1"
-git push origin v0.12.0-rc1
+git tag -a v0.12.0-rc2 -m "DA6IT.de Wavelog Offline Logger v0.12.0-rc2"
+git push origin v0.12.0-rc2
 ```
 
 Der Workflow:

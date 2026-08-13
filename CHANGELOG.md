@@ -4,6 +4,18 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.12.0-rc2] - 2026-08-13
+
+### Fixed
+
+- Ein während des Beendens noch startender `rigctld`-Prozess wird zuverlässig erkannt und sofort beendet
+- CAT-Einstellungen lassen sich getrennt speichern; **CAT starten** und **CAT stoppen** steuern die Verbindung eindeutig
+
+### Changed
+
+- Der Windows-Launcher tritt vor dem Start der Python-Anwendung einem Kill-on-close-Job bei, sodass auch verbleibende CAT-Kindprozesse beim Beenden entfernt werden
+- CAT startet nach jedem Programmstart grundsätzlich ausgeschaltet und muss bewusst manuell gestartet werden
+
 ## [0.12.0-rc1] - 2026-08-13
 
 ### Added

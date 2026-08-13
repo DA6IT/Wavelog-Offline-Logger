@@ -353,6 +353,7 @@ class HamlibManager:
         self._lock = threading.RLock()
         self._process: subprocess.Popen[str] | None = None
         self._config: CatConfig | None = None
+        self._generation = 0
 
     @property
     def running(self) -> bool:
@@ -361,7 +362,17 @@ class HamlibManager:
 
     def start(self, config: CatConfig, timeout: float = 12.0) -> None:
         config.validate()
-        self.stop()
+        # Reserve this start atomically. A concurrent stop (for example while
+        # the application is closing) invalidates the reservation so that a
+        # process which finishes spawning afterwards is terminated at once.
+        with self._lock:
+            self._generation += 1
+            generation = self._generation
+            previous = self._process
+            self._process = None
+            self._config = None
+        self._terminate_process(previous)
+
         executable = self.rigctld or find_rigctld()
         args = build_rigctld_args(config)
         try:
@@ -380,11 +391,22 @@ class HamlibManager:
             raise CatError(f"rigctld konnte nicht gestartet werden: {exc}") from exc
 
         with self._lock:
-            self._process = process
-            self._config = config
+            accepted = generation == self._generation
+            if accepted:
+                self._process = process
+                self._config = config
+
+        if not accepted:
+            self._terminate_process(process)
+            raise CatError("CAT-Start wurde abgebrochen")
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            with self._lock:
+                still_current = generation == self._generation and self._process is process
+            if not still_current:
+                self._terminate_process(process)
+                raise CatError("CAT-Start wurde abgebrochen")
             if process.poll() is not None:
                 detail = ""
                 if process.stderr:
@@ -397,7 +419,8 @@ class HamlibManager:
             except OSError:
                 time.sleep(0.1)
 
-        self.stop()
+        self._clear_process(process)
+        self._terminate_process(process)
         raise CatError(
             "rigctld wurde nicht rechtzeitig bereit. Bitte Funkgerät, COM-Port, "
             "Baudrate und den lokalen Port prüfen."
@@ -409,22 +432,39 @@ class HamlibManager:
                 self._process = None
                 self._config = None
 
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen[str] | None) -> None:
+        if process is None:
+            return
+        try:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2.0)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=2.0)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        finally:
+            try:
+                if process.stderr:
+                    process.stderr.close()
+            except OSError:
+                pass
+
     def stop(self) -> None:
         with self._lock:
+            self._generation += 1
             process = self._process
             self._process = None
             self._config = None
-        if process is None or process.poll() is not None:
-            return
-        try:
-            process.terminate()
-            process.wait(timeout=2.0)
-        except (OSError, subprocess.TimeoutExpired):
-            try:
-                process.kill()
-                process.wait(timeout=2.0)
-            except (OSError, subprocess.TimeoutExpired):
-                pass
+        self._terminate_process(process)
 
     def read(self, current_mode: str = "") -> CatReading:
         with self._lock:

@@ -2,7 +2,7 @@
 
 Offlinefähiger Desktop-Logger für Funkamateure mit sicherer Synchronisation zu Wavelog.
 
-> Aktueller Entwicklungsstand: **v0.12.0-rc1 (Release Candidate)**. Die neue CAT-Steuerung wurde mit einem Yaesu FTX-1 praktisch getestet.
+> Aktueller Entwicklungsstand: **v0.12.0-rc2 (Release Candidate)**. Die neue CAT-Steuerung wurde mit einem Yaesu FTX-1 praktisch getestet.
 
 ## Zweck
 
@@ -72,6 +72,8 @@ Release Candidates verwenden einen eigenen versionsabhängigen Programmordner un
 7. Bei vorhandener Internetverbindung die Synchronisation starten.
 
 CAT-Einstellungen sind profilbezogen. Bei aktiver Verbindung aktualisiert der Logger Frequenz, Band und Mode fortlaufend. Hamlib-Modi wie `FMN` werden für das ADIF-Log korrekt als `FM` übernommen.
+
+CAT startet nach jedem Programmstart bewusst ausgeschaltet. Einstellungen speichern, CAT starten und CAT stoppen sind getrennte Aktionen; das Funkgerät wird erst nach einem ausdrücklichen Start verbunden.
 
 Beim Start prüft die Anwendung im Hintergrund die öffentliche Release-Liste dieses GitHub-Projekts. Gibt es eine neuere passende Version, kann deren Downloadseite direkt geöffnet werden. Ohne Internet oder bei einem nicht erreichbaren GitHub bleibt die Prüfung still und beeinträchtigt das Offline-Logging nicht. Stabile Versionen bieten keine Vorabversionen an; Release Candidates können auf neuere Release Candidates hinweisen.
 

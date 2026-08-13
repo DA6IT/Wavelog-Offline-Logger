@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	appVersion   = "0.12.0-rc1"
+	appVersion   = "0.12.0-rc2"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -96,6 +96,7 @@ var (
 	procCreateJobObjectW         = kernel32.NewProc("CreateJobObjectW")
 	procSetInformationJobObject  = kernel32.NewProc("SetInformationJobObject")
 	procAssignProcessToJobObject = kernel32.NewProc("AssignProcessToJobObject")
+	procGetCurrentProcess        = kernel32.NewProc("GetCurrentProcess")
 	procOpenProcess              = kernel32.NewProc("OpenProcess")
 	procCloseHandle              = kernel32.NewProc("CloseHandle")
 )
@@ -304,6 +305,18 @@ func assignPidToJob(job uintptr, pid int) bool {
 	return r != 0
 }
 
+func assignCurrentProcessToJob(job uintptr) bool {
+	if job == 0 {
+		return false
+	}
+	current, _, _ := procGetCurrentProcess.Call()
+	if current == 0 {
+		return false
+	}
+	r, _, _ := procAssignProcessToJobObject.Call(job, current)
+	return r != 0
+}
+
 func main() {
 	local := os.Getenv("LOCALAPPDATA")
 	if local == "" {
@@ -312,7 +325,7 @@ func main() {
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
 	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v0120-rc1")
+	appDir := filepath.Join(base, "app-v0120-rc2")
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)
@@ -331,7 +344,12 @@ func main() {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	job := createKillJob()
+	launcherInJob := false
 	if job != 0 {
+		// Assign the launcher before starting Python. Windows then places Python
+		// and rigctld in the same kill-on-close job by inheritance, eliminating
+		// the gap between starting a child and assigning it afterwards.
+		launcherInJob = assignCurrentProcessToJob(job)
 		defer procCloseHandle.Call(job)
 	}
 
@@ -339,12 +357,15 @@ func main() {
 		messageBox("DA6IT.de Logger - Startfehler", "Desktop-App konnte nicht gestartet werden:\n"+err.Error(), 0x10)
 		return
 	}
-	if job != 0 {
+	if job != 0 && !launcherInJob {
+		// Fallback for environments in which the launcher cannot join a nested
+		// job object (for example when an outer job restricts assignment).
 		_ = assignPidToJob(job, cmd.Process.Pid)
 	}
 
 	// Keep the invisible launcher alive while the desktop application runs.
-	// Closing the app ends pythonw; closing/crashing the launcher closes the job and kills pythonw.
+	// Closing the app ends pythonw; closing/crashing the launcher closes the
+	// job and kills pythonw plus any remaining rigctld child process.
 	err := cmd.Wait()
 	if err != nil {
 		logPath := filepath.Join(base, "startup.log")
