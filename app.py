@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import os
 import re
 import sys
@@ -81,10 +82,12 @@ class LoggerApp(tk.Tk):
         self.configure(bg=BG)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.closing = False
+        self.shutdown_started = False
         self.sync_busy = False
         self.station_rows: list[dict] = []
         self.station_by_label: dict[str, dict] = {}
         self.cat_manager = HamlibManager()
+        atexit.register(self.cat_manager.stop)
         self.cat_models: list[RigModel] = []
         self.cat_model_by_label: dict[str, RigModel] = {}
         self.cat_generation = 0
@@ -113,7 +116,6 @@ class LoggerApp(tk.Tk):
         self._tick_clock()
         self.refresh_qsos()
         self.after(250, lambda: self.call_entry.focus_set())
-        self.after(500, self._start_saved_cat)
         self.after(1500, self._start_update_check)
         write_startup_log(f"{APP_NAME} {VERSION} gestartet")
 
@@ -295,7 +297,6 @@ class LoggerApp(tk.Tk):
             self.refresh_stats()
             self._refresh_profile_selector()
             self.status_var.set(f"Profil gewechselt: {old} → {self._current_profile()['name']}")
-            self.after(100, self._start_saved_cat)
         except Exception as e:
             messagebox.showerror("Profil wechseln", str(e), parent=self)
             self._refresh_profile_selector()
@@ -1464,11 +1465,10 @@ class LoggerApp(tk.Tk):
             wraplength=470,
         ).grid(row=1, column=0, sticky="w", pady=(3, 10))
 
-        self.cat_enabled_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
+        ttk.Label(
             left,
-            text="CAT für dieses Profil aktivieren",
-            variable=self.cat_enabled_var,
+            text="CAT wird nach jedem Programmstart bewusst manuell gestartet.",
+            style="Muted.Card.TLabel",
         ).grid(row=2, column=0, sticky="w", pady=(2, 10))
 
         self.cat_model_search_var = tk.StringVar()
@@ -1572,10 +1572,11 @@ class LoggerApp(tk.Tk):
 
         buttons = ttk.Frame(right, style="Card.TFrame")
         buttons.grid(row=6, column=0, sticky="ew")
-        self.cat_start_button = ttk.Button(buttons, text="Speichern & CAT starten", style="Primary.TButton", command=self.save_cat_settings)
-        self.cat_start_button.pack(side="left")
-        ttk.Button(buttons, text="Verbindung testen", style="Secondary.TButton", command=self.test_cat_connection).pack(side="left", padx=8)
-        ttk.Button(buttons, text="CAT deaktivieren", style="Secondary.TButton", command=self.disable_cat).pack(side="left")
+        ttk.Button(buttons, text="Einstellungen speichern", style="Secondary.TButton", command=self.save_cat_settings).pack(side="left")
+        self.cat_start_button = ttk.Button(buttons, text="CAT starten", style="Primary.TButton", command=self.start_cat)
+        self.cat_start_button.pack(side="left", padx=8)
+        ttk.Button(buttons, text="CAT stoppen", style="Secondary.TButton", command=self.stop_cat).pack(side="left")
+        ttk.Button(buttons, text="Verbindung testen", style="Secondary.TButton", command=self.test_cat_connection).pack(side="left", padx=(8, 0))
 
         hint = tk.Label(
             right,
@@ -1670,7 +1671,6 @@ class LoggerApp(tk.Tk):
 
     def _load_cat_settings_to_ui(self):
         config = CatConfig.from_getter(self.db.get_setting)
-        self.cat_enabled_var.set(config.enabled)
         self.cat_saved_model_id = config.model_id
         self.cat_device_var.set(config.device)
         self.cat_baud_var.set(str(config.baud))
@@ -1686,11 +1686,15 @@ class LoggerApp(tk.Tk):
         self._filter_cat_models()
         self._select_cat_model_id(config.model_id)
         self._refresh_cat_ports()
+        self.cat_status_label.configure(
+            text="CAT ist ausgeschaltet · zum Verbinden bitte CAT starten.",
+            fg=MUTED,
+        )
 
-    def _cat_config_from_ui(self, *, enabled: bool | None = None) -> CatConfig:
+    def _cat_config_from_ui(self, *, enabled: bool = False) -> CatConfig:
         model_id = self._selected_cat_model_id() or self.cat_saved_model_id
         return CatConfig(
-            enabled=self.cat_enabled_var.get() if enabled is None else enabled,
+            enabled=enabled,
             model_id=model_id,
             device=self.cat_device_var.get().strip(),
             baud=int(self.cat_baud_var.get().strip()),
@@ -1710,32 +1714,28 @@ class LoggerApp(tk.Tk):
 
     def save_cat_settings(self):
         try:
-            config = self._cat_config_from_ui()
-            if config.enabled:
-                config.validate()
+            # Runtime state is deliberately not persisted. Every application
+            # start begins with CAT off until the user starts it explicitly.
+            config = self._cat_config_from_ui(enabled=False)
+            config.validate()
             self._store_cat_config(config)
-            if config.enabled:
-                self._start_cat_runtime(config, notify=True)
+            if self.cat_manager.running:
+                message = "CAT-Einstellungen gespeichert · Änderungen gelten nach CAT stoppen und erneut starten."
             else:
-                self._stop_cat_runtime()
-                self.cat_status_label.configure(text="CAT-Einstellungen gespeichert · CAT ist deaktiviert.", fg=MUTED)
-                self.status_var.set("CAT-Einstellungen gespeichert")
+                message = "CAT-Einstellungen gespeichert · CAT bleibt ausgeschaltet."
+            self.cat_status_label.configure(text=message, fg=OK)
+            self.status_var.set("CAT-Einstellungen gespeichert")
         except Exception as exc:
             messagebox.showerror("CAT Setup", str(exc), parent=self)
 
-    def _start_saved_cat(self):
-        if self.closing:
-            return
-        config = CatConfig.from_getter(self.db.get_setting)
-        if not config.enabled:
-            self.cat_status_label.configure(text="CAT ist für dieses Profil deaktiviert.", fg=MUTED)
-            return
+    def start_cat(self):
         try:
+            config = self._cat_config_from_ui(enabled=True)
             config.validate()
-        except CatError as exc:
-            self.cat_status_label.configure(text="CAT-Konfiguration unvollständig: " + str(exc), fg=ERR)
+        except Exception as exc:
+            messagebox.showerror("CAT starten", str(exc), parent=self)
             return
-        self._start_cat_runtime(config, notify=False)
+        self._start_cat_runtime(config, notify=True)
 
     def _start_cat_runtime(self, config: CatConfig, *, notify: bool):
         self.cat_generation += 1
@@ -1764,7 +1764,7 @@ class LoggerApp(tk.Tk):
         self.status_var.set("CAT verbunden")
         self._schedule_cat_poll(0, config.poll_interval_ms)
         if notify:
-            messagebox.showinfo("CAT Setup", "CAT wurde gespeichert und erfolgreich gestartet.", parent=self)
+            messagebox.showinfo("CAT Setup", "CAT wurde erfolgreich gestartet.", parent=self)
 
     def _cat_start_failed(self, generation: int, message: str, notify: bool):
         if generation != self.cat_generation or self.closing:
@@ -1878,21 +1878,18 @@ class LoggerApp(tk.Tk):
         )
         messagebox.showinfo(
             "CAT-Verbindung",
-            f"Verbindung erfolgreich.\n\nFrequenz: {frequency} MHz\nHamlib-Modus: {reading.raw_mode}",
+            f"Verbindung erfolgreich.\n\nFrequenz: {frequency} MHz\nHamlib-Modus: {reading.raw_mode}\n\nCAT bleibt nach dem Test ausgeschaltet.",
             parent=self,
         )
-        self._start_saved_cat()
+        self.cat_status_label.configure(
+            text=f"✓ CAT-Test erfolgreich · CAT ist ausgeschaltet\nFrequenz: {frequency} MHz\nModus: {reading.raw_mode}",
+            fg=OK,
+        )
 
-    def disable_cat(self):
-        try:
-            self.cat_enabled_var.set(False)
-            config = self._cat_config_from_ui(enabled=False)
-            self._store_cat_config(config)
-        except Exception:
-            self.db.set_setting("cat_enabled", "0")
+    def stop_cat(self):
         self._stop_cat_runtime()
-        self.cat_status_label.configure(text="CAT ist für dieses Profil deaktiviert.", fg=MUTED)
-        self.status_var.set("CAT deaktiviert")
+        self.cat_status_label.configure(text="CAT ist ausgeschaltet.", fg=MUTED)
+        self.status_var.set("CAT gestoppt")
 
     def _stop_cat_runtime(self, *, update_ui: bool = True):
         self.cat_generation += 1
@@ -2098,7 +2095,10 @@ class LoggerApp(tk.Tk):
         self.status_var.set("Stationswerte aus Wavelog übernommen · noch nicht gespeichert")
 
     # ---------- shutdown ----------
-    def on_close(self):
+    def shutdown(self):
+        if self.shutdown_started:
+            return
+        self.shutdown_started = True
         self.closing = True
         try:
             write_startup_log("Programm wird geschlossen")
@@ -2108,6 +2108,9 @@ class LoggerApp(tk.Tk):
                 self.db.close()
         except Exception as e:
             write_startup_log("Fehler beim Shutdown: " + repr(e))
+
+    def on_close(self):
+        self.shutdown()
         self.destroy()
 
 
@@ -2375,9 +2378,13 @@ class EditDialog(tk.Toplevel):
 
 
 def main():
+    app = None
     try:
         app = LoggerApp()
-        app.mainloop()
+        try:
+            app.mainloop()
+        finally:
+            app.shutdown()
     except Exception:
         err = traceback.format_exc()
         write_startup_log("FATAL:\n" + err)

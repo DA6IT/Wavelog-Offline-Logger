@@ -407,6 +407,66 @@ assert map_hamlib_mode("RTTYR", "SSB") == "RTTY"
 assert map_hamlib_mode("FMN", "SSB") == "FM", "FTX-1 narrow FM must be logged as FM"
 assert map_hamlib_mode("NFM", "SSB") == "FM"
 
+# Closing the app while rigctld is still inside Popen used to leave the newly
+# spawned process behind. A stop must invalidate the in-flight start and kill
+# that exact process as soon as Popen returns.
+import io
+import threading
+from unittest.mock import patch
+from cat_control import CatError, HamlibManager
+
+spawn_entered = threading.Event()
+allow_spawn = threading.Event()
+
+class FakeRigctldProcess:
+    def __init__(self):
+        self.returncode = None
+        self.stderr = io.StringIO("")
+        self.terminated = False
+        self.killed = False
+    def poll(self):
+        return self.returncode
+    def terminate(self):
+        self.terminated = True
+        self.returncode = -15
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+    def wait(self, timeout=None):
+        if self.returncode is None:
+            raise AssertionError("wait called before termination")
+        return self.returncode
+
+fake_process = FakeRigctldProcess()
+
+def delayed_popen(*args, **kwargs):
+    spawn_entered.set()
+    assert allow_spawn.wait(2.0), "test did not release the simulated Popen"
+    return fake_process
+
+manager = HamlibManager(Path("rigctld.exe"))
+dummy_config = CatConfig(enabled=True, model_id=1, device="", port=4549)
+start_errors = []
+
+def start_manager():
+    try:
+        manager.start(dummy_config, timeout=0.5)
+    except Exception as exc:
+        start_errors.append(exc)
+
+with patch("cat_control.subprocess.Popen", side_effect=delayed_popen):
+    starter = threading.Thread(target=start_manager)
+    starter.start()
+    assert spawn_entered.wait(2.0), "simulated Popen was not reached"
+    manager.stop()
+    allow_spawn.set()
+    starter.join(2.0)
+
+assert not starter.is_alive()
+assert fake_process.terminated and fake_process.returncode is not None
+assert not manager.running
+assert start_errors and isinstance(start_errors[0], CatError)
+
 print("CAT SELFTEST OK")
 
 # Release discovery must compare project versions correctly and remain silent
@@ -438,6 +498,13 @@ stable_update = find_newer_release("0.11.2", opener=lambda *args, **kwargs: Fake
 assert stable_update and stable_update.version == "0.12.0"
 preview_update = find_newer_release("0.12.0-rc1", opener=lambda *args, **kwargs: FakeResponse(releases))
 assert preview_update and preview_update.version == "0.13.0-rc1"
+rc2_update = find_newer_release(
+    "0.12.0-rc1",
+    opener=lambda *args, **kwargs: FakeResponse([
+        {"tag_name": "v0.12.0-rc2", "name": "RC2", "html_url": "https://example/rc2", "draft": False, "prerelease": True},
+    ]),
+)
+assert rc2_update and rc2_update.version == "0.12.0-rc2"
 
 def offline(*args, **kwargs):
     raise urllib.error.URLError("offline")

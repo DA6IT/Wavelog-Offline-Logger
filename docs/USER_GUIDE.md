@@ -42,10 +42,13 @@ Der Windows-Build enthält Hamlib bereits. Eine zusätzliche Hamlib- oder CAT-An
 1. Funkgerät per USB oder serieller Schnittstelle mit Windows verbinden.
 2. **CAT Setup** öffnen und das Funkgerätemodell suchen.
 3. COM-Port sowie die vom Funkgerät verwendete Baudrate und die seriellen Parameter auswählen.
-4. **Verbindung testen** ausführen.
-5. CAT aktivieren und die Einstellungen speichern.
+4. **Einstellungen speichern** auswählen.
+5. Optional **Verbindung testen** ausführen.
+6. **CAT starten** auswählen.
 
 Die CAT-Konfiguration gehört immer zum aktiven Logger-Profil. Bei erfolgreicher Verbindung werden Frequenz, Band und Mode sowohl im normalen QSO-Formular als auch im Contest-Logging aktualisiert. Digitale Untermodi, die der Nutzer ausdrücklich ausgewählt hat, bleiben bei passenden USB-/LSB-Datenmodi erhalten.
+
+**Einstellungen speichern**, **CAT starten** und **CAT stoppen** sind bewusst getrennte Aktionen. Der Logger startet CAT nach jedem Programmstart ausgeschaltet; die gespeicherten Geräte- und Schnittstellenwerte bleiben erhalten, die Verbindung wird aber erst nach einem ausdrücklichen Klick auf **CAT starten** aufgebaut.
 
 ## 6. Synchronisieren
 
