@@ -60,6 +60,11 @@ try {
         }
     }
 
+    & (Join-Path $PSScriptRoot 'prepare-hamlib-windows.ps1')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Hamlib konnte nicht fuer den Windows-Build vorbereitet werden.'
+    }
+
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
     $fileName = "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.exe"
     $outputPath = Join-Path $OutputDirectory $fileName

@@ -44,6 +44,7 @@ try {
     Copy-Item -LiteralPath $checksumPath -Destination $stage
     Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $stage
     Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $stage
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\USER_GUIDE.md') -Destination (Join-Path $stage 'docs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\TROUBLESHOOTING.md') -Destination (Join-Path $stage 'docs')
 

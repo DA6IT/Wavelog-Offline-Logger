@@ -4,7 +4,7 @@ package main
 
 import (
 	"crypto/sha256"
-	_ "embed"
+	"embed"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	appVersion   = "0.11.2-rc1"
+	appVersion   = "0.12.0-rc1"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -35,8 +35,35 @@ var appSource []byte
 //go:embed logger_core.py
 var coreSource []byte
 
+//go:embed cat_control.py
+var catSource []byte
+
+//go:embed update_check.py
+var updateCheckSource []byte
+
 //go:embed cty.dat
 var ctyData []byte
+
+// Hamlib is prepared by scripts/prepare-hamlib-windows.ps1 before go build.
+// The official archive is pinned and SHA-256 verified by that script.
+//
+//go:embed build/embedded/hamlib/windows-x64/*
+var hamlibFS embed.FS
+
+var hamlibFileNames = []string{
+	"rigctld.exe",
+	"libhamlib-4.dll",
+	"libusb-1.0.dll",
+	"libgcc_s_seh-1.dll",
+	"libwinpthread-1.dll",
+	"COPYING.txt",
+	"COPYING.LIB.txt",
+	"LICENSE.txt",
+	"AUTHORS.txt",
+	"README.md.txt",
+	"README.w64-bin.txt",
+	"HAMLIB_VERSION.txt",
+}
 
 type IO_COUNTERS struct {
 	ReadOperationCount, WriteOperationCount, OtherOperationCount uint64
@@ -186,7 +213,8 @@ func writeAppFiles(appDir string) error {
 	}
 	versionPath := filepath.Join(appDir, "VERSION")
 	oldVersion, _ := os.ReadFile(versionPath)
-	if strings.TrimSpace(string(oldVersion)) == appVersion {
+	hamlibDir := filepath.Join(appDir, "hamlib")
+	if strings.TrimSpace(string(oldVersion)) == appVersion && appFilesComplete(appDir, hamlibDir) {
 		return nil
 	}
 	if err := os.WriteFile(filepath.Join(appDir, "app.py"), appSource, 0644); err != nil {
@@ -195,10 +223,52 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "logger_core.py"), coreSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "cat_control.py"), catSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "update_check.py"), updateCheckSource, 0644); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "cty.dat"), ctyData, 0644); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(hamlibDir, 0755); err != nil {
+		return err
+	}
+	for _, name := range hamlibFileNames {
+		embeddedPath := "build/embedded/hamlib/windows-x64/" + name
+		data, err := hamlibFS.ReadFile(embeddedPath)
+		if err != nil {
+			return fmt.Errorf("Hamlib-Datei %s fehlt im Build: %w", name, err)
+		}
+		mode := os.FileMode(0644)
+		if strings.HasSuffix(strings.ToLower(name), ".exe") {
+			mode = 0755
+		}
+		if err := os.WriteFile(filepath.Join(hamlibDir, name), data, mode); err != nil {
+			return err
+		}
+	}
 	return os.WriteFile(versionPath, []byte(appVersion+"\n"), 0644)
+}
+
+func appFilesComplete(appDir, hamlibDir string) bool {
+	required := []string{
+		filepath.Join(appDir, "app.py"),
+		filepath.Join(appDir, "logger_core.py"),
+		filepath.Join(appDir, "cat_control.py"),
+		filepath.Join(appDir, "update_check.py"),
+		filepath.Join(appDir, "cty.dat"),
+	}
+	for _, name := range hamlibFileNames {
+		required = append(required, filepath.Join(hamlibDir, name))
+	}
+	for _, path := range required {
+		if info, err := os.Stat(path); err != nil || info.IsDir() || info.Size() == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func createKillJob() uintptr {
@@ -242,7 +312,7 @@ func main() {
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
 	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v0112-rc1")
+	appDir := filepath.Join(base, "app-v0120-rc1")
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)

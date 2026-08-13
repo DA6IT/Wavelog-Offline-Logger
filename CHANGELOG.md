@@ -4,6 +4,24 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.12.0-rc1] - 2026-08-13
+
+### Added
+
+- Neues profilbezogenes CAT Setup für Funkgerät, COM-Port und serielle Parameter
+- Gebündeltes Hamlib 4.7.2 mit dynamischer Auswahl aus mehr als 300 Funkgerätemodellen; keine separate Hamlib-Installation erforderlich
+- Automatische CAT-Übernahme von Frequenz, Band und Mode in QSO- und Contest-Logging
+- Hintergrundprüfung auf neuere GitHub-Releases mit stiller Fehlerbehandlung bei fehlender Internetverbindung
+- Lizenzhinweise und Original-Lizenzdateien für die eingebetteten Hamlib-Komponenten
+
+### Fixed
+
+- Der vom Yaesu FTX-1 gemeldete Hamlib-Modus `FMN` wird beim Loggen korrekt als `FM` übernommen
+
+### Changed
+
+- Der Windows-Build lädt und prüft das offizielle Hamlib-x64-Paket reproduzierbar während des Builds und bettet die benötigten Dateien in die EXE ein
+
 ## [0.11.2-rc1] - 2026-08-13
 
 ### Added
