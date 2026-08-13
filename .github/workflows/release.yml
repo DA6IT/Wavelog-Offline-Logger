@@ -33,20 +33,26 @@ jobs:
         shell: pwsh
         run: .\scripts\package-release.ps1 -OutputDirectory dist
 
-      - name: Create GitHub release
+      - name: Publish GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $tag = '${{ github.ref_name }}'
           $assets = Get-ChildItem -LiteralPath dist -File | Where-Object {
             $_.Extension -in '.exe', '.zip' -or $_.Name -eq 'SHA256SUMS.txt'
           }
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $assets.FullName --clobber
+            exit $LASTEXITCODE
+          }
           $arguments = @(
-            'release', 'create', '${{ github.ref_name }}',
-            '--title', 'DA6IT.de Wavelog Offline Logger ${{ github.ref_name }}',
+            'release', 'create', $tag,
+            '--title', "DA6IT.de Wavelog Offline Logger $tag",
             '--generate-notes'
           )
-          if ('${{ github.ref_name }}'.Contains('-')) {
+          if ($tag.Contains('-')) {
             $arguments += '--prerelease'
           }
           $arguments += $assets.FullName
