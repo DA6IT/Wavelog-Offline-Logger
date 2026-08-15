@@ -14,6 +14,10 @@ dist/
 *.exe
 *.msi
 *.zip
+*.deb
+*.AppImage
+*.pkg.tar.zst
+*.sha256
 SHA256SUMS.txt
 
 # Local application and logbook data
@@ -44,3 +48,7 @@ tmp/
 
 # Local development-agent handover
 AGENTS.md
+
+# Superseded local documentation captures (the scripted full set replaces them)
+docs/screenshots/local-only-status.png
+docs/screenshots/settings-sections.png

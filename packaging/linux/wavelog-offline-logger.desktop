@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=DA6IT.de Wavelog Offline Logger
+Comment=Offline-first amateur radio logger with Wavelog sync
+Exec=wavelog-offline-logger
+Icon=wavelog-offline-logger
+Terminal=false
+Categories=Utility;HamRadio;
+Keywords=Amateur Radio;Ham Radio;Wavelog;ADIF;CAT;DX Cluster;

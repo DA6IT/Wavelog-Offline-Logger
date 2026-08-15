@@ -60,6 +60,17 @@ try {
         }
     }
 
+    # Keep release staging separate from caches created by Codex or another
+    # Windows account. Some sandbox-created Pillow folders carry child ACLs
+    # that an interactive user cannot traverse even when the repository root
+    # itself is writable.
+    $pythonPackages = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'build\embedded\python-packages\windows-x64-release'))
+    $expectedPackagesRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'build\embedded\python-packages'))
+    if (-not $pythonPackages.StartsWith($expectedPackagesRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsicherer Python-Paketpfad: $pythonPackages"
+    }
+    & (Join-Path $PSScriptRoot 'prepare-pillow-windows.ps1') -OutputDirectory $pythonPackages -PillowVersion '12.3.0'
+
     & (Join-Path $PSScriptRoot 'prepare-hamlib-windows.ps1')
     if ($LASTEXITCODE -ne 0) {
         throw 'Hamlib konnte nicht fuer den Windows-Build vorbereitet werden.'
@@ -72,6 +83,16 @@ try {
     $env:GOOS = 'windows'
     $env:GOARCH = 'amd64'
     $env:CGO_ENABLED = '0'
+    # Keep the compiler cache inside the ignored build directory. This also
+    # makes local builds work when the interactive user and workspace owner
+    # differ and the default %LOCALAPPDATA% Go cache is not writable.
+    $goCache = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'build\go-cache'))
+    $expectedBuildRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'build'))
+    if (-not $goCache.StartsWith($expectedBuildRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsicherer Go-Cache-Pfad: $goCache"
+    }
+    New-Item -ItemType Directory -Path $goCache -Force | Out-Null
+    $env:GOCACHE = $goCache
     $buildArgs = @(
         'build',
         '-trimpath',

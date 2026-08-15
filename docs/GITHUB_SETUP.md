@@ -50,7 +50,7 @@ Nach erfolgreichem Praxistest die in `RELEASING.md` genannten Versionsstellen au
 ## Noch nicht automatisiert
 
 - Windows-Code-Signierung
-- macOS Intel und Apple Silicon
 - Apple-Signierung und Notarisierung
+- Veröffentlichung der vorbereiteten Arch-`PKGBUILD`-Datei im AUR
 
-Diese Punkte dürfen den kostenlosen, unsignierten Windows-Release zunächst nicht blockieren, müssen aber in den Release Notes transparent genannt werden.
+Windows, macOS (Intel und Apple Silicon) sowie Linux (x64 und ARM64) werden durch GitHub Actions gebaut. Fehlende Plattform-Signaturen müssen in den Release Notes transparent genannt werden.

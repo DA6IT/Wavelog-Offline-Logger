@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.15.0"
+VERSION = "0.16.0"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -576,7 +576,7 @@ def protect_text(text: str) -> str:
         # ``plain:`` values remain readable for migration, but all new writes
         # must be protected by DPAPI or fail visibly.
         raise RuntimeError(
-            "Der Wavelog-Token konnte nicht sicher mit Windows-DPAPI gespeichert werden"
+            "Die Zugangsdaten konnten nicht sicher mit Windows-DPAPI gespeichert werden"
         ) from exc
 
 
@@ -915,6 +915,14 @@ class MetadataDB:
                     dcl TEXT NOT NULL DEFAULT 'unknown',
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS callbook_cache (
+                    callsign TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(callsign, source)
+                );
+                CREATE INDEX IF NOT EXISTS idx_callbook_updated ON callbook_cache(updated_at);
             """)
             # v0.5: "pending" from older builds means the same as LOCAL ONLY.
             self.conn.execute("UPDATE sync_meta SET status='local_only' WHERE status='pending' AND wavelog_id IS NULL")
@@ -938,10 +946,52 @@ class MetadataDB:
             self.conn.commit()
 
     def get_token(self) -> str:
-        return unprotect_text(self.get_setting("wavelog_token", ""))
+        return self.get_secret("wavelog_token")
 
     def set_token(self, token: str):
-        self.set_setting("wavelog_token", protect_text(token))
+        self.set_secret("wavelog_token", token)
+
+    def get_secret(self, key: str) -> str:
+        return unprotect_text(self.get_setting(key, ""))
+
+    def set_secret(self, key: str, value: str):
+        self.set_setting(key, protect_text(value))
+
+    def set_callbook_cache(self, callsign: str, source: str, payload: str):
+        call = (callsign or "").strip().upper()
+        source = (source or "").strip().lower()
+        if not call or not source or not payload:
+            return
+        now = utc_now_iso()
+        with self.lock:
+            self.conn.execute(
+                """INSERT INTO callbook_cache(callsign,source,payload,updated_at) VALUES(?,?,?,?)
+                   ON CONFLICT(callsign,source) DO UPDATE SET
+                   payload=excluded.payload,updated_at=excluded.updated_at""",
+                (call, source, payload, now),
+            )
+            self.conn.commit()
+
+    def get_callbook_cache(self, callsign: str, source: str, max_age_seconds: int = 604800) -> str | None:
+        call = (callsign or "").strip().upper()
+        source = (source or "").strip().lower()
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT payload,updated_at FROM callbook_cache WHERE callsign=? AND source=?",
+                (call, source),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            stamp = datetime.fromisoformat(str(row["updated_at"]).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+            if age > max(0, int(max_age_seconds)):
+                return None
+        except Exception:
+            return None
+        return str(row["payload"])
 
     def get_meta(self, local_id: str) -> dict[str, Any] | None:
         with self.lock:
@@ -1063,10 +1113,59 @@ class MetadataDB:
                 "SELECT * FROM sync_meta WHERE status IN ('local_only','pending','modified','pending_delete','error') ORDER BY created_at"
             )]
 
+    def list_new_upload_candidates(self) -> list[dict[str, Any]]:
+        """Return only never-linked QSOs safe for a first automatic upload.
+
+        Rows in ``error`` are deliberately excluded. A failed request may have
+        reached Wavelog before the response was lost; the next full sync must
+        link it safely instead of risking a duplicate blind retry.
+        """
+        with self.lock:
+            return [dict(r) for r in self.conn.execute(
+                "SELECT * FROM sync_meta WHERE wavelog_id IS NULL AND status IN ('local_only','pending') ORDER BY created_at"
+            )]
+
 
 # ---------- Wavelog API ----------
 class WavelogError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class WavelogOnlineSettings:
+    base_url: str
+    token: str
+    station_id: int
+    auto_sync: bool = False
+    full_sync_on_start: bool = False
+    full_sync_on_exit: bool = False
+
+    @classmethod
+    def from_storage(cls, get_setting, get_token) -> "WavelogOnlineSettings":
+        raw_station_id = str(get_setting("station_profile_id", "0") or "0").strip()
+        try:
+            station_id = int(raw_station_id)
+        except ValueError:
+            station_id = 0
+        return cls(
+            base_url=str(get_setting("wavelog_url", "") or "").strip(),
+            token=str(get_token() or "").strip(),
+            station_id=station_id,
+            auto_sync=str(get_setting("auto_sync_online", "0") or "0") == "1",
+            full_sync_on_start=str(get_setting("full_sync_on_start", "0") or "0") == "1",
+            full_sync_on_exit=str(get_setting("full_sync_on_exit", "0") or "0") == "1",
+        )
+
+    @property
+    def configured(self) -> bool:
+        return (
+            self.base_url.startswith(("http://", "https://"))
+            and bool(self.token)
+            and self.station_id > 0
+        )
+
+    def should_auto_sync(self, *, online: bool, sync_busy: bool, candidate_count: int) -> bool:
+        return self.configured and self.auto_sync and online and not sync_busy and candidate_count > 0
 
 
 class WavelogClient:
@@ -1125,6 +1224,16 @@ class WavelogClient:
         r = self._request("GET", "station") or {}
         data = r.get("data") or []
         return data if isinstance(data, list) else []
+
+    def lookup_callsign(self, callsign: str, *, band: str = "", mode: str = "", include_callbook: bool = True) -> dict[str, Any]:
+        params = {
+            "callsign": (callsign or "").strip().upper(),
+            "detail": "full",
+            "callbook": "true" if include_callbook else "false",
+            "band": band,
+            "mode": mode,
+        }
+        return self._request("GET", "lookup", params=params) or {}
 
     def list_qsos(self, *, since_id: int = 0, qso_since: str | None = None, qso_until: str | None = None) -> list[dict[str, Any]]:
         page = 1
@@ -1373,6 +1482,40 @@ class SyncEngine:
         self.store = store
         self.db = db
         self.client = client
+
+    def push_new_only(self, station_profile_id: int) -> SyncSummary:
+        """Upload new LOCAL ONLY QSOs without pulling, patching or deleting.
+
+        This is the narrow online-mode operation. It intentionally performs no
+        remote listing, QSL refresh, conflict resolution, PATCH or DELETE.
+        """
+        summary = SyncSummary()
+        local_qsos = self.store.scan()
+        self.db.reconcile_index(local_qsos)
+        local_map = {q["local_id"]: q for q in local_qsos}
+        for meta in self.db.list_new_upload_candidates():
+            local_id = meta["local_id"]
+            qso = local_map.get(local_id)
+            if not qso:
+                self.db.delete_meta(local_id)
+                continue
+            try:
+                remote = self.client.create_qso(
+                    local_to_wavelog(qso, station_profile_id, include_operator=True)
+                )
+                wavelog_id = int(remote.get("id"))
+                self.db.set_status(
+                    local_id,
+                    "synced",
+                    wavelog_id=wavelog_id,
+                    last_synced_hash=qso_hash(qso),
+                    remote_hash=remote_hash(remote),
+                )
+                summary.pushed += 1
+            except Exception as exc:
+                self.db.set_status(local_id, "error", error=str(exc))
+                summary.errors += 1
+        return summary
 
     def _local_map(self) -> dict[str, dict[str, Any]]:
         qsos = self.store.scan()

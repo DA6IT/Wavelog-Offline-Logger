@@ -3,11 +3,13 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -19,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.15.0"
+	appVersion   = "0.16.0"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -47,14 +49,29 @@ var externalLoggingSource []byte
 //go:embed dx_cluster.py
 var dxClusterSource []byte
 
+//go:embed callbook.py
+var callbookSource []byte
+
+//go:embed ui_preferences.py
+var uiPreferencesSource []byte
+
 //go:embed cty.dat
 var ctyData []byte
+
+//go:embed assets/da6it-logo.webp
+var da6itLogo []byte
 
 // Hamlib is prepared by scripts/prepare-hamlib-windows.ps1 before go build.
 // The official archive is pinned and SHA-256 verified by that script.
 //
 //go:embed build/embedded/hamlib/windows-x64/*
 var hamlibFS embed.FS
+
+// Pillow is staged by scripts/build-windows.ps1. It is embedded next to the
+// Python sources, so QRZ station photos work without a system-wide install.
+//
+//go:embed all:build/embedded/python-packages/windows-x64-release
+var pythonPackagesFS embed.FS
 
 var hamlibFileNames = []string{
 	"rigctld.exe",
@@ -221,7 +238,7 @@ func writeAppFiles(appDir string) error {
 	versionPath := filepath.Join(appDir, "VERSION")
 	oldVersion, _ := os.ReadFile(versionPath)
 	hamlibDir := filepath.Join(appDir, "hamlib")
-	if strings.TrimSpace(string(oldVersion)) == appVersion && appFilesComplete(appDir, hamlibDir) {
+	if strings.TrimSpace(string(oldVersion)) == appVersion && appFilesComplete(appDir, hamlibDir) && embeddedAppFilesMatch(appDir) {
 		return nil
 	}
 	if err := os.WriteFile(filepath.Join(appDir, "app.py"), appSource, 0644); err != nil {
@@ -242,7 +259,20 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "dx_cluster.py"), dxClusterSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "callbook.py"), callbookSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ui_preferences.py"), uiPreferencesSource, 0644); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "cty.dat"), ctyData, 0644); err != nil {
+		return err
+	}
+	assetsDir := filepath.Join(appDir, "assets")
+	if err := os.MkdirAll(assetsDir, 0755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(assetsDir, "da6it-logo.webp"), da6itLogo, 0644); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(hamlibDir, 0755); err != nil {
@@ -262,6 +292,33 @@ func writeAppFiles(appDir string) error {
 			return err
 		}
 	}
+	packageRoot := "build/embedded/python-packages/windows-x64-release"
+	if err := fs.WalkDir(pythonPackagesFS, packageRoot, func(embeddedPath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if embeddedPath == packageRoot {
+			return nil
+		}
+		relative, err := filepath.Rel(filepath.FromSlash(packageRoot), filepath.FromSlash(embeddedPath))
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(appDir, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		data, err := pythonPackagesFS.ReadFile(embeddedPath)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0644)
+	}); err != nil {
+		return fmt.Errorf("eingebettete Python-Pakete fehlen: %w", err)
+	}
 	return os.WriteFile(versionPath, []byte(appVersion+"\n"), 0644)
 }
 
@@ -273,13 +330,39 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "update_check.py"),
 		filepath.Join(appDir, "external_logging.py"),
 		filepath.Join(appDir, "dx_cluster.py"),
+		filepath.Join(appDir, "callbook.py"),
+		filepath.Join(appDir, "ui_preferences.py"),
 		filepath.Join(appDir, "cty.dat"),
+		filepath.Join(appDir, "assets", "da6it-logo.webp"),
+		filepath.Join(appDir, "PIL", "__init__.py"),
 	}
 	for _, name := range hamlibFileNames {
 		required = append(required, filepath.Join(hamlibDir, name))
 	}
 	for _, path := range required {
 		if info, err := os.Stat(path); err != nil || info.IsDir() || info.Size() == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func embeddedAppFilesMatch(appDir string) bool {
+	embeddedFiles := map[string][]byte{
+		"app.py":              appSource,
+		"logger_core.py":      coreSource,
+		"cat_control.py":      catSource,
+		"update_check.py":     updateCheckSource,
+		"external_logging.py": externalLoggingSource,
+		"dx_cluster.py":       dxClusterSource,
+		"callbook.py":         callbookSource,
+		"ui_preferences.py":   uiPreferencesSource,
+		"cty.dat":             ctyData,
+		filepath.Join("assets", "da6it-logo.webp"): da6itLogo,
+	}
+	for name, expected := range embeddedFiles {
+		current, err := os.ReadFile(filepath.Join(appDir, name))
+		if err != nil || !bytes.Equal(current, expected) {
 			return false
 		}
 	}
@@ -339,7 +422,7 @@ func main() {
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
 	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v0150")
+	appDir := filepath.Join(base, "app-v0160")
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)
