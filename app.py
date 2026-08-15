@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import font as tkfont
 
 from logger_core import (
     APP_NAME, VERSION, BANDS, MODES, LogStore, MetadataDB, WavelogClient,
@@ -80,6 +81,22 @@ NAV_HOVER = "#f1f5fb"
 NAV_ACTIVE_HOVER = "#dceaff"
 PROGRESS_BG = "#e9eef3"
 DISABLED = "#9bb8cf"
+
+BASE_UI_WIDTH = 1420
+BASE_UI_HEIGHT = 820
+MIN_UI_WIDTH = 900
+MIN_UI_HEIGHT = 580
+
+
+def responsive_ui_scale(width: int, height: int) -> float:
+    """Return a stable, bounded zoom factor for the main application window."""
+    width = max(1, int(width))
+    height = max(1, int(height))
+    raw = min(width / BASE_UI_WIDTH, height / BASE_UI_HEIGHT)
+    # Five-percent steps prevent a complete widget relayout for every single
+    # pixel while the user drags a window border.
+    stepped = round(raw * 20.0) / 20.0
+    return max(0.65, min(1.10, stepped))
 
 
 def _set_palette(theme: str) -> None:
@@ -219,13 +236,26 @@ class SyncProgressDialog(tk.Toplevel):
 class LoggerApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        # Build the complete interface while hidden.  It is presented and
+        # focused explicitly once all widgets have their final geometry.
+        self.withdraw()
+        self._ui_scale = 1.0
+        self._responsive_resize_job = None
+        self._responsive_fonts: list[tuple[tkfont.Font, int]] = []
+        self._responsive_wraplengths: list[tuple[tk.Widget, int]] = []
+        self._responsive_card_frames: list[ttk.Frame] = []
+        self._brand_logo_source = None
         self.data_dir = app_data_dir()
         self.ui_preferences = load_ui_preferences(self.data_dir)
         self.language = self.ui_preferences.language
         _set_palette(self.ui_preferences.theme)
         self.title(f"{APP_NAME} {VERSION}")
-        self.geometry("1420x820")
-        self.minsize(1180, 700)
+        screen_width = max(MIN_UI_WIDTH, self.winfo_screenwidth() - 80)
+        screen_height = max(MIN_UI_HEIGHT, self.winfo_screenheight() - 110)
+        initial_width = min(BASE_UI_WIDTH, screen_width)
+        initial_height = min(BASE_UI_HEIGHT, screen_height)
+        self.geometry(f"{initial_width}x{initial_height}")
+        self.minsize(MIN_UI_WIDTH, MIN_UI_HEIGHT)
         self.configure(bg=BG)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.closing = False
@@ -312,11 +342,13 @@ class LoggerApp(tk.Tk):
         self._load_settings_to_ui()
         self._install_dialog_translation()
         self._localize_widget_tree(self)
+        self._capture_responsive_widgets()
+        self.bind("<Configure>", self._window_configured, add="+")
         self.after(700, self._localization_tick)
         self._show_page("log")
         self._tick_clock()
         self.refresh_qsos()
-        self.after(250, lambda: self.call_entry.focus_set())
+        self.after(90, self._present_main_window)
         self.after(600, self._autostart_udp_log)
         self.after(1500, self._start_update_check)
         self.after(2200, self._start_wavelog_monitor)
@@ -324,6 +356,131 @@ class LoggerApp(tk.Tk):
 
     def _tr(self, value: object) -> str:
         return translate_text(value, self.language)
+
+    def _present_main_window(self):
+        """Show the completed window and reliably bring it to the foreground."""
+        if self.closing:
+            return
+        self.deiconify()
+        self.update_idletasks()
+        self._apply_responsive_scale(force=True)
+        try:
+            self.lift()
+            # Windows may reject a normal foreground request from a freshly
+            # spawned GUI process.  A short topmost pulse makes the window
+            # visible without leaving it permanently above other programs.
+            self.attributes("-topmost", True)
+            self.focus_force()
+        except tk.TclError:
+            pass
+        self.after(180, self._finish_window_presentation)
+
+    def _finish_window_presentation(self):
+        if self.closing:
+            return
+        try:
+            self.attributes("-topmost", False)
+            self.lift()
+            self.focus_force()
+            self.call_entry.focus_set()
+        except (AttributeError, tk.TclError):
+            pass
+
+    def _window_configured(self, event=None):
+        if self.closing or (event is not None and event.widget is not self):
+            return
+        if self._responsive_resize_job is not None:
+            try:
+                self.after_cancel(self._responsive_resize_job)
+            except tk.TclError:
+                pass
+        self._responsive_resize_job = self.after(70, self._apply_responsive_scale)
+
+    def _capture_responsive_widgets(self):
+        """Remember original visual metrics so resizing can zoom without drift."""
+        self._responsive_fonts.clear()
+        self._responsive_wraplengths.clear()
+
+        def visit(widget):
+            try:
+                children = widget.winfo_children()
+            except tk.TclError:
+                children = ()
+            for child in children:
+                visit(child)
+
+            try:
+                font_spec = widget.cget("font")
+                if font_spec:
+                    responsive_font = tkfont.Font(root=self, font=font_spec)
+                    base_size = int(responsive_font.cget("size"))
+                    if base_size:
+                        widget.configure(font=responsive_font)
+                        self._responsive_fonts.append((responsive_font, base_size))
+            except (KeyError, TypeError, ValueError, tk.TclError):
+                pass
+
+            try:
+                wraplength = int(float(widget.cget("wraplength")))
+                if wraplength > 0:
+                    self._responsive_wraplengths.append((widget, wraplength))
+            except (KeyError, TypeError, ValueError, tk.TclError):
+                pass
+
+        visit(self)
+
+    def _apply_responsive_scale(self, force: bool = False):
+        self._responsive_resize_job = None
+        if self.closing:
+            return
+        scale = responsive_ui_scale(self.winfo_width(), self.winfo_height())
+        if not force and abs(scale - self._ui_scale) < 0.001:
+            return
+        self._ui_scale = scale
+
+        for responsive_font, base_size in self._responsive_fonts:
+            magnitude = max(6, int(round(abs(base_size) * scale)))
+            responsive_font.configure(size=(-magnitude if base_size < 0 else magnitude))
+        for widget, base_wraplength in self._responsive_wraplengths:
+            try:
+                widget.configure(wraplength=max(80, int(round(base_wraplength * scale))))
+            except tk.TclError:
+                pass
+        for card_frame in self._responsive_card_frames:
+            try:
+                card_frame.configure(padding=max(8, int(round(16 * scale))))
+            except tk.TclError:
+                pass
+
+        self._setup_style(scale)
+        if hasattr(self, "sidebar"):
+            self.sidebar.configure(width=max(145, int(round(205 * scale))))
+        if hasattr(self, "main"):
+            self.main.configure(padding=(
+                max(12, int(round(22 * scale))),
+                max(9, int(round(16 * scale))),
+            ))
+        if hasattr(self, "log_page"):
+            self.log_page.columnconfigure(1, minsize=max(255, int(round(370 * scale))))
+        if hasattr(self, "callbook_image_frame"):
+            self.callbook_image_frame.configure(height=max(105, int(round(160 * scale))))
+        self._render_brand_logo()
+        if self.callbook_image_bytes:
+            self._render_callbook_image(self.callbook_image_bytes)
+
+    def _render_brand_logo(self):
+        if self._brand_logo_source is None or not hasattr(self, "brand_label") or ImageTk is None:
+            return
+        try:
+            image = self._brand_logo_source.copy()
+            image.thumbnail(
+                (max(105, int(round(170 * self._ui_scale))), max(42, int(round(70 * self._ui_scale)))),
+                Image.Resampling.LANCZOS,
+            )
+            self.brand_logo_photo = ImageTk.PhotoImage(image)
+            self.brand_label.configure(image=self.brand_logo_photo)
+        except Exception as exc:
+            write_startup_log("Logo konnte nicht responsiv skaliert werden: " + repr(exc))
 
     def _canonical_choice(self, value: str, canonical_values) -> str:
         for canonical in canonical_values:
@@ -628,44 +785,52 @@ class LoggerApp(tk.Tk):
             write_startup_log("DA6IT.de konnte nicht geöffnet werden: " + repr(exc))
 
     # ---------- UI shell ----------
-    def _setup_style(self):
+    def _setup_style(self, scale: float = 1.0):
+        def size(value: int, minimum: int = 6) -> int:
+            return max(minimum, int(round(value * scale)))
+
+        def padding(horizontal: int, vertical: int) -> tuple[int, int]:
+            return (size(horizontal, 4), size(vertical, 3))
+
         style = ttk.Style(self)
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
+        if not getattr(self, "_style_initialized", False):
+            try:
+                style.theme_use("clam")
+            except Exception:
+                pass
+            self._style_initialized = True
         style.configure("TFrame", background=BG)
         style.configure("Card.TFrame", background=CARD, relief="flat")
-        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
-        style.configure("Card.TLabel", background=CARD, foreground=TEXT, font=("Segoe UI", 10))
-        style.configure("Muted.Card.TLabel", background=CARD, foreground=MUTED, font=("Segoe UI", 9))
-        style.configure("Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI Semibold", 20))
-        style.configure("CardTitle.TLabel", background=CARD, foreground=TEXT, font=("Segoe UI Semibold", 12))
-        style.configure("Call.TEntry", font=("Segoe UI Semibold", 18), padding=8, fieldbackground=INPUT_BG, foreground=TEXT)
-        style.configure("TEntry", padding=6, fieldbackground=INPUT_BG, foreground=TEXT)
-        style.configure("TCombobox", padding=5, fieldbackground=INPUT_BG, background=INPUT_BG, foreground=TEXT)
-        style.configure("Primary.TButton", background=ACCENT, foreground="white", padding=(14, 8), borderwidth=0, font=("Segoe UI Semibold", 10))
+        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", size(10)))
+        style.configure("Card.TLabel", background=CARD, foreground=TEXT, font=("Segoe UI", size(10)))
+        style.configure("Muted.Card.TLabel", background=CARD, foreground=MUTED, font=("Segoe UI", size(9)))
+        style.configure("Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI Semibold", size(20)))
+        style.configure("CardTitle.TLabel", background=CARD, foreground=TEXT, font=("Segoe UI Semibold", size(12)))
+        style.configure("Call.TEntry", font=("Segoe UI Semibold", size(18)), padding=size(8, 4), fieldbackground=INPUT_BG, foreground=TEXT)
+        style.configure("TEntry", padding=size(6, 3), fieldbackground=INPUT_BG, foreground=TEXT)
+        style.configure("TCombobox", padding=size(5, 3), fieldbackground=INPUT_BG, background=INPUT_BG, foreground=TEXT)
+        style.configure("Primary.TButton", background=ACCENT, foreground="white", padding=padding(14, 8), borderwidth=0, font=("Segoe UI Semibold", size(10)))
         style.map("Primary.TButton", background=[("active", ACCENT_DARK), ("disabled", DISABLED)])
-        style.configure("Secondary.TButton", padding=(12, 7), font=("Segoe UI", 10), background=CARD, foreground=TEXT)
-        style.configure("Tuning.TButton", padding=(12, 7), font=("Segoe UI Semibold", 10), background=ERR, foreground="white")
+        style.configure("Secondary.TButton", padding=padding(12, 7), font=("Segoe UI", size(10)), background=CARD, foreground=TEXT)
+        style.configure("Tuning.TButton", padding=padding(12, 7), font=("Segoe UI Semibold", size(10)), background=ERR, foreground="white")
         style.map("Tuning.TButton", background=[("disabled", ERR), ("active", ERR)], foreground=[("disabled", "white")])
-        style.configure("Nav.TButton", background=SIDEBAR, foreground=SIDEBAR_TEXT, padding=(12, 9), anchor="w", borderwidth=0, font=("Segoe UI", 9))
+        style.configure("Nav.TButton", background=SIDEBAR, foreground=SIDEBAR_TEXT, padding=padding(12, 9), anchor="w", borderwidth=0, font=("Segoe UI", size(9)))
         style.map("Nav.TButton", background=[("active", NAV_HOVER)], foreground=[("active", ACCENT)])
-        style.configure("NavActive.TButton", background=ACTIVE_BG, foreground=ACCENT, padding=(12, 9), anchor="w", borderwidth=0, font=("Segoe UI Semibold", 9))
+        style.configure("NavActive.TButton", background=ACTIVE_BG, foreground=ACCENT, padding=padding(12, 9), anchor="w", borderwidth=0, font=("Segoe UI Semibold", size(9)))
         style.map("NavActive.TButton", background=[("active", NAV_ACTIVE_HOVER)], foreground=[("active", ACCENT_DARK)])
-        style.configure("Treeview", rowheight=30, font=("Segoe UI", 9), background=INPUT_BG, fieldbackground=INPUT_BG, foreground=TEXT, bordercolor=BORDER)
+        style.configure("Treeview", rowheight=size(30, 20), font=("Segoe UI", size(9)), background=INPUT_BG, fieldbackground=INPUT_BG, foreground=TEXT, bordercolor=BORDER)
         style.map("Treeview", background=[("selected", ACTIVE_BG)], foreground=[("selected", TEXT)])
-        style.configure("Treeview.Heading", font=("Segoe UI Semibold", 9), padding=5, background=CARD, foreground=TEXT)
-        style.configure("Stats.Horizontal.TProgressbar", troughcolor=PROGRESS_BG, background=ACCENT, borderwidth=0, thickness=10)
+        style.configure("Treeview.Heading", font=("Segoe UI Semibold", size(9)), padding=size(5, 3), background=CARD, foreground=TEXT)
+        style.configure("Stats.Horizontal.TProgressbar", troughcolor=PROGRESS_BG, background=ACCENT, borderwidth=0, thickness=size(10, 6))
         style.configure("TLabelframe", background=CARD, bordercolor=BORDER, relief="solid")
-        style.configure("TLabelframe.Label", background=CARD, foreground=TEXT, font=("Segoe UI Semibold", 10))
+        style.configure("TLabelframe.Label", background=CARD, foreground=TEXT, font=("Segoe UI Semibold", size(10)))
         style.configure("TRadiobutton", background=CARD, foreground=TEXT)
         style.configure("TCheckbutton", background=CARD, foreground=TEXT)
         style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(16, 9), font=("Segoe UI", 10))
+        style.configure("TNotebook.Tab", padding=padding(16, 9), font=("Segoe UI", size(10)))
         style.map("TNotebook.Tab", foreground=[("selected", ACCENT)], background=[("selected", CARD)])
         style.configure("Settings.TNotebook", background=BG, borderwidth=0)
-        style.configure("Settings.TNotebook.Tab", padding=(10, 6), font=("Segoe UI", 9))
+        style.configure("Settings.TNotebook.Tab", padding=padding(10, 6), font=("Segoe UI", size(9)))
         style.map(
             "Settings.TNotebook.Tab",
             foreground=[("selected", ACCENT)],
@@ -678,7 +843,8 @@ class LoggerApp(tk.Tk):
         try:
             resource_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
             path = resource_root / "assets" / "da6it-logo.webp"
-            image = Image.open(path).convert("RGB")
+            self._brand_logo_source = Image.open(path).convert("RGB")
+            image = self._brand_logo_source.copy()
             image.thumbnail((170, 70), Image.Resampling.LANCZOS)
             return ImageTk.PhotoImage(image)
         except Exception as exc:
@@ -689,7 +855,8 @@ class LoggerApp(tk.Tk):
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
 
-        side = tk.Frame(self, bg=SIDEBAR, width=205, highlightbackground=BORDER, highlightthickness=1)
+        self.sidebar = tk.Frame(self, bg=SIDEBAR, width=205, highlightbackground=BORDER, highlightthickness=1)
+        side = self.sidebar
         side.grid(row=0, column=0, sticky="nsew")
         side.grid_propagate(False)
         self.brand_logo_photo = self._load_brand_logo()
@@ -700,6 +867,7 @@ class LoggerApp(tk.Tk):
                 side, text="DA6IT.de", bg=SIDEBAR, fg=ACCENT,
                 font=("Segoe UI Semibold", 19), cursor="hand2",
             )
+        self.brand_label = brand
         brand.pack(anchor="w", padx=16, pady=(16, 0))
         brand.bind("<Button-1>", self._open_da6it_website)
         tk.Label(side, text="Wavelog Offline Logger", bg=SIDEBAR, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", padx=16, pady=(0, 17))
@@ -968,11 +1136,13 @@ class LoggerApp(tk.Tk):
         outer.grid(**grid)
         inner = ttk.Frame(outer, style="Card.TFrame", padding=16)
         inner.pack(fill="both", expand=True)
+        self._responsive_card_frames.append(inner)
         return inner
 
     # ---------- log page ----------
     def _build_log_page(self):
         p = self._new_page("log")
+        self.log_page = p
         p.columnconfigure(0, weight=1)
         p.columnconfigure(1, weight=0, minsize=370)
         p.rowconfigure(0, weight=1)
@@ -1288,17 +1458,27 @@ class LoggerApp(tk.Tk):
     def _show_callbook_image(self, callsign: str, generation: int, data: bytes):
         if self.closing or generation != self.callbook_generation or self.call_var.get().strip().upper() != callsign:
             return
+        self.callbook_image_bytes = data
+        self._render_callbook_image(data)
+
+    def _render_callbook_image(self, data: bytes):
+        """Render a callbook image at the size of the current responsive zoom."""
         try:
             if Image is not None and ImageTk is not None:
                 image = Image.open(io.BytesIO(data))
                 if image.width * image.height > 24_000_000:
                     return
-                image.thumbnail((330, 150), Image.Resampling.LANCZOS)
+                image.thumbnail(
+                    (
+                        max(220, int(round(330 * self._ui_scale))),
+                        max(100, int(round(150 * self._ui_scale))),
+                    ),
+                    Image.Resampling.LANCZOS,
+                )
                 photo = ImageTk.PhotoImage(image)
             else:
                 photo = tk.PhotoImage(data=base64.b64encode(data).decode("ascii"))
             self.callbook_photo = photo
-            self.callbook_image_bytes = data
             self.callbook_image_label.configure(image=photo, text="")
         except Exception:
             self.callbook_image_label.configure(image="", text="Fotoformat in dieser Laufzeit nicht verfügbar")

@@ -4,6 +4,19 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-08-16
+
+### Changed
+
+- Das Hauptfenster skaliert Schrift, Felder, Buttons, Tabellen, Abstände, Navigation, Logo und Callbook-Fotos jetzt proportional mit der Fenstergröße
+- Die unterstützte Mindestgröße wurde auf 900 × 580 Pixel reduziert; auf großen Fenstern wächst die Oberfläche kontrolliert mit
+
+### Fixed
+
+- Beim Verkleinern des Hauptfensters werden Inhalte nicht mehr einfach am Fensterrand abgeschnitten
+- Das vollständig aufgebaute Hauptfenster wird beim App-Start sichtbar in den Vordergrund geholt und das Rufzeichenfeld erhält den Eingabefokus
+- Der Windows-Publish-Ablauf behandelt leere native Ausgaben und JSON-Arrays unter Windows PowerShell 5.1 zuverlässig und wählt genau einen Release-Workflow aus
+
 ## [0.16.0] - 2026-08-15
 
 ### Added
