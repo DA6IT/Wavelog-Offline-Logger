@@ -19,6 +19,7 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - Telnet-DX-Cluster, Filter, Worked-Markierung und Spotversand
 - WSJT-X- und ADIF-Empfang über UDP
 - deutsche und englische Oberfläche, Light- und Dark-Theme
+- responsive Oberfläche ohne Scrollleisten mit automatischer Größenanpassung
 - Builds für Windows x64, macOS Apple Silicon/Intel und Linux x64/ARM64
 
 ## Installation

@@ -13,10 +13,10 @@ Eine lokale `pip`-Installation ist für den unterstützten Windows-Build nicht e
 
 ## Vollständige Freigabe von Windows aus
 
-Für v0.16.0 übernimmt das vorbereitete Skript Screenshot-Erzeugung mit isolierten Demo-Daten, Tests, lokalen Windows-Build, Branch, Pull Request, CI-Prüfung, Merge, Tag und das Warten auf alle Plattformpakete:
+Für v0.16.1 übernimmt das vorbereitete Skript Tests, lokalen Windows-Build, Branch, Pull Request, CI-Prüfung, Merge, Tag und das Warten auf alle Plattformpakete. Da sich der Inhalt der dokumentierten Seiten in diesem Patch nicht geändert hat, wird der bereits geprüfte Screenshot-Satz weiterverwendet:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\publish-v0.16.0.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\publish-v0.16.1.ps1" -SkipScreenshotCapture
 ```
 
 Der Push wird bewusst aus der normalen PowerShell des Repository-Eigentümers ausgeführt. Das Skript prüft vor dem Commit, dass weder `AGENTS.md`, Build-Verzeichnisse, ADI/SQLite-Dateien noch lokale Profil- oder Token-Dateien gestaged sind.
@@ -50,8 +50,8 @@ Danach Tests und Paket-Build erneut ausführen.
 Der Workflow `.github/workflows/release.yml` reagiert auf Tags im Format `v*` und prüft, dass Tag und Quellversion übereinstimmen.
 
 ```powershell
-git tag -a v0.16.0 -m "DA6IT.de Wavelog Offline Logger v0.16.0"
-git push origin v0.16.0
+git tag -a v0.16.1 -m "DA6IT.de Wavelog Offline Logger v0.16.1"
+git push origin v0.16.1
 ```
 
 Der Workflow:

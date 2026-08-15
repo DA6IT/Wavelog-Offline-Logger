@@ -7,9 +7,10 @@ param(
 $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $repository = "DA6IT/Wavelog-Offline-Logger"
-$version = "0.16.0"
+$version = "0.16.1"
 $tag = "v$version"
 $branch = "agent/v$version"
+$expectedExe = Join-Path $projectRoot "dist\DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.exe"
 
 function Find-Tool {
     param([string]$Name, [string[]]$Candidates)
@@ -58,6 +59,22 @@ function Invoke-CapturedNative {
     }
 }
 
+function Convert-NativeOutputToText {
+    param([object[]]$Output)
+    return (($Output | ForEach-Object { [string]$_ }) -join "`n").Trim()
+}
+
+function Convert-JsonArray {
+    param([Parameter(Mandatory=$true)][string]$Json)
+    if ([string]::IsNullOrWhiteSpace($Json)) {
+        return @()
+    }
+    $parsed = ConvertFrom-Json -InputObject $Json
+    # Windows PowerShell 5.1 can retain a JSON array as one nested pipeline
+    # object.  This pipeline deliberately enumerates it exactly once.
+    return @($parsed | ForEach-Object { $_ })
+}
+
 $git = Find-Tool "git" @("C:\Program Files\Git\cmd\git.exe")
 $gh = Find-Tool "gh" @("C:\Program Files\GitHub CLI\gh.exe")
 $python = Find-Tool "python" @(
@@ -94,14 +111,16 @@ try {
         throw "packaging/arch/PKGBUILD enthaelt nicht Version $version."
     }
 
-    $remoteTag = & $git ls-remote --tags origin "refs/tags/$tag"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Remote-Tags konnten nicht geprueft werden."
+    $remoteTagResult = Invoke-CapturedNative $git @("ls-remote", "--tags", "origin", "refs/tags/$tag")
+    if ($remoteTagResult.ExitCode -ne 0) {
+        throw "Remote-Tags konnten nicht geprueft werden: $(Convert-NativeOutputToText $remoteTagResult.Output)"
     }
-    if ($remoteTag) {
-        throw "Der Tag $tag existiert bereits auf GitHub. Release nicht erneut veroeffentlichen."
+    $releaseAlreadyTagged = -not [string]::IsNullOrWhiteSpace((Convert-NativeOutputToText $remoteTagResult.Output))
+    if ($releaseAlreadyTagged) {
+        Write-Host "Der Tag $tag existiert bereits. Branch-, PR- und Tag-Schritte werden uebersprungen; der Release-Workflow wird weiter beobachtet."
     }
 
+    if (-not $releaseAlreadyTagged) {
     Write-Host "2/10 Vollstaendige Dokumentations-Screenshots erzeugen ..."
     if (-not $SkipScreenshotCapture) {
         & (Join-Path $PSScriptRoot "capture-doc-screenshots.ps1")
@@ -136,7 +155,8 @@ try {
         "scripts\prepare-pillow-windows.ps1",
         "scripts\prepare-hamlib-windows.ps1",
         "scripts\package-release.ps1",
-        "scripts\capture-doc-screenshots.ps1"
+        "scripts\capture-doc-screenshots.ps1",
+        "scripts\publish-v0.16.1.ps1"
     )) {
         $parseTokens = $null
         $parseErrors = $null
@@ -170,7 +190,6 @@ try {
             throw "Lokaler Windows-Release-Build fehlgeschlagen."
         }
     }
-    $expectedExe = Join-Path $projectRoot "dist\DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.exe"
     if (-not $SkipLocalBuild -and -not (Test-Path -LiteralPath $expectedExe)) {
         throw "Erwartete Test-EXE fehlt: $expectedExe"
     }
@@ -183,13 +202,33 @@ try {
         if ($localBranches -contains $branch) {
             Invoke-Checked $git @("switch", $branch)
         } else {
-            Invoke-Checked $git @("switch", "-c", $branch)
+            # The release branch must always start at the current remote main,
+            # even when the working copy still points to an older release PR.
+            Invoke-Checked $git @("switch", "-c", $branch, "origin/main")
         }
     }
 
     Write-Host "6/10 Gepruefte Dateien committen und Branch pushen ..."
-    Invoke-Checked $git @("add", "-A")
+    $releaseFiles = @(
+        ".gitattributes",
+        "app.py",
+        "logger_core.py",
+        "bootstrap_windows.go",
+        "packaging/arch/PKGBUILD",
+        "README.md",
+        "CHANGELOG.md",
+        "docs/RELEASE_NOTES.md",
+        "docs/RELEASING.md",
+        "scripts/publish-v0.16.0.ps1",
+        "scripts/publish-v0.16.1.ps1"
+    )
+    $releaseFiles += $requiredScreenshots | ForEach-Object { "docs/screenshots/$_" }
+    Invoke-Checked $git (@("add", "--") + $releaseFiles)
     $staged = @(& $git diff --cached --name-only)
+    $unexpected = $staged | Where-Object { $_ -notin $releaseFiles }
+    if ($unexpected) {
+        throw "Unerwartete Datei(en) sind bereits gestaged: $($unexpected -join ', '). Bitte zuerst den Git-Index pruefen."
+    }
     $forbidden = $staged | Where-Object {
         $_ -eq "AGENTS.md" -or
         $_ -match '(^|/)(dist|build)/' -or
@@ -211,28 +250,31 @@ try {
     $prUrl = ""
     $prListResult = Invoke-CapturedNative $gh @(
         "pr", "list", "--repo", $repository, "--head", $branch,
-        "--base", "main", "--state", "open", "--limit", "1",
-        "--json", "number,url,isDraft"
+        "--base", "main", "--state", "all", "--limit", "10",
+        "--json", "number,url,isDraft,state,mergedAt"
     )
     if ($prListResult.ExitCode -ne 0) {
         throw "Pull Requests konnten nicht abgefragt werden: $($prListResult.Output -join ' ')"
     }
-    $prJson = (($prListResult.Output | ForEach-Object { [string]$_ }) -join "`n").Trim()
+    $prJson = Convert-NativeOutputToText $prListResult.Output
     if ([string]::IsNullOrWhiteSpace($prJson)) {
         throw "GitHub CLI lieferte bei der Pull-Request-Abfrage keine JSON-Antwort."
     }
     try {
-        $prRows = @(ConvertFrom-Json -InputObject $prJson)
+        $prRows = @(Convert-JsonArray $prJson)
     } catch {
         throw "Pull-Request-JSON konnte nicht gelesen werden: $prJson"
     }
     $pr = $prRows | Where-Object {
-        -not [string]::IsNullOrWhiteSpace([string]$_.url)
+        -not [string]::IsNullOrWhiteSpace([string]$_.url) -and
+        ($_.state -eq "OPEN" -or -not [string]::IsNullOrWhiteSpace([string]$_.mergedAt))
     } | Select-Object -First 1
+    $prAlreadyMerged = $false
 
     if ($null -ne $pr) {
         $prUrl = [string]$pr.url
-        if ($pr.isDraft) {
+        $prAlreadyMerged = -not [string]::IsNullOrWhiteSpace([string]$pr.mergedAt)
+        if ($pr.isDraft -and -not $prAlreadyMerged) {
             Invoke-Checked $gh @("pr", "ready", $prUrl, "--repo", $repository)
         }
     } else {
@@ -255,14 +297,14 @@ try {
             $lookupResult = Invoke-CapturedNative $gh @(
                 "pr", "list", "--repo", $repository, "--head", $branch,
                 "--base", "main", "--state", "open", "--limit", "1",
-                "--json", "number,url,isDraft"
+                "--json", "number,url,isDraft,state,mergedAt"
             )
             if ($lookupResult.ExitCode -ne 0) {
                 throw "Der erstellte Pull Request konnte nicht erneut abgefragt werden: $($lookupResult.Output -join ' ')"
             }
-            $lookupJson = (($lookupResult.Output | ForEach-Object { [string]$_ }) -join "`n").Trim()
+            $lookupJson = Convert-NativeOutputToText $lookupResult.Output
             try {
-                $lookupRows = @(ConvertFrom-Json -InputObject $lookupJson)
+                $lookupRows = @(Convert-JsonArray $lookupJson)
             } catch {
                 throw "Die erneute Pull-Request-Abfrage lieferte ungueltiges JSON: $lookupJson"
             }
@@ -280,6 +322,9 @@ try {
     Write-Host "Pull Request: $prUrl"
 
     Write-Host "8/10 GitHub-Actions-Pruefungen abwarten ..."
+    if ($prAlreadyMerged) {
+        Write-Host "Pull Request ist bereits gemergt; CI-Wartephase wird uebersprungen."
+    } else {
     $checksSeen = $false
     $lastCheckMessage = ""
     for ($attempt = 1; $attempt -le 120; $attempt++) {
@@ -287,11 +332,10 @@ try {
             "pr", "checks", $prUrl, "--repo", $repository,
             "--json", "name,state,bucket,link"
         )
-        $raw = ($checkResult.Output | ForEach-Object { [string]$_ }) -join "`n"
-        $raw = $raw.Trim()
+        $raw = Convert-NativeOutputToText $checkResult.Output
         if ($raw.StartsWith("[")) {
             try {
-                $checks = @(ConvertFrom-Json -InputObject $raw)
+                $checks = @(Convert-JsonArray $raw)
             } catch {
                 $checks = @()
                 $lastCheckMessage = "Ungueltige Check-JSON-Antwort: $raw"
@@ -331,6 +375,7 @@ try {
         }
         Start-Sleep -Seconds 10
     }
+    }
 
     Write-Host "9/10 Pull Request mergen und Release-Tag pushen ..."
     if ($prUrl -notmatch '/pull/([0-9]+)/?$') {
@@ -338,6 +383,7 @@ try {
     }
     $prNumber = $Matches[1]
     $mergeSucceeded = $false
+    $mergeCommit = ""
     $lastMergeOutput = ""
 
     for ($mergeAttempt = 1; $mergeAttempt -le 6; $mergeAttempt++) {
@@ -346,9 +392,10 @@ try {
         $stateResult = Invoke-CapturedNative $gh @("api", "repos/$repository/pulls/$prNumber")
         if ($stateResult.ExitCode -eq 0) {
             try {
-                $state = ConvertFrom-Json -InputObject (($stateResult.Output -join "`n").Trim())
+                $state = ConvertFrom-Json -InputObject (Convert-NativeOutputToText $stateResult.Output)
                 if (-not [string]::IsNullOrWhiteSpace([string]$state.merged_at)) {
                     $mergeSucceeded = $true
+                    $mergeCommit = [string]$state.merge_commit_sha
                     break
                 }
             } catch {
@@ -380,7 +427,7 @@ try {
         )
         if ($restMerge.ExitCode -eq 0) {
             try {
-                $restResult = ConvertFrom-Json -InputObject (($restMerge.Output -join "`n").Trim())
+                $restResult = ConvertFrom-Json -InputObject (Convert-NativeOutputToText $restMerge.Output)
                 $mergeSucceeded = [bool]$restResult.merged
             } catch {
                 $mergeSucceeded = $false
@@ -392,33 +439,63 @@ try {
         }
     }
 
+    # Do not tag a moving `origin/main`.  Read the exact merge commit from the
+    # PR and wait briefly for GitHub's status endpoint to become consistent.
+    for ($confirmAttempt = 1; $confirmAttempt -le 30 -and [string]::IsNullOrWhiteSpace($mergeCommit); $confirmAttempt++) {
+        $confirmResult = Invoke-CapturedNative $gh @("api", "repos/$repository/pulls/$prNumber")
+        if ($confirmResult.ExitCode -eq 0) {
+            try {
+                $confirmedPr = ConvertFrom-Json -InputObject (Convert-NativeOutputToText $confirmResult.Output)
+                if (-not [string]::IsNullOrWhiteSpace([string]$confirmedPr.merged_at)) {
+                    $mergeCommit = [string]$confirmedPr.merge_commit_sha
+                    break
+                }
+            } catch {
+                # A transient malformed response is retried below.
+            }
+        }
+        Start-Sleep -Seconds 2
+    }
+    if ([string]::IsNullOrWhiteSpace($mergeCommit)) {
+        throw "Der Pull Request wurde gemergt, aber GitHub lieferte keinen Merge-Commit. Es wurde bewusst kein Tag erstellt."
+    }
+
     Invoke-Checked $git @("fetch", "--prune", "origin", "main")
-    $localTag = (& $git tag --list $tag).Trim()
+    Invoke-Checked $git @("cat-file", "-e", "$mergeCommit^{commit}")
+    Invoke-Checked $git @("merge-base", "--is-ancestor", $mergeCommit, "origin/main")
+    # `git tag --list` writes no pipeline object when the tag is absent.
+    # Joining an explicit array keeps the value an empty string instead of
+    # `$null`, which is important under Windows PowerShell 5.1.
+    $localTag = ((@(& $git tag --list $tag) | ForEach-Object { [string]$_ }) -join "`n").Trim()
     if ($localTag) {
         Invoke-Checked $git @("tag", "-d", $tag)
     }
-    Invoke-Checked $git @("tag", "-a", $tag, "origin/main", "-m", "DA6IT.de Wavelog Offline Logger $tag")
+    Invoke-Checked $git @("tag", "-a", $tag, $mergeCommit, "-m", "DA6IT.de Wavelog Offline Logger $tag")
     Invoke-Checked $git @("push", "origin", $tag)
+    }
 
     Write-Host "10/10 Plattform-Builds und GitHub-Release abwarten ..."
     $releaseRun = $null
-    for ($attempt = 1; $attempt -le 30; $attempt++) {
+    for ($attempt = 1; $attempt -le 120; $attempt++) {
         $runsResult = Invoke-CapturedNative $gh @(
             "run", "list", "--repo", $repository, "--workflow", "release.yml",
-            "--event", "push", "--limit", "20",
+            "--event", "push", "--limit", "50",
             "--json", "databaseId,headBranch,status,conclusion,url"
         )
         if ($runsResult.ExitCode -eq 0) {
-            $runsJson = (($runsResult.Output | ForEach-Object { [string]$_ }) -join "`n").Trim()
+            $runsJson = Convert-NativeOutputToText $runsResult.Output
             if ($runsJson.StartsWith("[")) {
                 try {
-                    $runs = @(ConvertFrom-Json -InputObject $runsJson)
-                    $releaseRun = $runs | Where-Object { $_.headBranch -eq $tag } | Select-Object -First 1
+                    $runs = @(Convert-JsonArray $runsJson)
+                    $releaseRun = $runs | Where-Object { [string]$_.headBranch -eq $tag } | Select-Object -First 1
                     if ($releaseRun) { break }
                 } catch {
                     # GitHub may briefly return an incomplete response; retry.
                 }
             }
+        }
+        if (($attempt % 12) -eq 0) {
+            Write-Host "Release-Workflow ist noch nicht sichtbar; warte weiter ..."
         }
         Start-Sleep -Seconds 5
     }
@@ -431,7 +508,9 @@ try {
     $releaseUrl = "https://github.com/$repository/releases/tag/$tag"
     Write-Host ""
     Write-Host "RELEASE ERFOLGREICH: $releaseUrl" -ForegroundColor Green
-    Write-Host "Lokale Test-EXE: $expectedExe"
+    if (Test-Path -LiteralPath $expectedExe) {
+        Write-Host "Lokale Test-EXE: $expectedExe"
+    }
 } finally {
     Pop-Location
 }
