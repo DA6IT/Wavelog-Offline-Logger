@@ -36,6 +36,28 @@ function Invoke-Checked {
     }
 }
 
+function Invoke-CapturedNative {
+    param(
+        [Parameter(Mandatory=$true)][string]$File,
+        [string[]]$CommandArguments = @()
+    )
+    # Windows PowerShell 5.1 converts native stderr into error records. During
+    # an intentional retry those records must be captured instead of being
+    # promoted to a terminating error by the script-wide Stop preference.
+    $previousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $capturedOutput = @(& $File @CommandArguments 2>&1)
+        $capturedExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    [pscustomobject]@{
+        ExitCode = $capturedExitCode
+        Output = $capturedOutput
+    }
+}
+
 $git = Find-Tool "git" @("C:\Program Files\Git\cmd\git.exe")
 $gh = Find-Tool "gh" @("C:\Program Files\GitHub CLI\gh.exe")
 $python = Find-Tool "python" @(
@@ -273,7 +295,65 @@ try {
     }
 
     Write-Host "9/10 Pull Request mergen und Release-Tag pushen ..."
-    Invoke-Checked $gh @("pr", "merge", $prUrl, "--repo", $repository, "--merge", "--delete-branch")
+    if ($prUrl -notmatch '/pull/([0-9]+)/?$') {
+        throw "Pull-Request-Nummer konnte nicht aus der URL gelesen werden: $prUrl"
+    }
+    $prNumber = $Matches[1]
+    $mergeSucceeded = $false
+    $lastMergeOutput = ""
+
+    for ($mergeAttempt = 1; $mergeAttempt -le 6; $mergeAttempt++) {
+        # REST status is deliberately used here because the normal gh merge
+        # path itself talks to GraphQL and may fail transiently.
+        $stateResult = Invoke-CapturedNative $gh @("api", "repos/$repository/pulls/$prNumber")
+        if ($stateResult.ExitCode -eq 0) {
+            try {
+                $state = ConvertFrom-Json -InputObject (($stateResult.Output -join "`n").Trim())
+                if (-not [string]::IsNullOrWhiteSpace([string]$state.merged_at)) {
+                    $mergeSucceeded = $true
+                    break
+                }
+            } catch {
+                # A malformed transient response is handled by the retry.
+            }
+        }
+
+        Write-Host "Merge-Versuch $mergeAttempt/6 ..."
+        $mergeResult = Invoke-CapturedNative $gh @(
+            "pr", "merge", $prUrl, "--repo", $repository,
+            "--merge", "--delete-branch"
+        )
+        if ($mergeResult.ExitCode -eq 0) {
+            $mergeSucceeded = $true
+            break
+        }
+        $lastMergeOutput = ($mergeResult.Output | ForEach-Object { [string]$_ }) -join " "
+        if ($mergeAttempt -lt 6) {
+            Write-Warning "GitHub-Merge noch nicht erfolgreich: $lastMergeOutput"
+            Start-Sleep -Seconds 10
+        }
+    }
+
+    if (-not $mergeSucceeded) {
+        Write-Warning "GraphQL-Merge blieb erfolglos; versuche den offiziellen REST-Merge-Endpunkt."
+        $restMerge = Invoke-CapturedNative $gh @(
+            "api", "--method", "PUT", "repos/$repository/pulls/$prNumber/merge",
+            "-f", "merge_method=merge"
+        )
+        if ($restMerge.ExitCode -eq 0) {
+            try {
+                $restResult = ConvertFrom-Json -InputObject (($restMerge.Output -join "`n").Trim())
+                $mergeSucceeded = [bool]$restResult.merged
+            } catch {
+                $mergeSucceeded = $false
+            }
+        }
+        if (-not $mergeSucceeded) {
+            $restMessage = ($restMerge.Output | ForEach-Object { [string]$_ }) -join " "
+            throw "Pull Request konnte auch nach Wiederholungen nicht gemergt werden. GraphQL: $lastMergeOutput REST: $restMessage"
+        }
+    }
+
     Invoke-Checked $git @("fetch", "--prune", "origin", "main")
     $localTag = (& $git tag --list $tag).Trim()
     if ($localTag) {
