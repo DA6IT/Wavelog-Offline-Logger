@@ -186,20 +186,61 @@ try {
     Invoke-Checked $git @("push", "--set-upstream", "origin", $branch)
 
     Write-Host "7/10 Pull Request erstellen oder wiederverwenden ..."
-    $prRowsRaw = & $gh pr list --repo $repository --head $branch --base main --state open --json number,url,isDraft
+    $prUrl = ""
+    $prRowsRaw = @(& $gh pr list --repo $repository --head $branch --base main --state open --limit 1 --json number,url,isDraft)
     if ($LASTEXITCODE -ne 0) { throw "Pull Requests konnten nicht abgefragt werden." }
-    $prRows = @($prRowsRaw | ConvertFrom-Json)
-    if ($prRows.Count -gt 0) {
-        $pr = $prRows[0]
+    $prJson = ($prRowsRaw -join "`n").Trim()
+    if ([string]::IsNullOrWhiteSpace($prJson)) {
+        throw "GitHub CLI lieferte bei der Pull-Request-Abfrage keine JSON-Antwort."
+    }
+    try {
+        $prRows = @(ConvertFrom-Json -InputObject $prJson)
+    } catch {
+        throw "Pull-Request-JSON konnte nicht gelesen werden: $prJson"
+    }
+    $pr = $prRows | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string]$_.url)
+    } | Select-Object -First 1
+
+    if ($null -ne $pr) {
         $prUrl = [string]$pr.url
         if ($pr.isDraft) {
             Invoke-Checked $gh @("pr", "ready", $prUrl, "--repo", $repository)
         }
     } else {
-        $prUrl = (& $gh pr create --repo $repository --base main --head $branch --title "Release v$version" --body-file "docs\RELEASE_NOTES.md").Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $prUrl) {
-            throw "Pull Request konnte nicht erstellt werden."
+        $createOutput = @(& $gh pr create --repo $repository --base main --head $branch --title "Release v$version" --body-file "docs\RELEASE_NOTES.md" 2>&1)
+        $createExitCode = $LASTEXITCODE
+        if ($createExitCode -ne 0) {
+            throw "Pull Request konnte nicht erstellt werden: $($createOutput -join ' ')"
         }
+        $prUrl = [string]($createOutput | ForEach-Object { [string]$_ } | Where-Object {
+            $_ -match '^https://github\.com/[^/]+/[^/]+/pull/[0-9]+/?$'
+        } | Select-Object -Last 1)
+
+        # gh-Ausgaben koennen je nach Version oder Terminalformatierung von
+        # der reinen URL abweichen. In diesem Fall wird der gerade erstellte
+        # PR noch einmal strukturiert abgefragt.
+        if ([string]::IsNullOrWhiteSpace($prUrl)) {
+            $lookupRaw = @(& $gh pr list --repo $repository --head $branch --base main --state open --limit 1 --json number,url,isDraft)
+            if ($LASTEXITCODE -ne 0) {
+                throw "Der erstellte Pull Request konnte nicht erneut abgefragt werden."
+            }
+            $lookupJson = ($lookupRaw -join "`n").Trim()
+            try {
+                $lookupRows = @(ConvertFrom-Json -InputObject $lookupJson)
+            } catch {
+                throw "Die erneute Pull-Request-Abfrage lieferte ungueltiges JSON: $lookupJson"
+            }
+            $createdPr = $lookupRows | Where-Object {
+                -not [string]::IsNullOrWhiteSpace([string]$_.url)
+            } | Select-Object -First 1
+            if ($null -ne $createdPr) {
+                $prUrl = [string]$createdPr.url
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($prUrl)) {
+        throw "Pull-Request-URL fehlt trotz erfolgreichem Erstellen bzw. Abfragen."
     }
     Write-Host "Pull Request: $prUrl"
 
