@@ -209,9 +209,15 @@ try {
 
     Write-Host "7/10 Pull Request erstellen oder wiederverwenden ..."
     $prUrl = ""
-    $prRowsRaw = @(& $gh pr list --repo $repository --head $branch --base main --state open --limit 1 --json number,url,isDraft)
-    if ($LASTEXITCODE -ne 0) { throw "Pull Requests konnten nicht abgefragt werden." }
-    $prJson = ($prRowsRaw -join "`n").Trim()
+    $prListResult = Invoke-CapturedNative $gh @(
+        "pr", "list", "--repo", $repository, "--head", $branch,
+        "--base", "main", "--state", "open", "--limit", "1",
+        "--json", "number,url,isDraft"
+    )
+    if ($prListResult.ExitCode -ne 0) {
+        throw "Pull Requests konnten nicht abgefragt werden: $($prListResult.Output -join ' ')"
+    }
+    $prJson = (($prListResult.Output | ForEach-Object { [string]$_ }) -join "`n").Trim()
     if ([string]::IsNullOrWhiteSpace($prJson)) {
         throw "GitHub CLI lieferte bei der Pull-Request-Abfrage keine JSON-Antwort."
     }
@@ -230,12 +236,15 @@ try {
             Invoke-Checked $gh @("pr", "ready", $prUrl, "--repo", $repository)
         }
     } else {
-        $createOutput = @(& $gh pr create --repo $repository --base main --head $branch --title "Release v$version" --body-file "docs\RELEASE_NOTES.md" 2>&1)
-        $createExitCode = $LASTEXITCODE
-        if ($createExitCode -ne 0) {
-            throw "Pull Request konnte nicht erstellt werden: $($createOutput -join ' ')"
+        $createResult = Invoke-CapturedNative $gh @(
+            "pr", "create", "--repo", $repository, "--base", "main",
+            "--head", $branch, "--title", "Release v$version",
+            "--body-file", "docs\RELEASE_NOTES.md"
+        )
+        if ($createResult.ExitCode -ne 0) {
+            throw "Pull Request konnte nicht erstellt werden: $($createResult.Output -join ' ')"
         }
-        $prUrl = [string]($createOutput | ForEach-Object { [string]$_ } | Where-Object {
+        $prUrl = [string]($createResult.Output | ForEach-Object { [string]$_ } | Where-Object {
             $_ -match '^https://github\.com/[^/]+/[^/]+/pull/[0-9]+/?$'
         } | Select-Object -Last 1)
 
@@ -243,11 +252,15 @@ try {
         # der reinen URL abweichen. In diesem Fall wird der gerade erstellte
         # PR noch einmal strukturiert abgefragt.
         if ([string]::IsNullOrWhiteSpace($prUrl)) {
-            $lookupRaw = @(& $gh pr list --repo $repository --head $branch --base main --state open --limit 1 --json number,url,isDraft)
-            if ($LASTEXITCODE -ne 0) {
-                throw "Der erstellte Pull Request konnte nicht erneut abgefragt werden."
+            $lookupResult = Invoke-CapturedNative $gh @(
+                "pr", "list", "--repo", $repository, "--head", $branch,
+                "--base", "main", "--state", "open", "--limit", "1",
+                "--json", "number,url,isDraft"
+            )
+            if ($lookupResult.ExitCode -ne 0) {
+                throw "Der erstellte Pull Request konnte nicht erneut abgefragt werden: $($lookupResult.Output -join ' ')"
             }
-            $lookupJson = ($lookupRaw -join "`n").Trim()
+            $lookupJson = (($lookupResult.Output | ForEach-Object { [string]$_ }) -join "`n").Trim()
             try {
                 $lookupRows = @(ConvertFrom-Json -InputObject $lookupJson)
             } catch {
@@ -268,10 +281,21 @@ try {
 
     Write-Host "8/10 GitHub-Actions-Pruefungen abwarten ..."
     $checksSeen = $false
+    $lastCheckMessage = ""
     for ($attempt = 1; $attempt -le 120; $attempt++) {
-        $raw = & $gh pr checks $prUrl --repo $repository --json name,state,bucket,link 2>$null
-        if ($raw) {
-            $checks = @($raw | ConvertFrom-Json)
+        $checkResult = Invoke-CapturedNative $gh @(
+            "pr", "checks", $prUrl, "--repo", $repository,
+            "--json", "name,state,bucket,link"
+        )
+        $raw = ($checkResult.Output | ForEach-Object { [string]$_ }) -join "`n"
+        $raw = $raw.Trim()
+        if ($raw.StartsWith("[")) {
+            try {
+                $checks = @(ConvertFrom-Json -InputObject $raw)
+            } catch {
+                $checks = @()
+                $lastCheckMessage = "Ungueltige Check-JSON-Antwort: $raw"
+            }
             if ($checks.Count -gt 0) {
                 $checksSeen = $true
                 $failed = @($checks | Where-Object { $_.bucket -in @("fail", "cancel") })
@@ -286,9 +310,23 @@ try {
                 }
                 Write-Host "Noch $($pending.Count) Pruefung(en) aktiv ..."
             }
+        } elseif ($raw -match 'no checks reported') {
+            $lastCheckMessage = $raw
+            if ($attempt -eq 1) {
+                Write-Host "GitHub hat die neuen Pruefungen noch nicht registriert; warte ..."
+            }
+        } elseif ($checkResult.ExitCode -ne 0) {
+            $lastCheckMessage = if ($raw) { $raw } else { "gh pr checks Exit-Code $($checkResult.ExitCode)" }
+            if (($attempt % 6) -eq 1) {
+                Write-Warning "Check-Status voruebergehend nicht abrufbar; warte weiter: $lastCheckMessage"
+            }
         }
         if ($attempt -eq 120) {
-            $reason = if ($checksSeen) { "Pruefungen wurden nicht rechtzeitig abgeschlossen." } else { "GitHub hat keine Pruefungen gemeldet." }
+            $reason = if ($checksSeen) {
+                "Pruefungen wurden nicht rechtzeitig abgeschlossen."
+            } else {
+                "GitHub hat keine Pruefungen gemeldet. Letzte Antwort: $lastCheckMessage"
+            }
             throw $reason
         }
         Start-Sleep -Seconds 10
@@ -365,11 +403,22 @@ try {
     Write-Host "10/10 Plattform-Builds und GitHub-Release abwarten ..."
     $releaseRun = $null
     for ($attempt = 1; $attempt -le 30; $attempt++) {
-        $runsRaw = & $gh run list --repo $repository --workflow release.yml --event push --limit 20 --json databaseId,headBranch,status,conclusion,url
-        if ($LASTEXITCODE -eq 0 -and $runsRaw) {
-            $runs = @($runsRaw | ConvertFrom-Json)
-            $releaseRun = $runs | Where-Object { $_.headBranch -eq $tag } | Select-Object -First 1
-            if ($releaseRun) { break }
+        $runsResult = Invoke-CapturedNative $gh @(
+            "run", "list", "--repo", $repository, "--workflow", "release.yml",
+            "--event", "push", "--limit", "20",
+            "--json", "databaseId,headBranch,status,conclusion,url"
+        )
+        if ($runsResult.ExitCode -eq 0) {
+            $runsJson = (($runsResult.Output | ForEach-Object { [string]$_ }) -join "`n").Trim()
+            if ($runsJson.StartsWith("[")) {
+                try {
+                    $runs = @(ConvertFrom-Json -InputObject $runsJson)
+                    $releaseRun = $runs | Where-Object { $_.headBranch -eq $tag } | Select-Object -First 1
+                    if ($releaseRun) { break }
+                } catch {
+                    # GitHub may briefly return an incomplete response; retry.
+                }
+            }
         }
         Start-Sleep -Seconds 5
     }
