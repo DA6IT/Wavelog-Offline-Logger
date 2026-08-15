@@ -1,145 +1,75 @@
 # DA6IT.de Wavelog Offline Logger
 
-Offlinefähiger Desktop-Logger für Funkamateure. QSOs werden zuerst lokal gespeichert und erst auf Wunsch mit Wavelog synchronisiert.
+Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn Wavelog oder das Internet nicht erreichbar ist. Jedes QSO wird zuerst sicher lokal als ADI gespeichert und später manuell oder automatisch mit Wavelog synchronisiert.
 
-**Download:** [Aktuelle Version für Windows und macOS](https://github.com/DA6IT/Wavelog-Offline-Logger/releases/latest)
+**Download:** [Aktuelles Release für Windows, macOS und Linux](https://github.com/DA6IT/Wavelog-Offline-Logger/releases/latest)
 
-## Funktionen
+![QSO-Logging mit Callbook-Seitenleiste](docs/screenshots/qso-logging.png)
 
-- Normales QSO-Logging vollständig ohne Internet
-- **Fast Log / DXpedition:** Rufzeichen eingeben, Enter drücken, nächstes QSO
-- Tägliche ADI-Dateien als primäres lokales Logbuch
-- Mehrere getrennte Stations- und Operatorprofile
-- Bidirektionaler Abgleich mit Wavelog API v2
-- Sichtbare Konflikte statt stiller Überschreibungen
-- Offline-Länder-, DXCC-, Zonen- und Kontinenterkennung
-- POTA-, SOTA-, WWFF- und Contest-Felder
-- CAT-Steuerung über das mitgelieferte Hamlib
-- Telnet-DX-Cluster mit Filtern, CAT-Abstimmung und Spotversand
-- WSJT-X- und ADIF-Empfang über einen frei wählbaren UDP-Port
-- QRZ-, LoTW-, eQSL- und DCL-Status sowie lokale Statistiken
-- Automatischer Hinweis auf neue Releases, ohne Fehlermeldung bei fehlendem Internet
+## Highlights
 
-## Windows installieren
+- normales QSO-Logging, Fast Log/DXpedition und Contest-Logging
+- tägliche ADI-Dateien als primäres lokales Logbuch
+- mehrere getrennte Stationsprofile
+- bidirektionaler Wavelog-API-v2-Sync mit sichtbaren Konflikten
+- optionaler Online-Modus: nur neue QSOs sofort pushen
+- optionaler Voll-Sync beim App-Start und/oder Beenden
+- Callbook-Daten über Wavelog oder QRZ.com, einschließlich Stationsfoto
+- CAT über mitgeliefertes Hamlib, inklusive TUNE/ATU
+- Telnet-DX-Cluster, Filter, Worked-Markierung und Spotversand
+- WSJT-X- und ADIF-Empfang über UDP
+- deutsche und englische Oberfläche, Light- und Dark-Theme
+- Builds für Windows x64, macOS Apple Silicon/Intel und Linux x64/ARM64
 
-1. Im [GitHub-Release](https://github.com/DA6IT/Wavelog-Offline-Logger/releases) die Datei `DA6IT.de-Wavelog-Offline-Logger-v<VERSION>-windows-x64.exe` herunterladen.
-2. Optional die Prüfsumme aus `SHA256SUMS.txt` vergleichen.
-3. EXE starten.
+## Installation
 
-Beim ersten Start richtet der Bootstrapper eine private Python-3.12.10-Laufzeit ein. Dafür wird einmalig Internet benötigt; Python muss nicht systemweit installiert sein. Download und Prüfsumme werden vor der Einrichtung geprüft.
+| System | Release-Datei | Hinweis |
+|---|---|---|
+| Windows x64 | `*-windows-x64.exe` | private Python-Laufzeit; Hamlib enthalten |
+| macOS Apple Silicon | `*-macos-arm64.zip` | `.app` nach Programme verschieben |
+| macOS Intel | `*-macos-x64.zip` | beim ersten Start Rechtsklick → Öffnen |
+| Debian/Ubuntu | `*.deb` | `sudo apt install ./DATEI.deb` |
+| Linux allgemein | `*.AppImage` | ausführbar machen und starten |
+| Arch Linux | `*.pkg.tar.zst` | `sudo pacman -U DATEI.pkg.tar.zst` |
 
-Hamlib ist vollständig im Windows-Build enthalten. Für CAT wird nur der passende Windows-Treiber des Funkgeräts benötigt.
-
-Anwendungsdaten liegen unter:
-
-```text
-%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\
-```
-
-## macOS installieren
-
-GitHub erzeugt getrennte Pakete für Apple Silicon (`macos-arm64`) und Intel-Macs (`macos-x64`). Das passende ZIP herunterladen, entpacken und `DA6IT.de Wavelog Offline Logger.app` nach **Programme** verschieben. Python und Hamlib sind im App-Bundle enthalten.
-
-Die kostenlose macOS-Fassung ist derzeit nur technisch ad-hoc signiert und nicht von Apple notarisiert. Beim ersten Start deshalb im Finder mit Rechtsklick **Öffnen** wählen und die Rückfrage bestätigen. Es werden keine Systemeinstellungen oder Sicherheitsmechanismen automatisch verändert.
-
-Die Anwendungsdaten liegen kompatibel zu bestehenden Installationen unter:
-
-```text
-~/Library/Application Support/AFU-Tools/WavelogOfflineLogger/
-```
-
-Offizielle Releases werden für **Windows x64**, **macOS Apple Silicon** und **macOS Intel** gebaut.
+Beim ersten Windows-Start lädt der Bootstrapper einmalig eine verifizierte private Python-Laufzeit. Python muss nicht systemweit installiert sein. Für CAT kann zusätzlich der Windows-Treiber des Funkgeräts erforderlich sein.
 
 ## Schnelleinstieg
 
-1. Logger-Profil anlegen oder bearbeiten.
-2. Stationsrufzeichen, Operator und lokalen ADI-Ordner festlegen.
-3. Optional Wavelog-URL, API-v2-Token und Stationsprofil eintragen.
-4. QSO lokal speichern.
-5. Erst bei vorhandener Verbindung **Synchronisieren** auswählen.
+1. Unter **Einstellungen → Station & Wavelog** Rufzeichen, Operator und optional Wavelog eintragen.
+2. Im **Logbuch** ein Rufzeichen und die QSO-Daten erfassen.
+3. QSO speichern – es ist sofort lokal in der ADI-Datei vorhanden.
+4. Später **Synchronisieren** anklicken oder den profilbezogenen Online-Modus aktivieren.
 
-Der Logger ersetzt Wavelog nicht. Er ergänzt Wavelog für portable Einsätze, Pileups, Fielddays und andere Situationen ohne zuverlässiges Internet.
+Der Logger ersetzt Wavelog nicht. Er ergänzt es für portable Einsätze, DXpeditionen, Pileups, Conteste und Fielddays.
 
-## Fast Log / DXpedition
+## Daten und Sicherheit
 
-Band, Mode, Frequenz, Rapporte und Leistung werden einmal festgelegt. Danach genügt für jedes QSO:
-
-```text
-Rufzeichen + Enter
-```
-
-Datum und UTC-Zeit werden automatisch gesetzt. Jedes QSO landet sofort als `LOCAL ONLY` in der lokalen ADI-Datei. Wavelog wird erst beim manuellen Sync angesprochen. Das letzte noch nicht synchronisierte Fast-Log-QSO kann kontrolliert zurückgenommen werden.
-
-## CAT mit Hamlib
-
-Unter **CAT Setup** stehen mehr als 300 Hamlib-Funkgerätemodelle zur Verfügung. Frequenz, Band und Mode können automatisch in normales Logging, Fast Log und Contest-Logging übernommen werden.
-
-CAT startet nach jedem Programmstart bewusst ausgeschaltet. **CAT stoppen** und das Beenden des Loggers beenden auch den von der Anwendung gestarteten `rigctld`-Prozess.
-
-## DX Cluster
-
-Für den Empfang ist standardmäßig `dxcluster.afu-tools.de:7300` eingetragen. Spots erscheinen live und können nach Band, Mode, Zeitraum und Spotter-Region gefiltert sowie über jede Tabellenspalte sortiert werden.
-
-- Doppelklick stimmt bei aktivem CAT den TRX auf Frequenz und erkannten Mode ab.
-- **QSO übernehmen** füllt anschließend das normale QSO-Formular.
-- Neue Spots werden kurz hellblau markiert.
-- Bereits gearbeitete Rufzeichen und Länder werden nur für dasselbe **Band und denselben Mode** grün markiert.
-- Fehlende Modes werden aus Kommentar, typischen FT8-Frequenzen und eindeutigen Bereichen des IARU-Region-1-Bandplans abgeleitet; mehrdeutige Bereiche verwenden weiterhin LSB oder USB.
-
-Zum eigenen Spotten dient getrennt die DXSpider-Verbindung `dxcluster.afu-tools.de:7301`. Beide Server und Ports sind profilbezogen änderbar; das Login-Rufzeichen kommt automatisch aus dem aktiven Stationsprofil. Ein Spot wird nur nach ausdrücklicher Bestätigung gesendet.
-
-Empfang und Versand von DX-Spots benötigen Internet. Alle lokalen Logfunktionen bleiben offline nutzbar.
-
-## WSJT-X und ADIF über UDP
-
-Unter **UDP Logging** kann ein freier Port gewählt werden. Unterstützt werden:
-
-- native geloggte QSOs von WSJT-X
-- vollständige ADIF-Datensätze mit `<EOR>` anderer Programme
-- Duplikatschutz bei mehrfach übertragenen QSOs
-
-Der Empfänger startet bewusst manuell. Eingehende QSOs werden lokal gespeichert und später über den normalen Wavelog-Sync abgeglichen.
-
-## Daten und Sync-Sicherheit
-
-- ADI bleibt das primäre lokale QSO-Logbuch.
-- SQLite speichert nur Einstellungen, Zuordnungen und Sync-Metadaten.
-- Gleichzeitige lokale und entfernte Änderungen erzeugen einen sichtbaren Konflikt.
-- Ein außerhalb der App fehlendes lokales QSO wird nicht ungefragt aus Wavelog gelöscht.
+- ADI ist das primäre QSO-Logbuch; SQLite enthält Einstellungen und Sync-Metadaten.
+- Ohne Internet bleibt die App still im Modus `LOCAL ONLY`.
+- Ein Laufzeit-Push überträgt ausschließlich neue, unverknüpfte QSOs.
+- Änderungen, Downloads, Löschungen und Konflikte behandelt nur der vollständige Sync.
 - Profil-Löschung wirkt ausschließlich lokal und löscht keine Wavelog-Daten.
-- Es erfolgen keine heimlichen Online-Callbook-Abfragen.
-
-Regelmäßige Sicherungen der ADI-Ordner und des Anwendungsordners werden empfohlen.
+- eQSL-Felder sind vorbereitet, aber weiterhin **Coming soon** und noch ohne Verbindung.
 
 ## Dokumentation
 
-- [Benutzerhandbuch](docs/USER_GUIDE.md)
+- [Ausführliches Benutzerhandbuch](docs/USER_GUIDE.md)
+- [Vollständige Screenshot-Galerie](docs/SCREENSHOTS.md)
 - [Fehlerhilfe](docs/TROUBLESHOOTING.md)
+- [Release-Hinweise](docs/RELEASE_NOTES.md)
 - [Architektur](docs/ARCHITECTURE.md)
 - [Mitwirken](CONTRIBUTING.md)
-- [Sicherheit](SECURITY.md)
 
-## Aus dem Quellcode starten
-
-Benötigt wird Python 3.12 mit Tk-Unterstützung; externe Python-Pakete sind nicht erforderlich.
+## Entwicklung und Builds
 
 ```powershell
-python app.py
 python selftest.py
-```
-
-Der reproduzierbare Windows-Build verwendet zusätzlich Go 1.23.2:
-
-```powershell
 .\scripts\package-release.ps1
 ```
 
-Die macOS-App wird auf einem echten Mac beziehungsweise durch die beiden GitHub-macOS-Runner gebaut:
-
-```bash
-./scripts/build-macos.sh dist
-```
+Linux wird mit `bash ./scripts/build-linux.sh dist`, macOS mit `./scripts/build-macos.sh dist` gebaut. Die offiziellen Binärpakete entstehen reproduzierbar in GitHub Actions.
 
 ## Lizenz
 
-Dieses Projekt steht unter der [MIT-Lizenz](LICENSE). Es ist ein unabhängiges Community-Projekt und kein Bestandteil des Wavelog-Projekts.
+[MIT](LICENSE) · unabhängiges Community-Projekt, kein Bestandteil des Wavelog-Projekts.

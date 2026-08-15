@@ -15,6 +15,8 @@ bootstrap_windows.go
         +--------->  external_logging.py <---->  WSJT-X / ADIF über UDP
         |
         +--------->  update_check.py <---->  GitHub Releases API
+        |
+        +--------->  callbook.py <----> Wavelog Lookup API / QRZ XML API
 ```
 
 ### `bootstrap_windows.go`
@@ -36,6 +38,8 @@ Enthält die fachliche Logik:
 - Wavelog API v2 ansprechen
 - Statistiken und QSL-Status aufbereiten
 
+Der Online-Modus verwendet mit `push_new_only()` bewusst einen engeren Pfad als der vollständige bidirektionale Sync: Er erstellt ausschließlich noch nie verknüpfte `LOCAL ONLY`-QSOs. Fehlerhafte, bereits verknüpfte, geänderte oder gelöschte Datensätze werden nicht blind automatisch erneut übertragen und bleiben dem sicheren Voll-Sync vorbehalten.
+
 ### `cat_control.py`
 
 Verwaltet den gebündelten `rigctld`-Prozess, liest die Hamlib-Modellliste, erkennt Windows-COM-Ports und ordnet Funkgerätemodi den Logger-/ADIF-Modi zu. CAT-Einstellungen werden über die bestehende profilbezogene Einstellungsdatenbank gespeichert.
@@ -52,9 +56,13 @@ Implementiert den lokal start- und stoppbaren UDP-Empfänger, das native WSJT-X-
 
 Fragt nach dem Programmstart in einem Hintergrundthread ausschließlich die öffentliche GitHub-Release-Liste ab. Netzwerk-, HTTP- und Formatfehler liefern still kein Ergebnis. Stabile Versionen ignorieren Vorabversionen.
 
+### `callbook.py`
+
+Normalisiert die Wavelog- und QRZ.com-Antworten in ein gemeinsames Datenmodell. QRZ-Sitzungsschlüssel werden nur im Arbeitsspeicher gehalten und bei Ablauf einmal erneuert. Erfolgreiche Antworten werden profilspezifisch in SQLite zwischengespeichert; der Cache ersetzt niemals die ADI-QSO-Daten. Automatische Abfragen laufen in Hintergrundthreads und dürfen das lokale Logging bei Netzwerkfehlern nicht beeinflussen.
+
 ### `selftest.py`
 
-Deckt Kernabläufe, lokale Verlustsicherheit, Profile, Migrationen, Contest-Felder, Hash-Migrationen, CAT-Zuordnungen, DX-Cluster-Parsing und lokales Telnet-Verhalten, UDP-/WSJT-X-Protokolle und die fehlertolerante Release-Prüfung ohne echte Wavelog-Instanz ab.
+Deckt Kernabläufe, lokale Verlustsicherheit, Profile, Migrationen, Contest-Felder, Hash-Migrationen, CAT-Zuordnungen, DX-Cluster-Parsing und lokales Telnet-Verhalten, UDP-/WSJT-X-Protokolle, Callbook-Normalisierung/Cache sowie die fehlertolerante Release-Prüfung ohne echte Wavelog-Instanz ab.
 
 ## Datenmodell
 
@@ -69,11 +77,12 @@ Ein Tombstone (`pending_delete`) darf nur durch eine ausdrückliche Löschaktion
 3. Keine Remote-Wirkung beim Löschen eines Profils.
 4. Vorhandene Baselines und Legacy-Hashes werden migrationsfähig gehalten.
 5. Benutzerdaten werden nicht ungefragt gelöscht.
+6. Der automatische Laufzeit-Push führt keine Remote-Listenabfrage, Änderung, Löschung oder Konfliktauflösung aus.
 
 ## Token-Schutz
 
-Unter Windows werden neue Tokens mit DPAPI verschlüsselt. Kann DPAPI nicht verwendet werden, wird das Speichern abgebrochen und sichtbar gemeldet. Historische `plain:`-Werte bleiben lesbar, damit bestehende Installationen kontrolliert migriert werden können.
+Unter Windows werden neue Tokens und Passwörter mit DPAPI verschlüsselt. Kann DPAPI nicht verwendet werden, wird das Speichern abgebrochen und sichtbar gemeldet. Historische `plain:`-Werte bleiben lesbar, damit bestehende Installationen kontrolliert migriert werden können. Auf anderen Plattformen werden Geheimnisse derzeit nur lokal kodiert; ein nativer Keychain-/Secret-Service-Speicher ist noch offen.
 
 ## Release-Artefakt
 
-Der Go-Bootstrapper ist kein Python-Onefile-Bundle. Die Anwendung bleibt als eingebetteter Python-Quellcode im Launcher enthalten und wird versionsabhängig in den lokalen Anwendungsordner geschrieben. Der alternative PyInstaller-Batch ist nur eine historische/optionale Buildvariante.
+Der Go-Bootstrapper ist kein Python-Onefile-Bundle. Die Anwendung bleibt als eingebetteter Python-Quellcode im Launcher enthalten und wird versionsabhängig in den lokalen Anwendungsordner geschrieben. Pillow wird beim Windows-Build ohne Abhängigkeit von `pip` als offizielles, per PyPI-SHA-256 geprüftes Wheel vorbereitet. `build_pyinstaller_windows.bat` ist nur noch ein Kompatibilitätsstarter für denselben Go-Build.

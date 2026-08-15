@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import atexit
+import base64
+import io
 import os
 import re
 import sys
@@ -9,6 +11,9 @@ import threading
 import time
 import traceback
 import webbrowser
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +23,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from logger_core import (
     APP_NAME, VERSION, BANDS, MODES, LogStore, MetadataDB, WavelogClient,
     WavelogError, SyncEngine, app_data_dir, default_log_dir, band_from_mhz,
-    qso_hash, CountryDB, ProfileManager, build_fast_log_qso,
+    qso_hash, CountryDB, ProfileManager, WavelogOnlineSettings, build_fast_log_qso,
 )
 from cat_control import (
     CAT_BAUD_RATES, CAT_DATA_BITS, CAT_HANDSHAKES, CAT_LINE_STATES,
@@ -38,20 +43,70 @@ from dx_cluster import (
     worked_flags,
 )
 from update_check import ReleaseInfo, find_newer_release
+from callbook import (
+    CALLBOOK_SOURCE_DISABLED, CALLBOOK_SOURCE_QRZ, CALLBOOK_SOURCE_WAVELOG,
+    CallbookError, CallbookResult, QrzClient, lookup_candidate,
+    normalize_wavelog_result,
+)
+from ui_preferences import PALETTES, UiPreferences, load_ui_preferences, save_ui_preferences, translate_text
+
+try:
+    from PIL import Image, ImageTk
+except ImportError:  # The logger stays fully usable; PNG/GIF still use Tk directly.
+    Image = None
+    ImageTk = None
 
 
-BG = "#f3f5f7"
+BG = "#f6f8fb"
 CARD = "#ffffff"
-TEXT = "#17202a"
+TEXT = "#172033"
 MUTED = "#667085"
-ACCENT = "#1769aa"
-ACCENT_DARK = "#0f4f82"
-BORDER = "#d9e0e7"
-OK = "#287d3c"
+ACCENT = "#0969da"
+ACCENT_DARK = "#0556b3"
+BORDER = "#d8dee8"
+OK = "#1a8f36"
 WARN = "#9a6700"
 ERR = "#b42318"
-SIDEBAR = "#14212b"
-SIDEBAR_TEXT = "#f7f9fb"
+SIDEBAR = "#ffffff"
+SIDEBAR_TEXT = "#253044"
+ACTIVE_BG = "#eaf2ff"
+SURFACE = "#f8fbff"
+INPUT_BG = "#ffffff"
+PHOTO_BG = "#f3f6fa"
+NEUTRAL_BADGE_BG = "#edf2f7"
+OK_BADGE_BG = "#e9f7ec"
+WARN_BADGE_BG = "#fff4df"
+NAV_HOVER = "#f1f5fb"
+NAV_ACTIVE_HOVER = "#dceaff"
+PROGRESS_BG = "#e9eef3"
+DISABLED = "#9bb8cf"
+
+
+def _set_palette(theme: str) -> None:
+    palette = PALETTES.get(theme, PALETTES["light"])
+    globals().update(palette)
+
+CALLBOOK_SOURCE_LABELS_DE = {
+    "Über Wavelog (empfohlen)": CALLBOOK_SOURCE_WAVELOG,
+    "Direkt über QRZ.com": CALLBOOK_SOURCE_QRZ,
+    "Deaktiviert": CALLBOOK_SOURCE_DISABLED,
+}
+CALLBOOK_SOURCE_LABELS_EN = {
+    "Via Wavelog (recommended)": CALLBOOK_SOURCE_WAVELOG,
+    "Directly via QRZ.com": CALLBOOK_SOURCE_QRZ,
+    "Disabled": CALLBOOK_SOURCE_DISABLED,
+}
+CALLBOOK_SOURCE_LABELS = {**CALLBOOK_SOURCE_LABELS_DE, **CALLBOOK_SOURCE_LABELS_EN}
+
+
+def callbook_source_labels(language: str) -> dict[str, str]:
+    return CALLBOOK_SOURCE_LABELS_EN if language == "en" else CALLBOOK_SOURCE_LABELS_DE
+
+
+def callbook_source_name(source: str, language: str) -> str:
+    labels = callbook_source_labels(language)
+    names = {value: key for key, value in labels.items()}
+    return names.get(source, names[CALLBOOK_SOURCE_WAVELOG])
 
 
 def write_startup_log(text: str):
@@ -84,9 +139,90 @@ def display_now(time_mode: str) -> datetime:
     return datetime.now().astimezone() if time_mode == "LOCAL" else datetime.now(timezone.utc)
 
 
+class SyncProgressDialog(tk.Toplevel):
+    """Modal progress/status window for automatic start and shutdown syncs."""
+
+    def __init__(self, parent: "LoggerApp", reason: str, status_text: str):
+        super().__init__(parent)
+        self.parent = parent
+        self.reason = reason
+        self.title(parent._tr("Wavelog-Synchronisierung"))
+        self.geometry("640x330")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.configure(bg=CARD)
+        self.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        body = tk.Frame(self, bg=CARD, padx=28, pady=24)
+        body.pack(fill="both", expand=True)
+        self.heading = tk.Label(
+            body, text=parent._tr("Wavelog wird synchronisiert"), bg=CARD, fg=TEXT,
+            font=("Segoe UI Semibold", 17), anchor="w",
+        )
+        self.heading.pack(fill="x")
+        self.explanation = tk.Label(
+            body, text="", bg=CARD, fg=MUTED, font=("Segoe UI", 10),
+            justify="left", anchor="w", wraplength=570,
+        )
+        self.explanation.pack(fill="x", pady=(8, 16))
+        self.progress = ttk.Progressbar(body, mode="indeterminate", length=570)
+        self.progress.pack(fill="x")
+        self.progress.start(12)
+        self.status_label = tk.Label(
+            body, text=parent._tr(status_text), bg=CARD, fg=TEXT, font=("Segoe UI", 10),
+            justify="left", anchor="nw", wraplength=570,
+        )
+        self.status_label.pack(fill="both", expand=True, pady=(16, 12))
+        self.ok_button = ttk.Button(
+            body, text="OK", style="Primary.TButton", state="disabled",
+            command=parent._sync_progress_acknowledged,
+        )
+        self.ok_button.pack(anchor="e")
+        self.set_running(reason, status_text)
+        self.update_idletasks()
+        x = parent.winfo_rootx() + max(0, (parent.winfo_width() - self.winfo_width()) // 2)
+        y = parent.winfo_rooty() + max(0, (parent.winfo_height() - self.winfo_height()) // 2)
+        self.geometry(f"+{x}+{y}")
+        self.grab_set()
+        self.lift()
+
+    def set_running(self, reason: str, status_text: str):
+        self.reason = reason
+        explanation = (
+            "Vor der Bedienung wird das aktive Profil vollständig mit Wavelog abgeglichen."
+            if reason == "startup"
+            else "Vor dem Beenden wird das aktive Profil vollständig mit Wavelog abgeglichen."
+        )
+        self.heading.configure(text=self.parent._tr("Wavelog wird synchronisiert"), fg=TEXT)
+        self.explanation.configure(text=self.parent._tr(explanation))
+        self.status_label.configure(text=self.parent._tr(status_text), fg=TEXT)
+        self.ok_button.configure(state="disabled")
+        self.progress.configure(mode="indeterminate")
+        self.progress.start(12)
+
+    def complete(self, success: bool, details: str):
+        self.progress.stop()
+        self.progress.configure(mode="determinate", maximum=1, value=1)
+        heading = "Synchronisierung abgeschlossen" if success else "Synchronisierung fehlgeschlagen"
+        suffix = (
+            "Die App wird nach OK geschlossen."
+            if self.reason == "shutdown"
+            else "Nach OK kann die App verwendet werden."
+        )
+        self.heading.configure(text=self.parent._tr(heading), fg=(OK if success else ERR))
+        self.explanation.configure(text=self.parent._tr(suffix))
+        self.status_label.configure(text=self.parent._tr(details), fg=(TEXT if success else ERR))
+        self.ok_button.configure(state="normal")
+        self.ok_button.focus_set()
+
+
 class LoggerApp(tk.Tk):
     def __init__(self):
         super().__init__()
+        self.data_dir = app_data_dir()
+        self.ui_preferences = load_ui_preferences(self.data_dir)
+        self.language = self.ui_preferences.language
+        _set_palette(self.ui_preferences.theme)
         self.title(f"{APP_NAME} {VERSION}")
         self.geometry("1420x820")
         self.minsize(1180, 700)
@@ -95,6 +231,18 @@ class LoggerApp(tk.Tk):
         self.closing = False
         self.shutdown_started = False
         self.sync_busy = False
+        self.sync_is_automatic = False
+        self.sync_operation = ""
+        self.sync_reason = ""
+        self.sync_progress_dialog: SyncProgressDialog | None = None
+        self.startup_full_sync_pending = True
+        self.close_requested = False
+        self.close_services_stopped = False
+        self.wavelog_online = False
+        self.wavelog_check_generation = 0
+        self.wavelog_check_busy = False
+        self.wavelog_check_job = None
+        self.auto_sync_job = None
         self.station_rows: list[dict] = []
         self.station_by_label: dict[str, dict] = {}
         self.cat_manager = HamlibManager()
@@ -104,6 +252,7 @@ class LoggerApp(tk.Tk):
         self.cat_generation = 0
         self.cat_poll_job = None
         self.cat_poll_busy = False
+        self.tuner_busy = False
         self.udp_log_receiver = UdpLogReceiver(app_version=VERSION)
         atexit.register(self.udp_log_receiver.stop)
         self.udp_log_generation = 0
@@ -131,8 +280,16 @@ class LoggerApp(tk.Tk):
         self.fast_log_session_started = datetime.now(timezone.utc)
         self.fast_log_session_ids: list[str] = []
         self.fast_log_worked_keys: set[tuple[str, str, str]] = set()
+        self.callbook_generation = 0
+        self.callbook_lookup_job = None
+        self.callbook_result: CallbookResult | None = None
+        self.callbook_photo = None
+        self.callbook_image_bytes: bytes | None = None
+        self.qrz_client: QrzClient | None = None
+        self.qrz_client_credentials: tuple[str, str] | None = None
+        self.callbook_autofill: dict[str, str] = {}
+        self.callbook_last_call = ""
 
-        self.data_dir = app_data_dir()
         self.country_db = CountryDB(Path(__file__).resolve().parent / "cty.dat")
         self.current_country = None
         self.profile_manager = ProfileManager(self.data_dir)
@@ -153,12 +310,92 @@ class LoggerApp(tk.Tk):
         self._build_udp_log_page()
         self._build_settings_page()
         self._load_settings_to_ui()
+        self._install_dialog_translation()
+        self._localize_widget_tree(self)
+        self.after(700, self._localization_tick)
         self._show_page("log")
         self._tick_clock()
         self.refresh_qsos()
         self.after(250, lambda: self.call_entry.focus_set())
+        self.after(600, self._autostart_udp_log)
         self.after(1500, self._start_update_check)
+        self.after(2200, self._start_wavelog_monitor)
         write_startup_log(f"{APP_NAME} {VERSION} gestartet")
+
+    def _tr(self, value: object) -> str:
+        return translate_text(value, self.language)
+
+    def _canonical_choice(self, value: str, canonical_values) -> str:
+        for canonical in canonical_values:
+            if value in {canonical, self._tr(canonical)}:
+                return canonical
+        return value
+
+    def _install_dialog_translation(self):
+        if self.language != "en" or getattr(messagebox, "_da6it_translated", False):
+            return
+        for name in ("showinfo", "showwarning", "showerror", "askquestion", "askokcancel", "askretrycancel", "askyesno", "askyesnocancel"):
+            original = getattr(messagebox, name, None)
+            if not original:
+                continue
+            def translated(title, message, *args, _original=original, **kwargs):
+                return _original(self._tr(title), self._tr(message), *args, **kwargs)
+            setattr(messagebox, name, translated)
+        messagebox._da6it_translated = True
+        original_askstring = simpledialog.askstring
+        def translated_askstring(title, prompt, *args, **kwargs):
+            return original_askstring(self._tr(title), self._tr(prompt), *args, **kwargs)
+        simpledialog.askstring = translated_askstring
+
+    def _localize_widget_tree(self, parent):
+        if self.language != "en":
+            return
+        try:
+            widgets = [parent, *parent.winfo_children()]
+        except Exception:
+            return
+        for widget in widgets:
+            if widget is not parent:
+                self._localize_widget_tree(widget)
+            try:
+                if isinstance(widget, (tk.Tk, tk.Toplevel)):
+                    current_title = widget.title()
+                    translated_title = self._tr(current_title)
+                    if translated_title != current_title:
+                        widget.title(translated_title)
+                if isinstance(widget, (tk.Label, tk.Button, tk.Checkbutton, tk.Radiobutton, tk.LabelFrame,
+                                       ttk.Label, ttk.Button, ttk.Checkbutton, ttk.Radiobutton, ttk.LabelFrame)):
+                    variable_name = str(widget.cget("textvariable") or "")
+                    if variable_name:
+                        current = widget.getvar(variable_name)
+                        translated = self._tr(current)
+                        if translated != current:
+                            widget.setvar(variable_name, translated)
+                    else:
+                        current = widget.cget("text")
+                        translated = self._tr(current)
+                        if translated != current:
+                            widget.configure(text=translated)
+                if isinstance(widget, ttk.Notebook):
+                    for tab_id in widget.tabs():
+                        current = widget.tab(tab_id, "text")
+                        translated = self._tr(current)
+                        if translated != current:
+                            widget.tab(tab_id, text=translated)
+                if isinstance(widget, ttk.Treeview):
+                    for column in widget["columns"]:
+                        current = widget.heading(column, "text")
+                        translated = self._tr(current)
+                        if translated != current:
+                            widget.heading(column, text=translated)
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def _localization_tick(self):
+        if self.closing:
+            return
+        self._localize_widget_tree(self)
+        self.after(700, self._localization_tick)
 
     def _start_update_check(self):
         """Look for a newer release without ever blocking or disturbing startup."""
@@ -185,6 +422,211 @@ class LoggerApp(tk.Tk):
             except Exception:
                 pass
 
+    # ---------- Wavelog online mode ----------
+    def _wavelog_online_settings(self) -> WavelogOnlineSettings:
+        return WavelogOnlineSettings.from_storage(self.db.get_setting, self.db.get_token)
+
+    def _set_wavelog_mode_ui(self, online: bool, *, configured: bool = True):
+        self.wavelog_online = bool(online)
+        settings = self._wavelog_online_settings()
+        if online:
+            mode_text = "●  WAVELOG ONLINE"
+            mode_color = OK
+            hint = "Verbunden · neuer QSO-Push aktiv" if settings.auto_sync else "Verbunden · manueller Sync"
+        else:
+            mode_text = "●  LOCAL ONLY"
+            mode_color = ACCENT
+            hint = "Wavelog nicht eingerichtet." if not configured else "Offline · QSOs bleiben lokal."
+        if hasattr(self, "footer_mode_label"):
+            self.footer_mode_label.configure(text=self._tr(mode_text), fg=mode_color)
+        if hasattr(self, "sidebar_mode_label"):
+            self.sidebar_mode_label.configure(text=self._tr(mode_text), fg=mode_color)
+            self.sidebar_mode_hint.configure(text=self._tr(hint))
+
+    def _start_wavelog_monitor(self):
+        self._schedule_wavelog_check(0)
+
+    def _schedule_wavelog_check(self, delay_ms: int):
+        if self.wavelog_check_job is not None:
+            try:
+                self.after_cancel(self.wavelog_check_job)
+            except Exception:
+                pass
+        self.wavelog_check_job = None
+        if not self.closing:
+            self.wavelog_check_job = self.after(max(0, int(delay_ms)), self._wavelog_monitor_tick)
+
+    def _reset_wavelog_monitor(self, *, delay_ms: int = 500):
+        self.wavelog_check_generation += 1
+        self.wavelog_check_busy = False
+        if self.wavelog_check_job is not None:
+            try:
+                self.after_cancel(self.wavelog_check_job)
+            except Exception:
+                pass
+            self.wavelog_check_job = None
+        if self.auto_sync_job is not None:
+            try:
+                self.after_cancel(self.auto_sync_job)
+            except Exception:
+                pass
+            self.auto_sync_job = None
+        settings = self._wavelog_online_settings()
+        self._set_wavelog_mode_ui(False, configured=settings.configured)
+        self._schedule_wavelog_check(delay_ms)
+
+    def _wavelog_monitor_tick(self):
+        self.wavelog_check_job = None
+        if self.closing or self.wavelog_check_busy:
+            return
+        settings = self._wavelog_online_settings()
+        if not settings.configured:
+            self.startup_full_sync_pending = False
+            self._set_wavelog_mode_ui(False, configured=False)
+            self._schedule_wavelog_check(60_000)
+            return
+        self.wavelog_check_busy = True
+        generation = self.wavelog_check_generation
+
+        def worker():
+            error = ""
+            try:
+                WavelogClient(settings.base_url, settings.token, timeout=5).token_info()
+            except Exception as exc:
+                error = str(exc)
+            if not self.closing:
+                self.after(0, lambda: self._wavelog_check_finished(generation, not error, error))
+
+        threading.Thread(target=worker, name="wavelog-online-check", daemon=True).start()
+
+    def _wavelog_check_finished(self, generation: int, online: bool, error: str):
+        if generation != self.wavelog_check_generation or self.closing:
+            return
+        self.wavelog_check_busy = False
+        was_online = self.wavelog_online
+        self._set_wavelog_mode_ui(online)
+        if online:
+            if not was_online:
+                self.status_var.set("Wavelog ist wieder erreichbar · Online-Modus aktiv")
+            settings = self._wavelog_online_settings()
+            if settings.full_sync_on_start and self.startup_full_sync_pending and not self.sync_busy:
+                self.startup_full_sync_pending = False
+                self._start_sync(automatic=True, reason="startup")
+            else:
+                # The start option applies only to the first successful probe
+                # of this app session. Enabling it later takes effect on the
+                # next real application start, not immediately after saving.
+                self.startup_full_sync_pending = False
+            if not was_online and not self.sync_busy:
+                self._request_auto_sync(delay_ms=600)
+            self._schedule_wavelog_check(60_000)
+        else:
+            self.startup_full_sync_pending = False
+            if was_online:
+                self.status_var.set("Wavelog nicht erreichbar · LOCAL ONLY")
+            if error:
+                write_startup_log("Wavelog-Erreichbarkeitsprüfung: " + error)
+            self._schedule_wavelog_check(15_000)
+
+    def _request_auto_sync(self, *, delay_ms: int = 1200):
+        if self.closing or self.close_requested or self.sync_progress_dialog is not None:
+            return
+        settings = self._wavelog_online_settings()
+        candidate_count = len(self.db.list_new_upload_candidates())
+        if not settings.should_auto_sync(
+            online=self.wavelog_online,
+            sync_busy=self.sync_busy,
+            candidate_count=candidate_count,
+        ):
+            return
+        if self.auto_sync_job is not None:
+            try:
+                self.after_cancel(self.auto_sync_job)
+            except Exception:
+                pass
+        self.auto_sync_job = self.after(max(0, int(delay_ms)), self._run_auto_sync)
+
+    def _run_auto_sync(self):
+        self.auto_sync_job = None
+        if self.closing or self.close_requested or self.sync_progress_dialog is not None:
+            return
+        settings = self._wavelog_online_settings()
+        if settings.should_auto_sync(
+            online=self.wavelog_online,
+            sync_busy=self.sync_busy,
+            candidate_count=len(self.db.list_new_upload_candidates()),
+        ):
+            self._start_new_qso_push()
+
+    def _local_sync_change(self):
+        if self.wavelog_online:
+            self._request_auto_sync(delay_ms=1200)
+
+    def _start_new_qso_push(self):
+        if self.sync_busy or self.closing or self.close_requested or self.sync_progress_dialog is not None:
+            return
+        settings = self._wavelog_online_settings()
+        if not settings.should_auto_sync(
+            online=self.wavelog_online,
+            sync_busy=False,
+            candidate_count=len(self.db.list_new_upload_candidates()),
+        ):
+            return
+        self.sync_busy = True
+        self.sync_is_automatic = True
+        self.sync_operation = "push"
+        self.status_var.set("Neue LOCAL ONLY QSOs werden zu Wavelog hochgeladen …")
+
+        def worker():
+            try:
+                summary = SyncEngine(self.store, self.db, WavelogClient(settings.base_url, settings.token)).push_new_only(
+                    settings.station_id
+                )
+                if not self.closing:
+                    self.after(0, lambda: self._new_qso_push_finished(summary))
+            except Exception as exc:
+                if not self.closing:
+                    message = str(exc)
+                    self.after(0, lambda: self._new_qso_push_failed(message))
+
+        threading.Thread(target=worker, name="wavelog-new-qso-push", daemon=True).start()
+
+    def _new_qso_push_finished(self, summary):
+        self.sync_busy = False
+        self.sync_is_automatic = False
+        self.sync_operation = ""
+        if summary.errors:
+            self.status_var.set(
+                f"Online-Push: {summary.pushed} übertragen · {summary.errors} Fehler · Voll-Sync erforderlich"
+            )
+        elif summary.pushed:
+            self.db.set_setting("last_online_push_at", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"))
+            self.status_var.set(f"Online-Push: {summary.pushed} neue QSO(s) zu Wavelog übertragen")
+        self.refresh_qsos()
+        if self.close_requested:
+            self._begin_close_sequence()
+        else:
+            # A QSO may have been logged while this small batch was running.
+            self._request_auto_sync(delay_ms=350)
+
+    def _new_qso_push_failed(self, message: str):
+        self.sync_busy = False
+        self.sync_is_automatic = False
+        self.sync_operation = ""
+        self.status_var.set("Online-Push fehlgeschlagen · QSOs bleiben lokal")
+        write_startup_log("Online-Push fehlgeschlagen: " + message)
+        self.refresh_qsos()
+        self._schedule_wavelog_check(1500)
+        if self.close_requested:
+            self._begin_close_sequence()
+
+    def _open_da6it_website(self, _event=None):
+        try:
+            webbrowser.open_new_tab("https://da6it.de/")
+        except Exception as exc:
+            self.status_var.set("DA6IT.de konnte nicht geöffnet werden")
+            write_startup_log("DA6IT.de konnte nicht geöffnet werden: " + repr(exc))
+
     # ---------- UI shell ----------
     def _setup_style(self):
         style = ttk.Style(self)
@@ -199,43 +641,97 @@ class LoggerApp(tk.Tk):
         style.configure("Muted.Card.TLabel", background=CARD, foreground=MUTED, font=("Segoe UI", 9))
         style.configure("Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI Semibold", 20))
         style.configure("CardTitle.TLabel", background=CARD, foreground=TEXT, font=("Segoe UI Semibold", 12))
-        style.configure("Call.TEntry", font=("Segoe UI Semibold", 18), padding=8)
-        style.configure("TEntry", padding=6)
-        style.configure("TCombobox", padding=5)
+        style.configure("Call.TEntry", font=("Segoe UI Semibold", 18), padding=8, fieldbackground=INPUT_BG, foreground=TEXT)
+        style.configure("TEntry", padding=6, fieldbackground=INPUT_BG, foreground=TEXT)
+        style.configure("TCombobox", padding=5, fieldbackground=INPUT_BG, background=INPUT_BG, foreground=TEXT)
         style.configure("Primary.TButton", background=ACCENT, foreground="white", padding=(14, 8), borderwidth=0, font=("Segoe UI Semibold", 10))
-        style.map("Primary.TButton", background=[("active", ACCENT_DARK), ("disabled", "#9bb8cf")])
-        style.configure("Secondary.TButton", padding=(12, 7), font=("Segoe UI", 10))
-        style.configure("Nav.TButton", background=SIDEBAR, foreground=SIDEBAR_TEXT, padding=(16, 11), anchor="w", borderwidth=0, font=("Segoe UI", 10))
-        style.map("Nav.TButton", background=[("active", "#203441")])
-        style.configure("Treeview", rowheight=28, font=("Segoe UI", 9), background="white", fieldbackground="white")
-        style.configure("Treeview.Heading", font=("Segoe UI Semibold", 9), padding=5)
-        style.configure("Stats.Horizontal.TProgressbar", troughcolor="#e9eef3", background=ACCENT, borderwidth=0, thickness=10)
+        style.map("Primary.TButton", background=[("active", ACCENT_DARK), ("disabled", DISABLED)])
+        style.configure("Secondary.TButton", padding=(12, 7), font=("Segoe UI", 10), background=CARD, foreground=TEXT)
+        style.configure("Tuning.TButton", padding=(12, 7), font=("Segoe UI Semibold", 10), background=ERR, foreground="white")
+        style.map("Tuning.TButton", background=[("disabled", ERR), ("active", ERR)], foreground=[("disabled", "white")])
+        style.configure("Nav.TButton", background=SIDEBAR, foreground=SIDEBAR_TEXT, padding=(12, 9), anchor="w", borderwidth=0, font=("Segoe UI", 9))
+        style.map("Nav.TButton", background=[("active", NAV_HOVER)], foreground=[("active", ACCENT)])
+        style.configure("NavActive.TButton", background=ACTIVE_BG, foreground=ACCENT, padding=(12, 9), anchor="w", borderwidth=0, font=("Segoe UI Semibold", 9))
+        style.map("NavActive.TButton", background=[("active", NAV_ACTIVE_HOVER)], foreground=[("active", ACCENT_DARK)])
+        style.configure("Treeview", rowheight=30, font=("Segoe UI", 9), background=INPUT_BG, fieldbackground=INPUT_BG, foreground=TEXT, bordercolor=BORDER)
+        style.map("Treeview", background=[("selected", ACTIVE_BG)], foreground=[("selected", TEXT)])
+        style.configure("Treeview.Heading", font=("Segoe UI Semibold", 9), padding=5, background=CARD, foreground=TEXT)
+        style.configure("Stats.Horizontal.TProgressbar", troughcolor=PROGRESS_BG, background=ACCENT, borderwidth=0, thickness=10)
         style.configure("TLabelframe", background=CARD, bordercolor=BORDER, relief="solid")
         style.configure("TLabelframe.Label", background=CARD, foreground=TEXT, font=("Segoe UI Semibold", 10))
         style.configure("TRadiobutton", background=CARD, foreground=TEXT)
         style.configure("TCheckbutton", background=CARD, foreground=TEXT)
+        style.configure("TNotebook", background=BG, borderwidth=0)
+        style.configure("TNotebook.Tab", padding=(16, 9), font=("Segoe UI", 10))
+        style.map("TNotebook.Tab", foreground=[("selected", ACCENT)], background=[("selected", CARD)])
+        style.configure("Settings.TNotebook", background=BG, borderwidth=0)
+        style.configure("Settings.TNotebook.Tab", padding=(10, 6), font=("Segoe UI", 9))
+        style.map(
+            "Settings.TNotebook.Tab",
+            foreground=[("selected", ACCENT)],
+            background=[("selected", ACTIVE_BG), ("active", NAV_HOVER)],
+        )
+
+    def _load_brand_logo(self):
+        if Image is None or ImageTk is None:
+            return None
+        try:
+            resource_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+            path = resource_root / "assets" / "da6it-logo.webp"
+            image = Image.open(path).convert("RGB")
+            image.thumbnail((170, 70), Image.Resampling.LANCZOS)
+            return ImageTk.PhotoImage(image)
+        except Exception as exc:
+            write_startup_log("Logo konnte nicht geladen werden: " + repr(exc))
+            return None
 
     def _build_shell(self):
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
 
-        side = tk.Frame(self, bg=SIDEBAR, width=210)
+        side = tk.Frame(self, bg=SIDEBAR, width=205, highlightbackground=BORDER, highlightthickness=1)
         side.grid(row=0, column=0, sticky="nsew")
         side.grid_propagate(False)
-        tk.Label(side, text="DA6IT.de", bg=SIDEBAR, fg="white", font=("Segoe UI Semibold", 17)).pack(anchor="w", padx=20, pady=(24, 2))
-        tk.Label(side, text="Wavelog Offline Logger", bg=SIDEBAR, fg="#aebdca", font=("Segoe UI", 9)).pack(anchor="w", padx=20, pady=(0, 24))
-        ttk.Button(side, text="  QSO loggen", style="Nav.TButton", command=lambda: self._show_page("log")).pack(fill="x")
-        ttk.Button(side, text="  Fast Log / DXpedition", style="Nav.TButton", command=lambda: self._show_page("fast_log")).pack(fill="x")
-        ttk.Button(side, text="  Contest Logging", style="Nav.TButton", command=lambda: self._show_page("contest")).pack(fill="x")
-        ttk.Button(side, text="  Logbuch & Sync", style="Nav.TButton", command=lambda: self._show_page("qsos")).pack(fill="x")
-        ttk.Button(side, text="  Statistiken", style="Nav.TButton", command=lambda: self._show_page("stats")).pack(fill="x")
-        ttk.Button(side, text="  CAT Setup", style="Nav.TButton", command=lambda: self._show_page("cat")).pack(fill="x")
-        ttk.Button(side, text="  DX Cluster", style="Nav.TButton", command=lambda: self._show_page("dx_cluster")).pack(fill="x")
-        ttk.Button(side, text="  UDP Logging", style="Nav.TButton", command=lambda: self._show_page("udp_log")).pack(fill="x")
-        ttk.Button(side, text="  Einstellungen", style="Nav.TButton", command=lambda: self._show_page("settings")).pack(fill="x")
-        tk.Label(side, text=f"v{VERSION}", bg=SIDEBAR, fg="#8297a6", font=("Segoe UI", 8)).pack(side="bottom", anchor="w", padx=20, pady=18)
+        self.brand_logo_photo = self._load_brand_logo()
+        if self.brand_logo_photo is not None:
+            brand = tk.Label(side, image=self.brand_logo_photo, bg="#ffffff", cursor="hand2", padx=2, pady=2)
+        else:
+            brand = tk.Label(
+                side, text="DA6IT.de", bg=SIDEBAR, fg=ACCENT,
+                font=("Segoe UI Semibold", 19), cursor="hand2",
+            )
+        brand.pack(anchor="w", padx=16, pady=(16, 0))
+        brand.bind("<Button-1>", self._open_da6it_website)
+        tk.Label(side, text="Wavelog Offline Logger", bg=SIDEBAR, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", padx=16, pady=(0, 17))
+        self.nav_buttons: dict[str, ttk.Button] = {}
+        nav_items = (
+            ("log", "▣   Logbuch"),
+            ("fast_log", "ϟ   Fast Log / DXpedition"),
+            ("contest", "#   Contest Logging"),
+            ("qsos", "☁   Logbuch & Sync"),
+            ("stats", "▤   Statistiken"),
+            ("dx_cluster", "◎   DX Cluster"),
+            ("cat", "⌁   CAT Setup"),
+            ("udp_log", "◉   UDP Logging"),
+            ("settings", "⚙   Einstellungen"),
+        )
+        for page_name, label in nav_items:
+            if "   " in label:
+                icon, label_text = label.split("   ", 1)
+                label = icon + "   " + self._tr(label_text)
+            button = ttk.Button(side, text=label, style="Nav.TButton", command=lambda target=page_name: self._show_page(target))
+            button.pack(fill="x", padx=8, pady=1)
+            self.nav_buttons[page_name] = button
 
-        self.main = ttk.Frame(self, padding=(24, 18))
+        local_card = tk.Frame(side, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        local_card.pack(side="bottom", fill="x", padx=14, pady=(8, 14))
+        self.sidebar_mode_label = tk.Label(local_card, text="●  LOCAL ONLY", bg=SURFACE, fg=ACCENT, font=("Segoe UI Semibold", 9))
+        self.sidebar_mode_label.pack(anchor="w", padx=12, pady=(10, 3))
+        self.sidebar_mode_hint = tk.Label(local_card, text="Wavelog-Status wird geprüft.", bg=SURFACE, fg=MUTED, font=("Segoe UI", 8), justify="left")
+        self.sidebar_mode_hint.pack(anchor="w", padx=12, pady=(0, 10))
+        tk.Label(side, text=f"Version {VERSION}", bg=SIDEBAR, fg=MUTED, font=("Segoe UI", 8)).pack(side="bottom", anchor="w", padx=20, pady=(8, 0))
+
+        self.main = ttk.Frame(self, padding=(22, 16))
         self.main.grid(row=0, column=1, sticky="nsew")
         self.main.columnconfigure(0, weight=1)
         self.main.rowconfigure(1, weight=1)
@@ -243,8 +739,12 @@ class LoggerApp(tk.Tk):
         header = ttk.Frame(self.main)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 14))
         header.columnconfigure(0, weight=1)
-        self.page_title = ttk.Label(header, text="QSO loggen", style="Title.TLabel")
-        self.page_title.grid(row=0, column=0, sticky="w")
+        title_block = ttk.Frame(header)
+        title_block.grid(row=0, column=0, sticky="w")
+        self.page_title = ttk.Label(title_block, text="QSO loggen", style="Title.TLabel")
+        self.page_title.pack(anchor="w")
+        self.page_subtitle = ttk.Label(title_block, text="Schnell, lokal und unabhängig von einer Internetverbindung.", foreground=MUTED)
+        self.page_subtitle.pack(anchor="w", pady=(2, 0))
 
         profile_card = tk.Frame(header, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
         profile_card.grid(row=0, column=1, sticky="e", padx=(10, 10))
@@ -269,9 +769,16 @@ class LoggerApp(tk.Tk):
         self.page_container.rowconfigure(0, weight=1)
         self.pages: dict[str, ttk.Frame] = {}
 
-        self.status_var = tk.StringVar(value="Bereit · Offline-Logging aktiv")
-        status = tk.Label(self.main, textvariable=self.status_var, bg=BG, fg=MUTED, font=("Segoe UI", 9), anchor="w")
-        status.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        footer = tk.Frame(self.main, bg=BG, highlightbackground=BORDER, highlightthickness=0)
+        footer.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        self.footer_mode_label = tk.Label(footer, text="●  LOCAL ONLY", bg=BG, fg=ACCENT, font=("Segoe UI Semibold", 9), anchor="w")
+        self.footer_mode_label.pack(side="left")
+        self.status_var = tk.StringVar(value="Bereit")
+        tk.Label(footer, textvariable=self.status_var, bg=BG, fg=MUTED, font=("Segoe UI", 9), anchor="w").pack(side="left", padx=(14, 0))
+        self.footer_qso_var = tk.StringVar(value="0 QSOs")
+        self.footer_db_var = tk.StringVar(value="")
+        tk.Label(footer, textvariable=self.footer_qso_var, bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="right", padx=(18, 0))
+        tk.Label(footer, textvariable=self.footer_db_var, bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="right")
 
     # ---------- application profiles ----------
     def _open_profile_storage(self, profile_id: str):
@@ -324,6 +831,16 @@ class LoggerApp(tk.Tk):
                 return
         try:
             old = self._current_profile().get("name", "")
+            self.wavelog_check_generation += 1
+            for job_name in ("wavelog_check_job", "auto_sync_job"):
+                job = getattr(self, job_name, None)
+                if job is not None:
+                    try:
+                        self.after_cancel(job)
+                    except Exception:
+                        pass
+                    setattr(self, job_name, None)
+            self.wavelog_check_busy = False
             self._stop_cat_runtime(update_ui=False)
             self._stop_dx_cluster_runtime(update_ui=False)
             self._stop_dx_spotter_runtime(update_ui=False)
@@ -346,6 +863,7 @@ class LoggerApp(tk.Tk):
             self.refresh_qsos()
             self.refresh_stats()
             self._refresh_profile_selector()
+            self._reset_wavelog_monitor(delay_ms=500)
             self.status_var.set(f"Profil gewechselt: {old} → {self._current_profile()['name']}")
         except Exception as e:
             messagebox.showerror("Profil wechseln", str(e), parent=self)
@@ -417,7 +935,21 @@ class LoggerApp(tk.Tk):
 
     def _show_page(self, name: str):
         titles = {"log": "QSO loggen", "fast_log": "Fast Log / DXpedition", "contest": "Contest Logging", "qsos": "Logbuch & Sync", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "udp_log": "UDP Logging", "settings": "Einstellungen"}
-        self.page_title.configure(text=titles[name])
+        subtitles = {
+            "log": "Neues QSO erfassen und sicher lokal speichern.",
+            "fast_log": "Pileups zügig abarbeiten: Rufzeichen und Enter.",
+            "contest": "Seriennummern und Austauschdaten effizient protokollieren.",
+            "qsos": "Lokale QSOs prüfen und Wavelog bewusst manuell synchronisieren.",
+            "stats": "Das lokale Logbuch auf einen Blick.",
+            "cat": "Funkgerät über das eingebettete Hamlib steuern.",
+            "dx_cluster": "Live-Spots empfangen, filtern und an den TRX übergeben.",
+            "udp_log": "QSOs von WSJT-X und kompatiblen Programmen empfangen.",
+            "settings": "Stationsprofil, Online-Dienste und lokale Daten verwalten.",
+        }
+        self.page_title.configure(text=self._tr(titles[name]))
+        self.page_subtitle.configure(text=self._tr(subtitles.get(name, "")))
+        for page_name, button in self.nav_buttons.items():
+            button.configure(style="NavActive.TButton" if page_name == name else "Nav.TButton")
         self.pages[name].tkraise()
         if name == "fast_log":
             self.refresh_fast_log_page()
@@ -441,8 +973,8 @@ class LoggerApp(tk.Tk):
     # ---------- log page ----------
     def _build_log_page(self):
         p = self._new_page("log")
-        p.columnconfigure(0, weight=3)
-        p.columnconfigure(1, weight=2)
+        p.columnconfigure(0, weight=1)
+        p.columnconfigure(1, weight=0, minsize=370)
         p.rowconfigure(0, weight=1)
 
         left = self._card(p, row=0, column=0, sticky="nsew", padx=(0, 8))
@@ -480,7 +1012,8 @@ class LoggerApp(tk.Tk):
         self._field(left, "Kommentar", tk.StringVar(), 8, 1, span=3, key="comment")
 
         ttk.Label(left, text="Notizen", style="Card.TLabel").grid(row=10, column=0, sticky="w", pady=(10, 4))
-        self.notes_text = tk.Text(left, height=3, wrap="word", font=("Segoe UI", 10), relief="solid", borderwidth=1, highlightthickness=0)
+        self.notes_text = tk.Text(left, height=3, wrap="word", font=("Segoe UI", 10), relief="solid", borderwidth=1,
+                                  highlightthickness=0, bg=INPUT_BG, fg=TEXT, insertbackground=TEXT)
         self.notes_text.grid(row=11, column=0, columnspan=4, sticky="ew")
 
         btns = ttk.Frame(left, style="Card.TFrame")
@@ -489,39 +1022,71 @@ class LoggerApp(tk.Tk):
         ttk.Button(btns, text="Speichern + Neu", style="Secondary.TButton", command=lambda: self.save_qso(True)).pack(side="left", padx=8)
         ttk.Button(btns, text="Felder leeren", style="Secondary.TButton", command=self.clear_qso_form).pack(side="left")
         ttk.Button(btns, text="DX-Spot senden", style="Secondary.TButton", command=self.send_current_dx_spot).pack(side="right")
+        self.tune_button = ttk.Button(
+            btns, text="TUNE (ATU)", style="Secondary.TButton",
+            command=self.start_tuner_from_qso, state="disabled",
+        )
+        self.tune_button.pack(side="right", padx=(0, 8))
 
         right = self._card(p, row=0, column=1, sticky="nsew", padx=(8, 0))
         right.columnconfigure(0, weight=1)
-        ttk.Label(right, text="Zeit", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(right, text="Datum / Zeit", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.time_mode_var = tk.StringVar(value="UTC")
         self.live_time_var = tk.BooleanVar(value=True)
         row = ttk.Frame(right, style="Card.TFrame")
-        row.grid(row=1, column=0, sticky="ew", pady=(8, 10))
+        row.grid(row=1, column=0, sticky="ew", pady=(6, 4))
         ttk.Radiobutton(row, text="UTC", variable=self.time_mode_var, value="UTC", command=self._time_mode_changed).pack(side="left")
         ttk.Radiobutton(row, text="Lokal", variable=self.time_mode_var, value="LOCAL", command=self._time_mode_changed).pack(side="left", padx=(12, 0))
         ttk.Checkbutton(row, text="Live", variable=self.live_time_var, command=self._live_changed).pack(side="right")
         self.qso_date_var = tk.StringVar()
         self.qso_time_var = tk.StringVar()
-        self._field(right, "Datum", self.qso_date_var, 2, 0)
-        self._field(right, "Uhrzeit", self.qso_time_var, 4, 0)
+        datetime_row = ttk.Frame(right, style="Card.TFrame")
+        datetime_row.grid(row=2, column=0, sticky="ew")
+        datetime_row.columnconfigure(0, weight=1)
+        datetime_row.columnconfigure(1, weight=1)
+        self._field(datetime_row, "Datum", self.qso_date_var, 0, 0)
+        self._field(datetime_row, "Uhrzeit", self.qso_time_var, 0, 1)
 
-        ttk.Separator(right).grid(row=6, column=0, sticky="ew", pady=14)
-        ttk.Label(right, text="Gegenstation · offline", style="CardTitle.TLabel").grid(row=7, column=0, sticky="w")
-        self.country_summary = tk.Label(right, bg=CARD, fg=TEXT, font=("Segoe UI", 10), justify="left", anchor="nw", wraplength=330)
-        self.country_summary.grid(row=8, column=0, sticky="ew", pady=(7, 0))
+        ttk.Separator(right).grid(row=3, column=0, sticky="ew", pady=12)
+        callbook_head = ttk.Frame(right, style="Card.TFrame")
+        callbook_head.grid(row=4, column=0, sticky="ew")
+        callbook_head.columnconfigure(0, weight=1)
+        ttk.Label(callbook_head, text="Callbook-Informationen", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.callbook_source_label = tk.Label(callbook_head, text="OFFLINE", bg=NEUTRAL_BADGE_BG, fg=MUTED, font=("Segoe UI Semibold", 8), padx=8, pady=3)
+        self.callbook_source_label.grid(row=0, column=1, sticky="e")
+
+        self.callbook_image_frame = tk.Frame(right, bg=PHOTO_BG, height=160, relief="flat")
+        self.callbook_image_frame.grid(row=5, column=0, sticky="ew", pady=(8, 7))
+        self.callbook_image_frame.grid_propagate(False)
+        self.callbook_image_frame.columnconfigure(0, weight=1)
+        self.callbook_image_frame.rowconfigure(0, weight=1)
+        self.callbook_image_label = tk.Label(
+            self.callbook_image_frame, text="Kein Foto geladen", bg=PHOTO_BG, fg=MUTED,
+            font=("Segoe UI", 9), relief="flat",
+        )
+        self.callbook_image_label.grid(row=0, column=0, sticky="nsew")
+        self.callbook_name_label = tk.Label(right, text="Rufzeichen eingeben …", bg=CARD, fg=TEXT, font=("Segoe UI Semibold", 13), anchor="w")
+        self.callbook_name_label.grid(row=6, column=0, sticky="ew")
+        self.callbook_details_label = tk.Label(right, text="", bg=CARD, fg=TEXT, font=("Segoe UI", 9), justify="left", anchor="nw", wraplength=350)
+        self.callbook_details_label.grid(row=7, column=0, sticky="ew", pady=(3, 0))
+        self.callbook_status_label = tk.Label(
+            right, text="Online-Abfrage optional · Offline-Logging bleibt immer verfügbar.",
+            bg=CARD, fg=MUTED, font=("Segoe UI", 8), justify="left", anchor="w", wraplength=350,
+        )
+        self.callbook_status_label.grid(row=8, column=0, sticky="ew", pady=(5, 0))
+        ttk.Button(right, text="Callbook neu laden", style="Secondary.TButton", command=self._manual_callbook_lookup).grid(row=9, column=0, sticky="w", pady=(7, 0))
+
+        ttk.Separator(right).grid(row=10, column=0, sticky="ew", pady=12)
+        ttk.Label(right, text="DXCC · offline", style="CardTitle.TLabel").grid(row=11, column=0, sticky="w")
+        self.country_summary = tk.Label(right, bg=CARD, fg=TEXT, font=("Segoe UI", 9), justify="left", anchor="nw", wraplength=350)
+        self.country_summary.grid(row=12, column=0, sticky="ew", pady=(5, 0))
         self.country_source = tk.Label(right, text="CTY.DAT · keine Internetverbindung nötig", bg=CARD, fg=MUTED, font=("Segoe UI", 8), justify="left", anchor="w")
-        self.country_source.grid(row=9, column=0, sticky="ew", pady=(4, 0))
+        self.country_source.grid(row=13, column=0, sticky="ew", pady=(3, 0))
 
-        ttk.Separator(right).grid(row=10, column=0, sticky="ew", pady=14)
-        ttk.Label(right, text="Aktives Stationsprofil", style="CardTitle.TLabel").grid(row=11, column=0, sticky="w")
-        self.profile_summary = tk.Label(right, bg=CARD, fg=TEXT, font=("Segoe UI", 10), justify="left", anchor="nw", wraplength=330)
-        self.profile_summary.grid(row=12, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(right, text="Profil bearbeiten", style="Secondary.TButton", command=lambda: self._show_page("settings")).grid(row=13, column=0, sticky="w", pady=(12, 0))
-
-        ttk.Separator(right).grid(row=14, column=0, sticky="ew", pady=14)
-        ttk.Label(right, text="Logdatei", style="CardTitle.TLabel").grid(row=15, column=0, sticky="w")
-        self.logfile_preview = tk.Label(right, bg=CARD, fg=MUTED, font=("Segoe UI", 9), justify="left", anchor="nw", wraplength=330)
-        self.logfile_preview.grid(row=16, column=0, sticky="ew", pady=(6, 0))
+        # Kept for existing profile and log-file update helpers; the compact
+        # footer/header now present these details instead of a second side card.
+        self.profile_summary = tk.Label(right, bg=CARD)
+        self.logfile_preview = tk.Label(right, bg=CARD)
         self._update_country_summary()
 
         self.form_vars = {
@@ -555,8 +1120,188 @@ class LoggerApp(tk.Tk):
                 self.call_entry.icursor(pos)
             except Exception:
                 pass
+        if value != self.callbook_last_call:
+            for key, old_value in self.callbook_autofill.items():
+                variable = self.form_vars.get(key) if hasattr(self, "form_vars") else None
+                if variable is not None and variable.get() == old_value:
+                    variable.set("")
+            self.callbook_autofill.clear()
+            self.callbook_last_call = value
         self.current_country = self.country_db.lookup(value)
         self._update_country_summary()
+        self._schedule_callbook_lookup(value)
+
+    def _configured_callbook_source(self) -> str:
+        source = self.db.get_setting("callbook_source", CALLBOOK_SOURCE_WAVELOG).strip().lower()
+        if source not in {CALLBOOK_SOURCE_WAVELOG, CALLBOOK_SOURCE_QRZ, CALLBOOK_SOURCE_DISABLED}:
+            source = CALLBOOK_SOURCE_WAVELOG
+        if source == CALLBOOK_SOURCE_QRZ:
+            if not self.db.get_setting("qrz_username", "").strip() or not self.db.get_secret("qrz_password"):
+                return CALLBOOK_SOURCE_WAVELOG
+        return source
+
+    def _schedule_callbook_lookup(self, callsign: str, *, force: bool = False):
+        if self.callbook_lookup_job is not None:
+            try:
+                self.after_cancel(self.callbook_lookup_job)
+            except Exception:
+                pass
+            self.callbook_lookup_job = None
+        self.callbook_generation += 1
+        generation = self.callbook_generation
+        self.callbook_result = None
+        self.callbook_photo = None
+        self.callbook_image_bytes = None
+        if hasattr(self, "callbook_image_label"):
+            self.callbook_image_label.configure(image="", text="Kein Foto geladen")
+        if not lookup_candidate(callsign):
+            if hasattr(self, "callbook_name_label"):
+                self.callbook_name_label.configure(text="Rufzeichen eingeben …")
+                self.callbook_details_label.configure(text="")
+                self.callbook_source_label.configure(text="OFFLINE", bg=NEUTRAL_BADGE_BG, fg=MUTED)
+                self.callbook_status_label.configure(text="Online-Abfrage optional · Offline-Logging bleibt immer verfügbar.", fg=MUTED)
+            return
+        if not force and self.db.get_setting("callbook_auto_lookup", "1") != "1":
+            self.callbook_name_label.configure(text=callsign)
+            self.callbook_details_label.configure(text="Automatische Abfrage ist deaktiviert.")
+            return
+        if self._configured_callbook_source() == CALLBOOK_SOURCE_DISABLED:
+            self.callbook_name_label.configure(text=callsign)
+            self.callbook_details_label.configure(text="Callbook-Abfrage ist deaktiviert.")
+            return
+        self.callbook_status_label.configure(text="Callbook wird abgefragt …", fg=MUTED)
+        delay = 0 if force else 700
+        self.callbook_lookup_job = self.after(delay, lambda: self._start_callbook_lookup(callsign, generation, force))
+
+    def _manual_callbook_lookup(self):
+        self._schedule_callbook_lookup(self.call_var.get().strip().upper(), force=True)
+
+    def _start_callbook_lookup(self, callsign: str, generation: int, force: bool = False):
+        self.callbook_lookup_job = None
+        source = self._configured_callbook_source()
+        band = self.band_var.get()
+        mode = self.mode_var.get()
+
+        def worker():
+            try:
+                result = None
+                if not force:
+                    cached = self.db.get_callbook_cache(callsign, source)
+                    if cached:
+                        result = CallbookResult.from_json(cached)
+                        result.cached = True
+                if result is None:
+                    if source == CALLBOOK_SOURCE_QRZ:
+                        username = self.db.get_setting("qrz_username", "").strip()
+                        password = self.db.get_secret("qrz_password")
+                        credentials = (username, password)
+                        if self.qrz_client is None or self.qrz_client_credentials != credentials:
+                            self.qrz_client = QrzClient(username, password, timeout=8)
+                            self.qrz_client_credentials = credentials
+                        result = self.qrz_client.lookup(callsign)
+                    else:
+                        client = WavelogClient(
+                            self.db.get_setting("wavelog_url", ""),
+                            self.db.get_token(),
+                            timeout=8,
+                        )
+                        payload = client.lookup_callsign(callsign, band=band, mode=mode, include_callbook=True)
+                        result = normalize_wavelog_result(payload, callsign)
+                    if not any((result.name, result.qth, result.grid, result.country, result.image_url)):
+                        raise CallbookError("Keine Callbook-Daten gefunden")
+                    self.db.set_callbook_cache(callsign, source, result.to_json())
+                if not self.closing:
+                    self.after(0, lambda current=result: self._apply_callbook_result(callsign, generation, current))
+            except Exception as exc:
+                if not self.closing:
+                    error_message = str(exc)
+                    self.after(0, lambda message=error_message: self._callbook_lookup_failed(callsign, generation, message))
+
+        threading.Thread(target=worker, name="callbook-lookup", daemon=True).start()
+
+    def _apply_callbook_result(self, callsign: str, generation: int, result: CallbookResult):
+        if self.closing or generation != self.callbook_generation or self.call_var.get().strip().upper() != callsign:
+            return
+        self.callbook_result = result
+        for key, value in (("name", result.name), ("gridsquare", result.grid), ("qth", result.qth)):
+            variable = self.form_vars.get(key)
+            if value and variable is not None and (not variable.get().strip() or variable.get() == self.callbook_autofill.get(key, "")):
+                variable.set(value)
+                self.callbook_autofill[key] = value
+        source_text = result.source or "CALLBOOK"
+        self.callbook_source_label.configure(text=source_text.upper(), bg=OK_BADGE_BG, fg=OK)
+        title = result.callsign or callsign
+        if result.name:
+            title += " · " + result.name
+        self.callbook_name_label.configure(text=title)
+        place = ", ".join(part for part in (result.qth, result.state, result.country) if part)
+        details = []
+        if place:
+            details.append(place)
+        if result.grid:
+            details.append("Locator: " + result.grid)
+        zones = " / ".join(part for part in (result.cq_zone, result.itu_zone) if part)
+        if zones:
+            details.append("CQ / ITU: " + zones)
+        self.callbook_details_label.configure(text="\n".join(details) or "Keine weiteren Angaben")
+        suffix = " · aus lokalem Cache" if result.cached else ""
+        self.callbook_status_label.configure(text="Daten automatisch übernommen" + suffix, fg=OK)
+        if result.image_url:
+            threading.Thread(
+                target=self._load_callbook_image,
+                args=(callsign, generation, result.image_url),
+                name="callbook-image",
+                daemon=True,
+            ).start()
+
+    def _callbook_lookup_failed(self, callsign: str, generation: int, _message: str):
+        if self.closing or generation != self.callbook_generation or self.call_var.get().strip().upper() != callsign:
+            return
+        self.callbook_source_label.configure(text="OFFLINE", bg=NEUTRAL_BADGE_BG, fg=MUTED)
+        self.callbook_name_label.configure(text=callsign)
+        self.callbook_details_label.configure(text="Keine Online-Daten verfügbar.")
+        self.callbook_status_label.configure(text="Offline-Logging läuft ohne Unterbrechung weiter.", fg=MUTED)
+
+    def _load_callbook_image(self, callsign: str, generation: int, image_url: str):
+        try:
+            parsed = urllib.parse.urlparse(image_url)
+            if parsed.scheme not in {"http", "https"}:
+                return
+            if parsed.scheme == "http":
+                image_url = urllib.parse.urlunparse(parsed._replace(scheme="https"))
+            request = urllib.request.Request(
+                image_url,
+                headers={"User-Agent": f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}", "Accept": "image/*"},
+            )
+            with urllib.request.urlopen(request, timeout=8) as response:
+                content_type = str(response.headers.get("Content-Type") or "").lower()
+                if content_type and not content_type.startswith("image/"):
+                    return
+                data = response.read(5 * 1024 * 1024 + 1)
+            if not data or len(data) > 5 * 1024 * 1024:
+                return
+            if not self.closing:
+                self.after(0, lambda payload=data: self._show_callbook_image(callsign, generation, payload))
+        except Exception:
+            return
+
+    def _show_callbook_image(self, callsign: str, generation: int, data: bytes):
+        if self.closing or generation != self.callbook_generation or self.call_var.get().strip().upper() != callsign:
+            return
+        try:
+            if Image is not None and ImageTk is not None:
+                image = Image.open(io.BytesIO(data))
+                if image.width * image.height > 24_000_000:
+                    return
+                image.thumbnail((330, 150), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(image)
+            else:
+                photo = tk.PhotoImage(data=base64.b64encode(data).decode("ascii"))
+            self.callbook_photo = photo
+            self.callbook_image_bytes = data
+            self.callbook_image_label.configure(image=photo, text="")
+        except Exception:
+            self.callbook_image_label.configure(image="", text="Fotoformat in dieser Laufzeit nicht verfügbar")
 
     def _update_country_summary(self):
         if not hasattr(self, "country_summary"):
@@ -701,6 +1446,7 @@ class LoggerApp(tk.Tk):
             self.db.ensure_local(q["local_id"], qso_hash(q))
             self.status_var.set(f"Gespeichert: {q['call']} · {q['band']} · {q['mode']} · {Path(q['_file']).name}")
             self.refresh_qsos()
+            self._local_sync_change()
             if new_after:
                 self.clear_qso_form(keep_freq=True)
                 self.call_entry.focus_set()
@@ -709,6 +1455,9 @@ class LoggerApp(tk.Tk):
 
     def clear_qso_form(self, keep_freq=False):
         self.call_var.set("")
+        self.callbook_last_call = ""
+        self.callbook_autofill.clear()
+        self._schedule_callbook_lookup("")
         self.current_country = None
         self._update_country_summary()
         if not keep_freq:
@@ -954,6 +1703,7 @@ class LoggerApp(tk.Tk):
             self.status_var.set(
                 f"Fast Log: {saved['call']} · {saved['band']} · {saved['mode']} lokal gespeichert",
             )
+            self._local_sync_change()
             self.fast_log_call_entry.focus_set()
         except Exception as exc:
             messagebox.showerror("Fast-Log-QSO konnte nicht gespeichert werden", str(exc), parent=self)
@@ -1306,6 +2056,7 @@ class LoggerApp(tk.Tk):
             self._set_contest_session(session)
             self.status_var.set(f"Contest-QSO #{serial:03d}: {call} gespeichert")
             self.refresh_qsos(); self.refresh_contest_page(); self.clear_contest_form()
+            self._local_sync_change()
         except Exception as e:
             messagebox.showerror("Contest-QSO konnte nicht gespeichert werden", str(e), parent=self)
 
@@ -1330,7 +2081,7 @@ class LoggerApp(tk.Tk):
         widths = {"date":88,"time":62,"call":88,"operator":82,"contest":100,"band":52,"mode":60,"freq":80,"rst":62,"status":88,
                   "qrz":52,"lotw":52,"eqsl":52,"dcl":52}
         for c in cols:
-            self.tree.heading(c, text=headings[c])
+            self.tree.heading(c, text=self._tr(headings[c]))
             self.tree.column(c, width=widths[c], minwidth=45, stretch=(c in ("call", "contest")))
         self.tree.grid(row=0, column=0, sticky="nsew")
         sb = ttk.Scrollbar(card, orient="vertical", command=self.tree.yview)
@@ -1406,6 +2157,10 @@ class LoggerApp(tk.Tk):
         suffix = f" · letzter Sync {last}" if last else " · noch nicht synchronisiert"
         issue_text = f" · {issues} offen" if issues else ""
         self.sync_label.configure(text=f"{len(qsos)} QSOs · {wavelog} WAVELOG · {local_only} LOCAL ONLY{issue_text}{suffix}")
+        if hasattr(self, "footer_qso_var"):
+            self.footer_qso_var.set(f"{len(qsos)} QSOs")
+            profile_name = self._current_profile().get("name", "Profil")
+            self.footer_db_var.set(f"{profile_name} · {Path(self.db.path).name}")
 
     def selected_id(self) -> str | None:
         s = self.tree.selection() if hasattr(self, "tree") else []
@@ -1433,6 +2188,7 @@ class LoggerApp(tk.Tk):
             self.db.ensure_local(local_id, qso_hash(updated))
             self.refresh_qsos()
             self.status_var.set(f"QSO {updated['call']} geändert")
+            self._local_sync_change()
         except Exception as e:
             messagebox.showerror("Bearbeiten fehlgeschlagen", str(e), parent=self)
 
@@ -1449,24 +2205,72 @@ class LoggerApp(tk.Tk):
         self.store.delete(lid)
         self.refresh_qsos()
         self.status_var.set("QSO lokal gelöscht")
+        self._local_sync_change()
 
     def _client_from_settings(self) -> WavelogClient:
         return WavelogClient(self.db.get_setting("wavelog_url", ""), self.db.get_token())
 
     def sync_now(self):
+        self._start_sync(automatic=False, reason="manual")
+
+    def _show_sync_progress(self, reason: str, status_text: str):
+        dialog = self.sync_progress_dialog
+        if dialog is not None and dialog.winfo_exists():
+            dialog.set_running(reason, status_text)
+            dialog.lift()
+            return
+        self.sync_progress_dialog = SyncProgressDialog(self, reason, status_text)
+
+    def _complete_sync_progress(self, success: bool, details: str) -> bool:
+        dialog = self.sync_progress_dialog
+        if dialog is None or not dialog.winfo_exists():
+            return False
+        dialog.complete(success, details)
+        return True
+
+    def _sync_progress_acknowledged(self):
+        dialog = self.sync_progress_dialog
+        reason = dialog.reason if dialog is not None else self.sync_reason
+        if dialog is not None:
+            try:
+                dialog.grab_release()
+                dialog.destroy()
+            except tk.TclError:
+                pass
+        self.sync_progress_dialog = None
+        self.sync_reason = ""
+        if self.close_requested or reason == "shutdown":
+            self._finalize_close()
+        else:
+            self._request_auto_sync(delay_ms=600)
+
+    def _start_sync(self, *, automatic: bool, reason: str = "manual"):
         if self.sync_busy:
             return
         try:
-            station_id = int(self.db.get_setting("station_profile_id", "0"))
-            if station_id <= 0:
+            settings = self._wavelog_online_settings()
+            station_id = settings.station_id
+            if not settings.configured:
                 raise ValueError("Bitte in den Einstellungen zuerst ein Wavelog-Stationsprofil auswählen")
-            client = self._client_from_settings()
+            client = WavelogClient(settings.base_url, settings.token)
         except Exception as e:
-            messagebox.showerror("Sync", str(e), parent=self)
+            if not automatic:
+                messagebox.showerror("Sync", str(e), parent=self)
             return
         self.sync_busy = True
-        self.status_var.set("Synchronisierung läuft …")
-        self.sync_label.configure(text="Synchronisierung läuft …")
+        self.sync_is_automatic = automatic
+        self.sync_operation = "full"
+        self.sync_reason = reason
+        if reason == "startup":
+            progress_text = "Vollständiger Start-Sync läuft …"
+        elif reason == "shutdown":
+            progress_text = "Vollständiger Abschluss-Sync läuft …"
+        else:
+            progress_text = "Automatische Synchronisierung läuft …" if automatic else "Synchronisierung läuft …"
+        self.status_var.set(progress_text)
+        self.sync_label.configure(text=progress_text)
+        if reason in ("startup", "shutdown"):
+            self._show_sync_progress(reason, progress_text)
 
         def worker():
             try:
@@ -1480,24 +2284,53 @@ class LoggerApp(tk.Tk):
                        f"lokal→Wavelog gelöscht {summary.deleted} · QSL-Status {summary.qsl_updated} · "
                        f"Konflikte {summary.conflicts} · Fehler {summary.errors} · QSL-Statusfehler {summary.qsl_errors}")
                 if not self.closing:
-                    self.after(0, lambda: self._sync_finished(msg))
+                    self.after(0, lambda: self._sync_finished(msg, automatic))
             except Exception as e:
                 if not self.closing:
-                    self.after(0, lambda: self._sync_failed(str(e)))
+                    error_message = str(e)
+                    self.after(0, lambda message=error_message: self._sync_failed(message, automatic))
 
         threading.Thread(target=worker, name="wavelog-sync", daemon=True).start()
 
-    def _sync_finished(self, msg):
+    def _sync_finished(self, msg, automatic: bool = False):
         self.sync_busy = False
+        self.sync_is_automatic = False
+        self.sync_operation = ""
         self.db.set_setting("last_sync_at", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"))
-        self.status_var.set("Sync fertig · " + msg)
+        self._set_wavelog_mode_ui(True)
+        self.status_var.set(("Auto-Sync fertig · " if automatic else "Sync fertig · ") + msg)
         self.refresh_qsos()
+        self._schedule_wavelog_check(60_000)
+        if self._complete_sync_progress(True, msg):
+            return
+        self.sync_reason = ""
+        if self.close_requested:
+            self._finalize_close()
+        else:
+            # Do not leave a QSO that was entered during the full sync behind.
+            self._request_auto_sync(delay_ms=600)
 
-    def _sync_failed(self, msg):
+    def _sync_failed(self, msg, automatic: bool = False):
         self.sync_busy = False
-        self.status_var.set("Sync fehlgeschlagen")
-        messagebox.showerror("Wavelog Sync", msg, parent=self)
+        self.sync_is_automatic = False
+        self.sync_operation = ""
+        has_progress = self.sync_progress_dialog is not None
+        if automatic or has_progress:
+            self.status_var.set("Auto-Sync fehlgeschlagen · QSOs bleiben LOCAL ONLY")
+            write_startup_log("Auto-Sync fehlgeschlagen: " + msg)
+        else:
+            self.status_var.set("Sync fehlgeschlagen")
+            messagebox.showerror("Wavelog Sync", msg, parent=self)
         self.refresh_qsos()
+        self._schedule_wavelog_check(1500)
+        safe_message = self._tr(
+            "Wavelog konnte nicht vollständig synchronisiert werden. Die lokalen QSOs bleiben sicher gespeichert."
+        ) + "\n\n" + msg
+        if self._complete_sync_progress(False, safe_message):
+            return
+        self.sync_reason = ""
+        if self.close_requested:
+            self._finalize_close()
 
     def resolve_conflict(self, force_local: bool):
         lid = self.selected_id()
@@ -1566,15 +2399,16 @@ class LoggerApp(tk.Tk):
         controls = self._card(p, row=0, column=0, columnspan=4, sticky="ew", pady=(0, 10))
         ttk.Label(controls, text="Auswertung", style="CardTitle.TLabel").pack(side="left")
         tk.Label(controls, text="Zeitraum", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(24, 7))
-        self.stats_period_var = tk.StringVar(value="Gesamt")
+        stat_periods = ("Gesamt", "Dieses Jahr", "Dieser Monat", "Diese Woche", "Heute (UTC)")
+        self.stats_period_var = tk.StringVar(value=self._tr("Gesamt"))
         period = ttk.Combobox(controls, textvariable=self.stats_period_var, state="readonly", width=18,
-                              values=("Gesamt", "Dieses Jahr", "Dieser Monat", "Diese Woche", "Heute (UTC)"))
+                              values=tuple(self._tr(value) for value in stat_periods))
         period.pack(side="left")
         period.bind("<<ComboboxSelected>>", lambda e: self.refresh_stats())
         tk.Label(controls, text="Operator:", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(18, 6))
-        self.stats_operator_var = tk.StringVar(value="Alle Operatoren")
+        self.stats_operator_var = tk.StringVar(value=self._tr("Alle Operatoren"))
         self.stats_operator_combo = ttk.Combobox(controls, textvariable=self.stats_operator_var, state="readonly", width=18,
-                                                  values=("Alle Operatoren",))
+                                                  values=(self._tr("Alle Operatoren"),))
         self.stats_operator_combo.pack(side="left")
         self.stats_operator_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_stats())
         self.stats_hint = tk.Label(controls, text="", bg=CARD, fg=MUTED, font=("Segoe UI", 9))
@@ -1615,17 +2449,21 @@ class LoggerApp(tk.Tk):
         self.stats_sync_frame.pack(fill="both", expand=True)
 
     def _stats_period_only_qsos(self, qsos: list[dict]) -> list[dict]:
-        current = self.stats_operator_var.get() if hasattr(self, "stats_operator_var") else "Alle Operatoren"
+        all_operators = self._tr("Alle Operatoren")
+        current = self.stats_operator_var.get() if hasattr(self, "stats_operator_var") else all_operators
         try:
             if hasattr(self, "stats_operator_var"):
-                self.stats_operator_var.set("Alle Operatoren")
+                self.stats_operator_var.set(all_operators)
             return self._stats_filtered_qsos(qsos)
         finally:
             if hasattr(self, "stats_operator_var"):
                 self.stats_operator_var.set(current)
 
     def _stats_filtered_qsos(self, qsos: list[dict]) -> list[dict]:
-        period = self.stats_period_var.get() if hasattr(self, "stats_period_var") else "Gesamt"
+        periods = ("Gesamt", "Dieses Jahr", "Dieser Monat", "Diese Woche", "Heute (UTC)")
+        period = self._canonical_choice(
+            self.stats_period_var.get() if hasattr(self, "stats_period_var") else "Gesamt", periods,
+        )
         now = datetime.now(timezone.utc)
         filtered = list(qsos)
         if period == "Heute (UTC)":
@@ -1649,8 +2487,9 @@ class LoggerApp(tk.Tk):
             key = now.strftime("%Y")
             filtered = [q for q in filtered if str(q.get("qso_date", "")).startswith(key)]
 
-        operator = self.stats_operator_var.get() if hasattr(self, "stats_operator_var") else "Alle Operatoren"
-        if operator and operator != "Alle Operatoren":
+        all_operators = self._tr("Alle Operatoren")
+        operator = self.stats_operator_var.get() if hasattr(self, "stats_operator_var") else all_operators
+        if operator and operator not in {"Alle Operatoren", all_operators}:
             filtered = [q for q in filtered if str(q.get("operator_call") or "").upper() == operator.upper()]
         return filtered
 
@@ -1738,10 +2577,11 @@ class LoggerApp(tk.Tk):
         # works for personal logs as well as shared/club callsigns.
         operators_all = sorted({str(q.get("operator_call") or "").upper() for q in all_qsos if str(q.get("operator_call") or "").strip()})
         if hasattr(self, "stats_operator_combo"):
-            values = ["Alle Operatoren"] + operators_all
+            all_operators = self._tr("Alle Operatoren")
+            values = [all_operators] + operators_all
             self.stats_operator_combo.configure(values=values)
             if self.stats_operator_var.get() not in values:
-                self.stats_operator_var.set("Alle Operatoren")
+                self.stats_operator_var.set(all_operators)
         period_qsos = self._stats_period_only_qsos(all_qsos)
         operator_counts = Counter((q.get("operator_call") or "Unbekannt").upper() for q in period_qsos)
         qsos = self._stats_filtered_qsos(all_qsos)
@@ -1926,7 +2766,8 @@ class LoggerApp(tk.Tk):
                     self.after(0, lambda: self._cat_runtime_loaded(models, version))
             except Exception as exc:
                 if not self.closing:
-                    self.after(0, lambda: self._cat_runtime_failed(str(exc)))
+                    error_message = str(exc)
+                    self.after(0, lambda message=error_message: self._cat_runtime_failed(message))
 
         threading.Thread(target=worker, name="cat-runtime-info", daemon=True).start()
 
@@ -2061,6 +2902,72 @@ class LoggerApp(tk.Tk):
             return
         self._start_cat_runtime(config, notify=True)
 
+    def _set_tune_button_state(self):
+        if hasattr(self, "tune_button"):
+            enabled = self.cat_manager.running and not self.tuner_busy and not self.closing
+            self.tune_button.configure(
+                state="normal" if enabled else "disabled",
+                style="Tuning.TButton" if self.tuner_busy else "Secondary.TButton",
+                text="TUNE läuft …" if self.tuner_busy else "TUNE (ATU)",
+            )
+
+    def start_tuner_from_qso(self):
+        if self.tuner_busy:
+            return
+        if not self.cat_manager.running:
+            messagebox.showwarning(
+                "Tuner starten",
+                "CAT ist nicht gestartet. Bitte zuerst im CAT Setup verbinden.",
+                parent=self,
+            )
+            self._set_tune_button_state()
+            return
+        confirmed = messagebox.askyesno(
+            "TUNE / Antennentuner",
+            "Der automatische Tuner des Funkgeräts wird gestartet. Das Funkgerät kann dabei kurz senden.\n\n"
+            "Antenne und Leistungsgrenzen geprüft – TUNE jetzt ausführen?",
+            parent=self,
+        )
+        if not confirmed:
+            return
+        self.tuner_busy = True
+        self.tuner_started_monotonic = time.monotonic()
+        generation = self.cat_generation
+        self._set_tune_button_state()
+        self.status_var.set("Antennentuner wird gestartet …")
+
+        def worker():
+            try:
+                self.cat_manager.start_tuner()
+                if not self.closing:
+                    self.after(0, lambda: self._tuner_finished(generation, ""))
+            except Exception as exc:
+                if not self.closing:
+                    message = str(exc)
+                    self.after(0, lambda error=message: self._tuner_finished(generation, error))
+
+        threading.Thread(target=worker, name="cat-tuner", daemon=True).start()
+
+    def _tuner_finished(self, generation: int, error: str):
+        minimum_display = 0.8
+        remaining = minimum_display - (time.monotonic() - getattr(self, "tuner_started_monotonic", 0.0))
+        if remaining > 0 and not self.closing:
+            self.after(int(remaining * 1000), lambda: self._tuner_finished(generation, error))
+            return
+        self.tuner_busy = False
+        self._set_tune_button_state()
+        if generation != self.cat_generation or self.closing:
+            return
+        if error:
+            self.status_var.set("Antennentuner konnte nicht gestartet werden")
+            messagebox.showerror(
+                "TUNE / Antennentuner",
+                "Der TUNE-Befehl wurde vom Funkgerät oder Hamlib nicht unterstützt:\n\n" + error,
+                parent=self,
+            )
+            return
+        self.status_var.set("Antennentuner gestartet")
+
     def _start_cat_runtime(self, config: CatConfig, *, notify: bool):
         self.cat_generation += 1
         generation = self.cat_generation
@@ -2076,7 +2983,11 @@ class LoggerApp(tk.Tk):
                     self.after(0, lambda: self._cat_started(generation, config, notify))
             except Exception as exc:
                 if not self.closing:
-                    self.after(0, lambda: self._cat_start_failed(generation, str(exc), notify))
+                    error_message = str(exc)
+                    self.after(
+                        0,
+                        lambda message=error_message: self._cat_start_failed(generation, message, notify),
+                    )
 
         threading.Thread(target=worker, name="cat-start", daemon=True).start()
 
@@ -2086,6 +2997,7 @@ class LoggerApp(tk.Tk):
         self.cat_start_button.configure(state="normal")
         self.cat_status_label.configure(text="✓ CAT verbunden · warte auf Funkgerätedaten …", fg=OK)
         self.status_var.set("CAT verbunden")
+        self._set_tune_button_state()
         self._schedule_cat_poll(0, config.poll_interval_ms)
         if notify:
             messagebox.showinfo("CAT Setup", "CAT wurde erfolgreich gestartet.", parent=self)
@@ -2096,6 +3008,7 @@ class LoggerApp(tk.Tk):
         self.cat_start_button.configure(state="normal")
         self.cat_status_label.configure(text="✕ " + message, fg=ERR)
         self.status_var.set("CAT-Verbindung fehlgeschlagen")
+        self._set_tune_button_state()
         if notify:
             messagebox.showerror("CAT-Verbindung", message, parent=self)
 
@@ -2130,7 +3043,11 @@ class LoggerApp(tk.Tk):
                     self.after(0, lambda: self._cat_poll_ok(generation, reading, interval_ms))
             except Exception as exc:
                 if not self.closing:
-                    self.after(0, lambda: self._cat_poll_failed(generation, str(exc), interval_ms))
+                    error_message = str(exc)
+                    self.after(
+                        0,
+                        lambda message=error_message: self._cat_poll_failed(generation, message, interval_ms),
+                    )
 
         threading.Thread(target=worker, name="cat-poll", daemon=True).start()
 
@@ -2188,7 +3105,11 @@ class LoggerApp(tk.Tk):
             except Exception as exc:
                 self.cat_manager.stop()
                 if not self.closing:
-                    self.after(0, lambda: self._cat_start_failed(generation, str(exc), True))
+                    error_message = str(exc)
+                    self.after(
+                        0,
+                        lambda message=error_message: self._cat_start_failed(generation, message, True),
+                    )
 
         threading.Thread(target=worker, name="cat-test", daemon=True).start()
 
@@ -2219,7 +3140,9 @@ class LoggerApp(tk.Tk):
         self.cat_generation += 1
         self._cancel_cat_poll()
         self.cat_poll_busy = False
+        self.tuner_busy = False
         self.cat_manager.stop()
+        self._set_tune_button_state()
         if update_ui and hasattr(self, "cat_status_label"):
             self.cat_status_label.configure(text="CAT ist gestoppt.", fg=MUTED)
 
@@ -2273,28 +3196,28 @@ class LoggerApp(tk.Tk):
         filters = self._card(p, row=1, column=0, sticky="ew", pady=(0, 10))
         ttk.Label(filters, text="Spot-Filter", style="CardTitle.TLabel").pack(side="left", padx=(0, 18))
         tk.Label(filters, text="Band", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(0, 5))
-        self.dx_cluster_band_filter_var = tk.StringVar(value="Alle")
-        band_filter = ttk.Combobox(filters, textvariable=self.dx_cluster_band_filter_var, values=["Alle", *BANDS], state="readonly", width=10)
+        self.dx_cluster_band_filter_var = tk.StringVar(value=self._tr("Alle"))
+        band_filter = ttk.Combobox(filters, textvariable=self.dx_cluster_band_filter_var, values=[self._tr("Alle"), *BANDS], state="readonly", width=10)
         band_filter.pack(side="left")
         band_filter.bind("<<ComboboxSelected>>", lambda _event: self._refresh_dx_cluster_spots())
         tk.Label(filters, text="Mode", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(18, 5))
-        self.dx_cluster_mode_filter_var = tk.StringVar(value="Alle")
-        mode_filter = ttk.Combobox(filters, textvariable=self.dx_cluster_mode_filter_var, values=["Alle", *[mode for mode in MODES if mode != "SSB"]], state="readonly", width=14)
+        self.dx_cluster_mode_filter_var = tk.StringVar(value=self._tr("Alle"))
+        mode_filter = ttk.Combobox(filters, textvariable=self.dx_cluster_mode_filter_var, values=[self._tr("Alle"), *[mode for mode in MODES if mode != "SSB"]], state="readonly", width=14)
         mode_filter.pack(side="left")
         mode_filter.bind("<<ComboboxSelected>>", lambda _event: self._refresh_dx_cluster_spots())
         tk.Label(filters, text="Spotter-Region", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(18, 5))
-        self.dx_cluster_spotter_region_filter_var = tk.StringVar(value="Alle")
+        self.dx_cluster_spotter_region_filter_var = tk.StringVar(value=self._tr("Alle"))
         region_filter = ttk.Combobox(
             filters, textvariable=self.dx_cluster_spotter_region_filter_var,
-            values=SPOTTER_REGION_OPTIONS, state="readonly", width=16,
+            values=tuple(self._tr(value) for value in SPOTTER_REGION_OPTIONS), state="readonly", width=16,
         )
         region_filter.pack(side="left")
         region_filter.bind("<<ComboboxSelected>>", self._dx_cluster_spotter_region_changed)
         tk.Label(filters, text="Zeitraum", bg=CARD, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(18, 5))
-        self.dx_cluster_time_filter_var = tk.StringVar(value="30 Minuten")
+        self.dx_cluster_time_filter_var = tk.StringVar(value=self._tr("30 Minuten"))
         time_filter = ttk.Combobox(
             filters, textvariable=self.dx_cluster_time_filter_var,
-            values=("15 Minuten", "30 Minuten", "60 Minuten", "2 Stunden", "Alle"),
+            values=tuple(self._tr(value) for value in ("15 Minuten", "30 Minuten", "60 Minuten", "2 Stunden", "Alle")),
             state="readonly", width=12,
         )
         time_filter.pack(side="left")
@@ -2317,21 +3240,21 @@ class LoggerApp(tk.Tk):
         self.dx_cluster_visible_ids: list[str] = []
         self.dx_cluster_selected_id: str | None = None
         self.dx_cluster_table_columns = (
-            ("time", "UTC", 7), ("call", "DX-Rufzeichen", 15),
-            ("dx_country", "DX-Land", 20), ("frequency", "MHz", 11),
-            ("band", "Band", 8), ("mode", "Mode", 10),
-            ("spotter", "Spotter", 15), ("spotter_country", "Spotter-Land", 20),
-            ("comment", "Kommentar", 60),
+            ("time", self._tr("UTC"), 7), ("call", self._tr("DX-Rufzeichen"), 15),
+            ("dx_country", self._tr("DX-Land"), 20), ("frequency", self._tr("MHz"), 11),
+            ("band", self._tr("Band"), 8), ("mode", self._tr("Mode"), 10),
+            ("spotter", self._tr("Spotter"), 15), ("spotter_country", self._tr("Spotter-Land"), 20),
+            ("comment", self._tr("Kommentar"), 60),
         )
         self.dx_cluster_tree = tk.Text(
-            tree_box, wrap="none", state="disabled", bg="white", fg=TEXT,
+            tree_box, wrap="none", state="disabled", bg=INPUT_BG, fg=TEXT, insertbackground=TEXT,
             font=("Consolas", 9), relief="solid", borderwidth=1,
             highlightthickness=0, cursor="arrow", padx=4, pady=2,
         )
-        self.dx_cluster_tree.tag_configure("header", background="#eceff2", foreground=TEXT, font=("Consolas", 9, "bold"))
-        self.dx_cluster_tree.tag_configure("new", background="#eaf4ff")
-        self.dx_cluster_tree.tag_configure("worked", foreground="#18733b", font=("Consolas", 9, "bold"))
-        self.dx_cluster_tree.tag_configure("selected", background="#cfe4f7")
+        self.dx_cluster_tree.tag_configure("header", background=NEUTRAL_BADGE_BG, foreground=TEXT, font=("Consolas", 9, "bold"))
+        self.dx_cluster_tree.tag_configure("new", background=ACTIVE_BG)
+        self.dx_cluster_tree.tag_configure("worked", foreground=OK, font=("Consolas", 9, "bold"))
+        self.dx_cluster_tree.tag_configure("selected", background=NAV_ACTIVE_HOVER)
         self.dx_cluster_tree.grid(row=0, column=0, sticky="nsew")
         scroll = ttk.Scrollbar(tree_box, orient="vertical", command=self.dx_cluster_tree.yview)
         scroll.grid(row=0, column=1, sticky="ns")
@@ -2363,11 +3286,11 @@ class LoggerApp(tk.Tk):
         saved_window = self.db.get_setting("dx_cluster_time_window", "30 Minuten")
         if saved_window not in {"15 Minuten", "30 Minuten", "60 Minuten", "2 Stunden", "Alle"}:
             saved_window = "30 Minuten"
-        self.dx_cluster_time_filter_var.set(saved_window)
+        self.dx_cluster_time_filter_var.set(self._tr(saved_window))
         saved_region = self.db.get_setting("dx_cluster_spotter_region", "Alle")
         if saved_region not in SPOTTER_REGION_OPTIONS:
             saved_region = "Alle"
-        self.dx_cluster_spotter_region_filter_var.set(saved_region)
+        self.dx_cluster_spotter_region_filter_var.set(self._tr(saved_region))
         self._clear_dx_cluster_spots()
         self.dx_cluster_status_label.configure(
             text="DX Cluster ist getrennt · zum Empfangen bitte manuell verbinden.", fg=MUTED,
@@ -2558,15 +3481,17 @@ class LoggerApp(tk.Tk):
         self._refresh_dx_cluster_spots()
 
     def _dx_cluster_time_filter_changed(self, _event=None):
-        value = self.dx_cluster_time_filter_var.get()
+        value = self._canonical_choice(
+            self.dx_cluster_time_filter_var.get(), ("15 Minuten", "30 Minuten", "60 Minuten", "2 Stunden", "Alle"),
+        )
         self.db.set_setting("dx_cluster_time_window", value)
         self._refresh_dx_cluster_spots()
 
     def _dx_cluster_spotter_region_changed(self, _event=None):
-        value = self.dx_cluster_spotter_region_filter_var.get()
+        value = self._canonical_choice(self.dx_cluster_spotter_region_filter_var.get(), SPOTTER_REGION_OPTIONS)
         if value not in SPOTTER_REGION_OPTIONS:
             value = "Alle"
-            self.dx_cluster_spotter_region_filter_var.set(value)
+            self.dx_cluster_spotter_region_filter_var.set(self._tr(value))
         self.db.set_setting("dx_cluster_spotter_region", value)
         self._refresh_dx_cluster_spots()
 
@@ -2646,10 +3571,12 @@ class LoggerApp(tk.Tk):
     def _refresh_dx_cluster_spots(self):
         if not hasattr(self, "dx_cluster_tree"):
             return
-        band_filter = self.dx_cluster_band_filter_var.get()
-        mode_filter = self.dx_cluster_mode_filter_var.get()
-        spotter_region_filter = self.dx_cluster_spotter_region_filter_var.get()
-        window_label = self.dx_cluster_time_filter_var.get()
+        band_filter = self._canonical_choice(self.dx_cluster_band_filter_var.get(), ("Alle", *BANDS))
+        mode_filter = self._canonical_choice(self.dx_cluster_mode_filter_var.get(), ("Alle", *MODES))
+        spotter_region_filter = self._canonical_choice(self.dx_cluster_spotter_region_filter_var.get(), SPOTTER_REGION_OPTIONS)
+        window_label = self._canonical_choice(
+            self.dx_cluster_time_filter_var.get(), ("15 Minuten", "30 Minuten", "60 Minuten", "2 Stunden", "Alle"),
+        )
         window_minutes = {
             "15 Minuten": 15, "30 Minuten": 30, "60 Minuten": 60, "2 Stunden": 120,
         }.get(window_label)
@@ -2958,8 +3885,15 @@ class LoggerApp(tk.Tk):
             wraplength=470,
         ).grid(row=7, column=0, sticky="w", pady=(4, 16))
 
-        ttk.Separator(left).grid(row=8, column=0, sticky="ew", pady=(0, 14))
-        ttk.Label(left, text="UDP-Status", style="CardTitle.TLabel").grid(row=9, column=0, sticky="w")
+        self.udp_log_autostart_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            left,
+            text="UDP Logging beim App-Start automatisch starten",
+            variable=self.udp_log_autostart_var,
+        ).grid(row=8, column=0, sticky="w", pady=(0, 14))
+
+        ttk.Separator(left).grid(row=9, column=0, sticky="ew", pady=(0, 14))
+        ttk.Label(left, text="UDP-Status", style="CardTitle.TLabel").grid(row=10, column=0, sticky="w")
         self.udp_log_status_label = tk.Label(
             left,
             text="UDP-Logging ist ausgeschaltet.",
@@ -2970,7 +3904,7 @@ class LoggerApp(tk.Tk):
             anchor="nw",
             wraplength=470,
         )
-        self.udp_log_status_label.grid(row=10, column=0, sticky="ew", pady=(6, 10))
+        self.udp_log_status_label.grid(row=11, column=0, sticky="ew", pady=(6, 10))
         self.udp_log_last_label = tk.Label(
             left,
             text="Noch kein QSO empfangen.",
@@ -2981,10 +3915,10 @@ class LoggerApp(tk.Tk):
             anchor="nw",
             wraplength=470,
         )
-        self.udp_log_last_label.grid(row=11, column=0, sticky="ew", pady=(0, 12))
+        self.udp_log_last_label.grid(row=12, column=0, sticky="ew", pady=(0, 12))
 
         buttons = ttk.Frame(left, style="Card.TFrame")
-        buttons.grid(row=12, column=0, sticky="ew")
+        buttons.grid(row=13, column=0, sticky="ew")
         ttk.Button(buttons, text="Einstellungen speichern", style="Secondary.TButton", command=self.save_udp_log_settings).pack(side="left")
         self.udp_log_start_button = ttk.Button(buttons, text="UDP starten", style="Primary.TButton", command=self.start_udp_log)
         self.udp_log_start_button.pack(side="left", padx=8)
@@ -3028,7 +3962,7 @@ class LoggerApp(tk.Tk):
                 "Jedes empfangene QSO landet direkt in der ADI-Datei des aktiven Profils und "
                 "erscheint als LOCAL ONLY im Logbuch. Es wird später über den normalen Wavelog-Sync "
                 "übertragen. Mehrfach gesendete identische QSOs werden ignoriert.\n\n"
-                "Der UDP-Empfaenger wird nach jedem Programmstart bewusst manuell gestartet."
+                "Optional kann der UDP-Empfänger beim App-Start automatisch gestartet werden."
             ),
             bg=CARD, fg=TEXT, font=("Segoe UI", 10), justify="left", anchor="nw", wraplength=480,
         ).grid(row=7, column=0, sticky="ew", pady=(8, 0))
@@ -3040,6 +3974,7 @@ class LoggerApp(tk.Tk):
             config = UdpLogConfig()
         self.udp_log_host_var.set(config.bind_host)
         self.udp_log_port_var.set(str(config.port))
+        self.udp_log_autostart_var.set(self.db.get_setting("udp_log_autostart", "0") == "1")
         self.udp_log_received = 0
         self.udp_log_status_label.configure(
             text="UDP-Logging ist ausgeschaltet · zum Empfangen bitte UDP starten.", fg=MUTED,
@@ -3062,6 +3997,7 @@ class LoggerApp(tk.Tk):
             config = self._udp_log_config_from_ui()
             for key, value in config.settings().items():
                 self.db.set_setting(key, value)
+            self.db.set_setting("udp_log_autostart", "1" if self.udp_log_autostart_var.get() else "0")
             if self.udp_log_receiver.running:
                 message = "UDP-Einstellungen gespeichert · Änderungen gelten nach UDP stoppen und erneut starten."
             else:
@@ -3071,11 +4007,12 @@ class LoggerApp(tk.Tk):
         except Exception as exc:
             messagebox.showerror("UDP Logging", str(exc), parent=self)
 
-    def start_udp_log(self):
+    def start_udp_log(self, *, show_error: bool = True):
         try:
             config = self._udp_log_config_from_ui()
             for key, value in config.settings().items():
                 self.db.set_setting(key, value)
+            self.db.set_setting("udp_log_autostart", "1" if self.udp_log_autostart_var.get() else "0")
             self.udp_log_generation += 1
             generation = self.udp_log_generation
             self.udp_log_receiver.start(
@@ -3085,7 +4022,10 @@ class LoggerApp(tk.Tk):
             )
         except Exception as exc:
             self.udp_log_status_label.configure(text="UDP konnte nicht gestartet werden: " + str(exc), fg=ERR)
-            messagebox.showerror("UDP Logging", str(exc), parent=self)
+            self.status_var.set("UDP Logging konnte nicht gestartet werden")
+            write_startup_log("UDP Logging konnte nicht gestartet werden: " + repr(exc))
+            if show_error:
+                messagebox.showerror("UDP Logging", str(exc), parent=self)
             return
         self.udp_log_start_button.configure(state="disabled")
         self.udp_log_stop_button.configure(state="normal")
@@ -3093,6 +4033,13 @@ class LoggerApp(tk.Tk):
             text=f"✓ UDP aktiv auf {config.bind_host}:{config.port} · warte auf QSOs …", fg=OK,
         )
         self.status_var.set(f"UDP Logging aktiv · Port {config.port}")
+
+    def _autostart_udp_log(self):
+        if self.closing or self.udp_log_receiver.running:
+            return
+        if self.db.get_setting("udp_log_autostart", "0") != "1":
+            return
+        self.start_udp_log(show_error=False)
 
     def stop_udp_log(self):
         self._stop_udp_log_runtime()
@@ -3203,6 +4150,7 @@ class LoggerApp(tk.Tk):
             )
             self.status_var.set(f"UDP-QSO gespeichert: {saved['call']} · LOCAL ONLY")
             self.refresh_qsos()
+            self._local_sync_change()
         except Exception as exc:
             self._show_udp_log_error(generation, str(exc))
 
@@ -3210,10 +4158,53 @@ class LoggerApp(tk.Tk):
     def _build_settings_page(self):
         p = self._new_page("settings")
         p.columnconfigure(0, weight=1)
-        p.columnconfigure(1, weight=1)
         p.rowconfigure(0, weight=1)
 
-        left = self._card(p, row=0, column=0, sticky="nsew", padx=(0, 8))
+        notebook = ttk.Notebook(p, style="Settings.TNotebook")
+        notebook.grid(row=0, column=0, sticky="nsew")
+        general_tab = ttk.Frame(notebook, padding=(2, 12))
+        station_tab = ttk.Frame(notebook, padding=(2, 12))
+        online_tab = ttk.Frame(notebook, padding=(2, 12))
+        data_tab = ttk.Frame(notebook, padding=(2, 12))
+        notebook.add(general_tab, text="Allgemein")
+        notebook.add(station_tab, text="Station & Wavelog")
+        notebook.add(online_tab, text="Callbook & Online-Dienste")
+        notebook.add(data_tab, text="Daten & Verbindungen")
+        for tab in (general_tab, station_tab, online_tab, data_tab):
+            tab.columnconfigure(0, weight=1)
+            tab.columnconfigure(1, weight=1)
+            tab.rowconfigure(0, weight=1)
+
+        general_left = self._card(general_tab, row=0, column=0, sticky="nsew", padx=(0, 8))
+        general_left.columnconfigure(1, weight=1)
+        ttk.Label(general_left, text="App-weite Einstellungen", style="CardTitle.TLabel").grid(
+            row=0, column=0, columnspan=2, sticky="w",
+        )
+        ttk.Label(
+            general_left,
+            text="Sprache und Darstellung gelten für alle Stationsprofile. Die Änderung wird nach einem Neustart der App aktiv.",
+            style="Muted.Card.TLabel", wraplength=470,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(3, 14))
+        self.set_ui_language = tk.StringVar(value="English" if self.language == "en" else "Deutsch")
+        self.set_ui_theme = tk.StringVar(value="Dunkel / Dark" if self.ui_preferences.theme == "dark" else "Hell / Light")
+        ttk.Label(general_left, text="Sprache", style="Card.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 12), pady=7)
+        ttk.Combobox(
+            general_left, textvariable=self.set_ui_language, values=("Deutsch", "English"), state="readonly",
+        ).grid(row=2, column=1, sticky="ew", pady=7)
+        ttk.Label(general_left, text="Theme", style="Card.TLabel").grid(row=3, column=0, sticky="w", padx=(0, 12), pady=7)
+        ttk.Combobox(
+            general_left, textvariable=self.set_ui_theme, values=("Hell / Light", "Dunkel / Dark"), state="readonly",
+        ).grid(row=3, column=1, sticky="ew", pady=7)
+
+        general_right = self._card(general_tab, row=0, column=1, sticky="nsew", padx=(8, 0))
+        ttk.Label(general_right, text="Daten & Backup", style="CardTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            general_right,
+            text="Backup und Wiederherstellung der Profile, Einstellungen und ADI-Logbücher werden hier ergänzt.",
+            style="Muted.Card.TLabel", wraplength=450,
+        ).pack(anchor="w", pady=(4, 0))
+
+        left = self._card(station_tab, row=0, column=0, sticky="nsew", padx=(0, 8))
         left.columnconfigure(1, weight=1)
         ttk.Label(left, text="Offline-Stationsprofil", style="CardTitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(left, text="Diese Daten werden in deine ADI-Dateien geschrieben und funktionieren auch komplett ohne Internet.", style="Muted.Card.TLabel", wraplength=450).grid(row=1, column=0, columnspan=2, sticky="w", pady=(3, 12))
@@ -3238,13 +4229,16 @@ class LoggerApp(tk.Tk):
         hint = tk.Label(left, text="Die Aktivierungsreferenzen werden automatisch als MY_* Felder in jedes neue QSO geschrieben.", bg=CARD, fg=MUTED, font=("Segoe UI", 9), justify="left", wraplength=430)
         hint.grid(row=12, column=0, columnspan=2, sticky="w", pady=(12,0))
 
-        right = self._card(p, row=0, column=1, sticky="nsew", padx=(8, 0))
+        right = self._card(station_tab, row=0, column=1, sticky="nsew", padx=(8, 0))
         right.columnconfigure(0, weight=1)
         ttk.Label(right, text="Wavelog Sync", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(right, text="API v2 (wl2_… Token). Der Logger bleibt auch ohne Verbindung vollständig nutzbar.", style="Muted.Card.TLabel", wraplength=450).grid(row=1, column=0, sticky="w", pady=(3, 10))
+        ttk.Label(right, text="API v2 (wl2_… Token). Manueller Sync bleibt immer möglich; optional wechselt die App automatisch in den Online-Modus. Für Callbook-Daten wird zusätzlich lookup:read benötigt.", style="Muted.Card.TLabel", wraplength=450).grid(row=1, column=0, sticky="w", pady=(3, 10))
         self.set_url = tk.StringVar()
         self.set_token = tk.StringVar()
         self.set_station_profile = tk.StringVar()
+        self.set_auto_sync_online = tk.BooleanVar(value=False)
+        self.set_full_sync_on_start = tk.BooleanVar(value=False)
+        self.set_full_sync_on_exit = tk.BooleanVar(value=False)
         ttk.Label(right, text="Wavelog URL", style="Card.TLabel").grid(row=2, column=0, sticky="w", pady=(5,3))
         ttk.Entry(right, textvariable=self.set_url).grid(row=3, column=0, sticky="ew")
         ttk.Label(right, text="API-v2 Token", style="Card.TLabel").grid(row=4, column=0, sticky="w", pady=(8, 3))
@@ -3257,27 +4251,108 @@ class LoggerApp(tk.Tk):
         self.station_combo.grid(row=9, column=0, sticky="ew")
         self.station_combo.bind("<<ComboboxSelected>>", lambda e: self._station_selection_changed())
         ttk.Button(right, text="Werte aus Wavelog-Profil übernehmen", style="Secondary.TButton", command=self.copy_station_values).grid(row=10, column=0, sticky="w", pady=(8, 12))
+        ttk.Separator(right).grid(row=11, column=0, sticky="ew", pady=(2, 10))
+        ttk.Checkbutton(
+            right,
+            text="Online-Modus: neue QSOs automatisch zu Wavelog pushen",
+            variable=self.set_auto_sync_online,
+        ).grid(row=12, column=0, sticky="w")
+        ttk.Checkbutton(
+            right,
+            text="Vollständigen Sync beim App-Start ausführen",
+            variable=self.set_full_sync_on_start,
+        ).grid(row=13, column=0, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(
+            right,
+            text="Vollständigen Sync beim Beenden ausführen",
+            variable=self.set_full_sync_on_exit,
+        ).grid(row=14, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(
+            right,
+            text="Alle Optionen gelten pro Profil und sind unabhängig wählbar. Offline werden QSOs weiter sicher lokal gespeichert.",
+            style="Muted.Card.TLabel", wraplength=450,
+        ).grid(row=15, column=0, sticky="w", pady=(5, 0))
 
-        ttk.Separator(right).grid(row=11, column=0, sticky="ew", pady=8)
-        ttk.Label(right, text="Logdateien", style="CardTitle.TLabel").grid(row=12, column=0, sticky="w")
+        callbook_card = self._card(online_tab, row=0, column=0, sticky="nsew", padx=(0, 8))
+        callbook_card.columnconfigure(0, weight=1)
+        callbook_card.columnconfigure(1, weight=1)
+        ttk.Label(callbook_card, text="Rufzeichen-Lookup", style="CardTitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(
+            callbook_card,
+            text="Name, Locator, QTH und – falls vorhanden – das Stationsfoto werden beim Tippen geladen. Ohne Internet läuft das Logging still weiter.",
+            style="Muted.Card.TLabel", wraplength=480,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(3, 12))
+        self.set_callbook_source = tk.StringVar(value=callbook_source_name(CALLBOOK_SOURCE_WAVELOG, self.language))
+        self.set_callbook_auto = tk.BooleanVar(value=True)
+        ttk.Label(callbook_card, text="Datenquelle", style="Card.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(3, 3))
+        ttk.Combobox(
+            callbook_card, textvariable=self.set_callbook_source,
+            values=tuple(callbook_source_labels(self.language)), state="readonly",
+        ).grid(row=3, column=0, columnspan=2, sticky="ew")
+        ttk.Checkbutton(
+            callbook_card, text="Bei vollständigem Rufzeichen automatisch abfragen",
+            variable=self.set_callbook_auto,
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 10))
+        ttk.Separator(callbook_card).grid(row=5, column=0, columnspan=2, sticky="ew", pady=(2, 10))
+        ttk.Label(callbook_card, text="Direkter QRZ.com-Zugang", style="CardTitle.TLabel").grid(row=6, column=0, columnspan=2, sticky="w")
+        ttk.Label(
+            callbook_card,
+            text="Nur nötig, wenn QRZ.com direkt gewählt ist. Sind die Zugangsdaten leer, wird automatisch Wavelog verwendet. QRZ kann ein XML-Abonnement voraussetzen.",
+            style="Muted.Card.TLabel", wraplength=480,
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(3, 8))
+        self.set_qrz_username = tk.StringVar()
+        self.set_qrz_password = tk.StringVar()
+        ttk.Label(callbook_card, text="QRZ.com Benutzername", style="Card.TLabel").grid(row=8, column=0, sticky="w", padx=(0, 6), pady=(3, 3))
+        ttk.Label(callbook_card, text="QRZ.com Passwort", style="Card.TLabel").grid(row=8, column=1, sticky="w", padx=(6, 0), pady=(3, 3))
+        ttk.Entry(callbook_card, textvariable=self.set_qrz_username).grid(row=9, column=0, sticky="ew", padx=(0, 6))
+        ttk.Entry(callbook_card, textvariable=self.set_qrz_password, show="●").grid(row=9, column=1, sticky="ew", padx=(6, 0))
+        ttk.Button(callbook_card, text="Callbook-Verbindung testen", style="Secondary.TButton", command=self.test_callbook).grid(row=10, column=0, columnspan=2, sticky="w", pady=(12, 7))
+        self.callbook_test_label = tk.Label(callbook_card, text="", bg=CARD, fg=MUTED, font=("Segoe UI", 9), justify="left", anchor="w", wraplength=470)
+        self.callbook_test_label.grid(row=11, column=0, columnspan=2, sticky="ew")
+
+        eqsl_card = self._card(online_tab, row=0, column=1, sticky="nsew", padx=(8, 0))
+        eqsl_card.columnconfigure(0, weight=1)
+        ttk.Label(eqsl_card, text="eQSL.cc", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        coming = tk.Label(eqsl_card, text="COMING SOON", bg=WARN_BADGE_BG, fg=WARN, font=("Segoe UI Semibold", 8), padx=8, pady=3)
+        coming.grid(row=0, column=1, sticky="e")
+        ttk.Label(
+            eqsl_card,
+            text="Die Zugangsdaten können bereits profilspezifisch hinterlegt werden. Derzeit findet noch keine Verbindung, kein Download und kein Upload statt.",
+            style="Muted.Card.TLabel", wraplength=450,
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 14))
+        self.set_eqsl_username = tk.StringVar()
+        self.set_eqsl_password = tk.StringVar()
+        ttk.Label(eqsl_card, text="eQSL.cc Benutzername", style="Card.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 3))
+        ttk.Entry(eqsl_card, textvariable=self.set_eqsl_username).grid(row=3, column=0, columnspan=2, sticky="ew")
+        ttk.Label(eqsl_card, text="eQSL.cc Passwort", style="Card.TLabel").grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 3))
+        ttk.Entry(eqsl_card, textvariable=self.set_eqsl_password, show="●").grid(row=5, column=0, columnspan=2, sticky="ew")
+        tk.Label(
+            eqsl_card, text="Coming soon – derzeit noch ohne Funktion.",
+            bg=WARN_BADGE_BG, fg=WARN, font=("Segoe UI Semibold", 10),
+            padx=12, pady=10, anchor="w",
+        ).grid(row=6, column=0, columnspan=2, sticky="ew", pady=(16, 0))
+
+        data_left = self._card(data_tab, row=0, column=0, sticky="nsew", padx=(0, 8))
+        data_left.columnconfigure(0, weight=1)
+        ttk.Label(data_left, text="Lokale Logdateien", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            data_left,
+            text="ADI bleibt das primäre Logbuchformat. Die SQLite-Datei enthält nur Einstellungen, Sync-Metadaten und den Callbook-Cache.",
+            style="Muted.Card.TLabel", wraplength=450,
+        ).grid(row=1, column=0, sticky="w", pady=(3, 12))
         self.set_log_dir = tk.StringVar()
-        logrow = ttk.Frame(right, style="Card.TFrame")
-        logrow.grid(row=13, column=0, sticky="ew", pady=(6, 0))
+        logrow = ttk.Frame(data_left, style="Card.TFrame")
+        logrow.grid(row=2, column=0, sticky="ew", pady=(6, 0))
         logrow.columnconfigure(0, weight=1)
         ttk.Entry(logrow, textvariable=self.set_log_dir).grid(row=0, column=0, sticky="ew")
         ttk.Button(logrow, text="…", width=4, command=self.choose_log_dir).grid(row=0, column=1, padx=(6, 0))
 
-        savebar = ttk.Frame(right, style="Card.TFrame")
-        savebar.grid(row=14, column=0, sticky="ew", pady=(18, 0))
-        ttk.Button(savebar, text="Einstellungen speichern", style="Primary.TButton", command=self.save_settings).pack(side="left")
-
-        spotter = self._card(p, row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        spotter = self._card(data_tab, row=0, column=1, sticky="nsew", padx=(8, 0))
         spotter.columnconfigure(0, weight=2)
         spotter.columnconfigure(1, weight=1)
         spotter.columnconfigure(2, weight=2)
-        spotter.columnconfigure(3, weight=2)
         ttk.Label(spotter, text="DX-Spotter-Verbindung", style="CardTitle.TLabel").grid(
-            row=0, column=0, columnspan=4, sticky="w",
+            row=0, column=0, columnspan=3, sticky="w",
         )
         ttk.Label(
             spotter,
@@ -3287,7 +4362,7 @@ class LoggerApp(tk.Tk):
                 "wird nichts gesendet. Das Login-Rufzeichen kommt immer aus dem aktiven Stationsprofil."
             ),
             style="Muted.Card.TLabel", wraplength=1050,
-        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(3, 8))
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 8))
         self.dx_spotter_host_var = tk.StringVar(value=DEFAULT_SPOTTER_HOST)
         self.dx_spotter_port_var = tk.StringVar(value=str(DEFAULT_SPOTTER_PORT))
         self.dx_spotter_call_var = tk.StringVar()
@@ -3307,13 +4382,20 @@ class LoggerApp(tk.Tk):
             spotter, text="Spotter-Verbindung wird erst beim Senden aufgebaut.",
             bg=CARD, fg=MUTED, font=("Segoe UI", 9), anchor="w",
         )
-        self.dx_spotter_status_label.grid(row=3, column=3, sticky="ew")
+        self.dx_spotter_status_label.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+
+        savebar = ttk.Frame(p)
+        savebar.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        ttk.Label(savebar, text="Stationsdaten sind profilspezifisch; Sprache und Theme gelten app-weit.", foreground=MUTED).pack(side="left")
+        ttk.Button(savebar, text="Einstellungen speichern", style="Primary.TButton", command=self.save_settings).pack(side="right")
 
     def _settings_row(self, parent, label, var, row):
         ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", padx=(0,12), pady=7)
         ttk.Entry(parent, textvariable=var).grid(row=row, column=1, sticky="ew", pady=7)
 
     def _load_settings_to_ui(self):
+        self.set_ui_language.set("English" if self.ui_preferences.language == "en" else "Deutsch")
+        self.set_ui_theme.set("Dunkel / Dark" if self.ui_preferences.theme == "dark" else "Hell / Light")
         self.set_operator.set(self.db.get_setting("operator_call", ""))
         self.set_station.set(self.db.get_setting("station_call", ""))
         self.set_locator.set(self.db.get_setting("locator", ""))
@@ -3324,6 +4406,16 @@ class LoggerApp(tk.Tk):
         self.set_wwff.set(self.db.get_setting("my_wwff_ref", ""))
         self.set_url.set(self.db.get_setting("wavelog_url", ""))
         self.set_token.set(self.db.get_token())
+        self.set_auto_sync_online.set(self.db.get_setting("auto_sync_online", "0") == "1")
+        self.set_full_sync_on_start.set(self.db.get_setting("full_sync_on_start", "0") == "1")
+        self.set_full_sync_on_exit.set(self.db.get_setting("full_sync_on_exit", "0") == "1")
+        source = self.db.get_setting("callbook_source", CALLBOOK_SOURCE_WAVELOG).strip().lower()
+        self.set_callbook_source.set(callbook_source_name(source, self.language))
+        self.set_callbook_auto.set(self.db.get_setting("callbook_auto_lookup", "1") == "1")
+        self.set_qrz_username.set(self.db.get_setting("qrz_username", ""))
+        self.set_qrz_password.set(self.db.get_secret("qrz_password"))
+        self.set_eqsl_username.set(self.db.get_setting("eqsl_username", ""))
+        self.set_eqsl_password.set(self.db.get_secret("eqsl_password"))
         self.set_log_dir.set(self.db.get_setting("log_dir", str(self.store.log_dir)))
         self.time_mode_var.set(self.db.get_setting("time_mode", "UTC") or "UTC")
         self.form_vars["tx_pwr"].set(self.db.get_setting("default_power", ""))
@@ -3371,7 +4463,24 @@ class LoggerApp(tk.Tk):
             self.db.set_setting("my_wwff_ref", self.set_wwff.get().strip().upper())
             self.db.set_setting("wavelog_url", self.set_url.get().strip())
             self.db.set_token(self.set_token.get().strip())
+            self.db.set_setting("auto_sync_online", "1" if self.set_auto_sync_online.get() else "0")
+            self.db.set_setting("full_sync_on_start", "1" if self.set_full_sync_on_start.get() else "0")
+            self.db.set_setting("full_sync_on_exit", "1" if self.set_full_sync_on_exit.get() else "0")
+            source = CALLBOOK_SOURCE_LABELS.get(self.set_callbook_source.get(), CALLBOOK_SOURCE_WAVELOG)
+            self.db.set_setting("callbook_source", source)
+            self.db.set_setting("callbook_auto_lookup", "1" if self.set_callbook_auto.get() else "0")
+            self.db.set_setting("qrz_username", self.set_qrz_username.get().strip())
+            self.db.set_secret("qrz_password", self.set_qrz_password.get())
+            self.db.set_setting("eqsl_username", self.set_eqsl_username.get().strip())
+            self.db.set_secret("eqsl_password", self.set_eqsl_password.get())
             self.db.set_setting("log_dir", self.set_log_dir.get().strip())
+            new_ui_preferences = UiPreferences(
+                language="en" if self.set_ui_language.get() == "English" else "de",
+                theme="dark" if self.set_ui_theme.get() == "Dunkel / Dark" else "light",
+            )
+            restart_required = new_ui_preferences != self.ui_preferences
+            save_ui_preferences(self.data_dir, new_ui_preferences)
+            self.ui_preferences = new_ui_preferences
             self._store_dx_spotter_config(spotter_config)
             selected = self.station_by_label.get(self.set_station_profile.get())
             if selected:
@@ -3389,8 +4498,16 @@ class LoggerApp(tk.Tk):
             elif self.dx_spotter_active_config != spotter_config:
                 self._stop_dx_spotter_runtime(update_ui=True)
             self.refresh_fast_log_page()
+            self.qrz_client = None
+            self.qrz_client_credentials = None
+            if self.call_var.get().strip():
+                self._schedule_callbook_lookup(self.call_var.get().strip().upper(), force=True)
+            self._reset_wavelog_monitor(delay_ms=300)
             self.status_var.set("Einstellungen gespeichert")
-            messagebox.showinfo("Einstellungen", "Einstellungen wurden gespeichert.", parent=self)
+            message = "Einstellungen wurden gespeichert."
+            if restart_required:
+                message += "\n\nSprache oder Theme werden nach dem nächsten Programmstart aktiv."
+            messagebox.showinfo("Einstellungen", message, parent=self)
         except Exception as e:
             messagebox.showerror("Einstellungen", str(e), parent=self)
 
@@ -3398,6 +4515,45 @@ class LoggerApp(tk.Tk):
         p = filedialog.askdirectory(initialdir=self.set_log_dir.get() or str(self._profile_default_log_dir()), parent=self)
         if p:
             self.set_log_dir.set(p)
+
+    def test_callbook(self):
+        call = (self.set_station.get().strip() or self.set_operator.get().strip()).upper()
+        if not lookup_candidate(call):
+            self.callbook_test_label.configure(text="Bitte zuerst ein gültiges Operator- oder Stationsrufzeichen eintragen.", fg=WARN)
+            return
+        selected = CALLBOOK_SOURCE_LABELS.get(self.set_callbook_source.get(), CALLBOOK_SOURCE_WAVELOG)
+        qrz_user = self.set_qrz_username.get().strip()
+        qrz_password = self.set_qrz_password.get()
+        source = selected
+        fallback_note = ""
+        if source == CALLBOOK_SOURCE_DISABLED:
+            self.callbook_test_label.configure(text="Callbook-Abfrage ist deaktiviert.", fg=MUTED)
+            return
+        if source == CALLBOOK_SOURCE_QRZ and (not qrz_user or not qrz_password):
+            source = CALLBOOK_SOURCE_WAVELOG
+            fallback_note = " · QRZ-Zugang leer, daher Wavelog verwendet"
+        self.callbook_test_label.configure(text="Verbindung wird geprüft …", fg=MUTED)
+        url = self.set_url.get().strip()
+        token = self.set_token.get().strip()
+
+        def worker():
+            try:
+                if source == CALLBOOK_SOURCE_QRZ:
+                    result = QrzClient(qrz_user, qrz_password, timeout=8).lookup(call)
+                else:
+                    payload = WavelogClient(url, token, timeout=8).lookup_callsign(call, include_callbook=True)
+                    result = normalize_wavelog_result(payload, call)
+                if not any((result.name, result.qth, result.grid, result.country, result.image_url)):
+                    raise CallbookError("Keine Callbook-Daten gefunden")
+                summary = " · ".join(part for part in (result.callsign, result.name, result.grid, result.qth) if part)
+                if not self.closing:
+                    self.after(0, lambda text=summary: self.callbook_test_label.configure(text="✓ " + text + fallback_note, fg=OK))
+            except Exception as exc:
+                if not self.closing:
+                    error_message = str(exc)
+                    self.after(0, lambda message=error_message: self.callbook_test_label.configure(text="✕ " + message, fg=ERR))
+
+        threading.Thread(target=worker, name="callbook-test", daemon=True).start()
 
     def test_wavelog(self):
         url = self.set_url.get().strip()
@@ -3413,7 +4569,8 @@ class LoggerApp(tk.Tk):
                     self.after(0, lambda: self._wavelog_test_ok(info, stations))
             except Exception as e:
                 if not self.closing:
-                    self.after(0, lambda: self._wavelog_test_fail(str(e)))
+                    error_message = str(e)
+                    self.after(0, lambda message=error_message: self._wavelog_test_fail(message))
         threading.Thread(target=worker, name="wavelog-test", daemon=True).start()
 
     def _wavelog_test_ok(self, info: dict, stations: list[dict]):
@@ -3421,12 +4578,13 @@ class LoggerApp(tk.Tk):
         scopes = ", ".join(info.get("scopes") or [])
         scope_list = info.get("scopes") or []
         qsl_hint = "" if "confirmation:read" in scope_list else "\n⚠ confirmation:read fehlt – Bestätigungen (✓) sind nicht verfügbar."
+        lookup_hint = "" if "lookup:read" in scope_list else "\n⚠ lookup:read fehlt – Rufzeichen-/Callbook-Daten über Wavelog sind nicht verfügbar."
         club_hint = ""
         station_call = self.set_station.get().strip().upper()
         if station_call and owner.upper() == station_call and "club:read" not in scope_list:
             club_hint = "\nℹ Clubstation: Für sicheren clubweiten Operator-Abgleich einen Officer-Token mit club:read verwenden."
-        warn = bool(qsl_hint)
-        self.connection_label.configure(text=f"✓ Token gültig · Owner: {owner or '—'}\nScopes: {scopes or '—'}{qsl_hint}{club_hint}", fg=WARN if warn else OK)
+        warn = bool(qsl_hint or lookup_hint)
+        self.connection_label.configure(text=f"✓ Token gültig · Owner: {owner or '—'}\nScopes: {scopes or '—'}{qsl_hint}{lookup_hint}{club_hint}", fg=WARN if warn else OK)
         if not self.set_operator.get().strip() and owner:
             self.set_operator.set(owner.upper())
         self.station_rows = stations
@@ -3470,11 +4628,50 @@ class LoggerApp(tk.Tk):
         self.status_var.set("Stationswerte aus Wavelog übernommen · noch nicht gespeichert")
 
     # ---------- shutdown ----------
+    def _begin_close_sequence(self):
+        if self.closing:
+            return
+        if not self.close_services_stopped:
+            self.close_services_stopped = True
+            # Freeze external input before the final sync so UDP cannot append
+            # another QSO while the completion dialog is waiting for OK.
+            self._stop_cat_runtime(update_ui=False)
+            self._stop_dx_cluster_runtime(update_ui=False)
+            self._stop_dx_spotter_runtime(update_ui=False)
+            self._stop_udp_log_runtime(update_ui=False)
+        if self.sync_busy:
+            self.status_var.set("Beenden wartet auf die laufende Wavelog-Übertragung …")
+            self._show_sync_progress("shutdown", "Beenden wartet auf die laufende Wavelog-Übertragung …")
+            return
+        settings = self._wavelog_online_settings()
+        if settings.full_sync_on_exit and settings.configured and self.wavelog_online:
+            self.startup_full_sync_pending = False
+            self.status_var.set("Vollständiger Abschluss-Sync läuft …")
+            self._start_sync(automatic=True, reason="shutdown")
+            return
+        self._finalize_close()
+
+    def _finalize_close(self):
+        self.shutdown()
+        try:
+            self.destroy()
+        except tk.TclError:
+            pass
+
     def shutdown(self):
         if self.shutdown_started:
             return
         self.shutdown_started = True
         self.closing = True
+        self.wavelog_check_generation += 1
+        for job_name in ("wavelog_check_job", "auto_sync_job"):
+            job = getattr(self, job_name, None)
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+                setattr(self, job_name, None)
         try:
             write_startup_log("Programm wird geschlossen")
             self._stop_cat_runtime(update_ui=False)
@@ -3488,8 +4685,10 @@ class LoggerApp(tk.Tk):
             write_startup_log("Fehler beim Shutdown: " + repr(e))
 
     def on_close(self):
-        self.shutdown()
-        self.destroy()
+        if self.close_requested:
+            return
+        self.close_requested = True
+        self._begin_close_sequence()
 
 
 
@@ -3558,9 +4757,9 @@ class ProfileDeleteDialog(tk.Toplevel):
         tk.Label(outer, text=f"Profil: {profile_name}", bg=BG, fg=TEXT, font=("Segoe UI Semibold", 11)).pack(anchor="w", pady=(12, 5))
         tk.Label(outer, text="Gelöscht werden die lokalen Einstellungen und Sync-Metadaten dieses Logger-Profils.", bg=BG, fg=TEXT, font=("Segoe UI", 10), wraplength=500, justify="left").pack(anchor="w")
 
-        warning = tk.Frame(outer, bg="#fff4e5", highlightbackground="#f0c36d", highlightthickness=1)
+        warning = tk.Frame(outer, bg=WARN_BADGE_BG, highlightbackground=WARN, highlightthickness=1)
         warning.pack(fill="x", pady=14)
-        tk.Label(warning, text="Wavelog wird NICHT verändert. Es werden weder QSOs noch Stationsprofile in Wavelog gelöscht.", bg="#fff4e5", fg="#7a4d00", font=("Segoe UI Semibold", 9), wraplength=475, justify="left", padx=12, pady=10).pack(anchor="w")
+        tk.Label(warning, text="Wavelog wird NICHT verändert. Es werden weder QSOs noch Stationsprofile in Wavelog gelöscht.", bg=WARN_BADGE_BG, fg=WARN, font=("Segoe UI Semibold", 9), wraplength=475, justify="left", padx=12, pady=10).pack(anchor="w")
 
         self.delete_adi_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(outer, text="Lokale ADI-Dateien dieses Profils ebenfalls löschen", variable=self.delete_adi_var).pack(anchor="w", pady=(0, 12))
@@ -3727,7 +4926,7 @@ class EditDialog(tk.Toplevel):
             self.vars[key] = v
             ttk.Entry(frame, textvariable=v).grid(row=i, column=1, sticky="ew", pady=4)
         ttk.Label(frame, text="Notizen").grid(row=len(fields), column=0, sticky="nw", pady=4)
-        self.notes = tk.Text(frame, height=4, wrap="word", font=("Segoe UI", 9))
+        self.notes = tk.Text(frame, height=4, wrap="word", font=("Segoe UI", 9), bg=INPUT_BG, fg=TEXT, insertbackground=TEXT)
         self.notes.grid(row=len(fields), column=1, sticky="ew", pady=4)
         self.notes.insert("1.0", str(q.get("notes") or ""))
         btn = ttk.Frame(frame)

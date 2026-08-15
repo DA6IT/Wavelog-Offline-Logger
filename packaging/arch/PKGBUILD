@@ -1,0 +1,41 @@
+# Maintainer: DA6IT <opensource@da6it.de>
+pkgname=wavelog-offline-logger
+pkgver=0.16.0
+pkgrel=1
+pkgdesc='Offline-first amateur-radio logger with manual Wavelog sync'
+arch=('x86_64' 'aarch64')
+url='https://github.com/DA6IT/Wavelog-Offline-Logger'
+license=('MIT')
+depends=('glibc' 'libx11' 'libxext' 'libxrender' 'libxft' 'fontconfig' 'freetype2')
+makedepends=('python' 'python-pyinstaller' 'python-pillow' 'curl' 'autoconf' 'automake' 'gcc' 'make')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
+# Replace SKIP with the release-source SHA-256 before publishing to the AUR.
+sha256sums=('SKIP')
+
+build() {
+  cd "Wavelog-Offline-Logger-${pkgver}"
+  local machine_arch
+  machine_arch="$(uname -m)"
+  bash ./scripts/prepare-hamlib-linux.sh
+  python -m PyInstaller --noconfirm --clean --windowed --onedir \
+    --name wavelog-offline-logger \
+    --add-data "cty.dat:." \
+    --add-data "build/embedded/hamlib/linux-${machine_arch}:hamlib" \
+    --add-data "assets:assets" \
+    app.py
+}
+
+package() {
+  cd "Wavelog-Offline-Logger-${pkgver}"
+  install -d "${pkgdir}/opt/wavelog-offline-logger" "${pkgdir}/usr/bin"
+  cp -a dist/wavelog-offline-logger/. "${pkgdir}/opt/wavelog-offline-logger/"
+  install -Dm755 /dev/stdin "${pkgdir}/usr/bin/wavelog-offline-logger" <<'EOF'
+#!/bin/sh
+exec /opt/wavelog-offline-logger/wavelog-offline-logger "$@"
+EOF
+  install -Dm644 packaging/linux/wavelog-offline-logger.desktop \
+    "${pkgdir}/usr/share/applications/wavelog-offline-logger.desktop"
+  install -Dm644 assets/wavelog-offline-logger.svg \
+    "${pkgdir}/usr/share/icons/hicolor/scalable/apps/wavelog-offline-logger.svg"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

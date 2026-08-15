@@ -91,3 +91,48 @@ jobs:
             dist/*.zip
             dist/*.sha256
           if-no-files-found: error
+
+  linux-build:
+    name: Linux ${{ matrix.package_arch }} packages
+    needs: selftest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            python_arch: x64
+            package_arch: x64
+          - runner: ubuntu-22.04-arm
+            python_arch: arm64
+            package_arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.10'
+          architecture: ${{ matrix.python_arch }}
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl dpkg-dev file python3-tk squashfs-tools zstd
+
+      - name: Test and build Linux packages
+        shell: bash
+        run: bash ./scripts/build-linux.sh dist
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ matrix.package_arch }}
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+            dist/*.pkg.tar.zst
+            dist/*.sha256
+          if-no-files-found: error

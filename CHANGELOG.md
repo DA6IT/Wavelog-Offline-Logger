@@ -4,6 +4,35 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-15
+
+### Added
+
+- Neu gestaltete Oberfläche mit schmaler Navigation, DA6IT.de-Logo, deutschem und englischem UI sowie hellem und dunklem Theme
+- Optionaler Callbook-Lookup über die Wavelog-API oder direkt über QRZ.com einschließlich Name, Locator, QTH, Zonen und optionalem Stationsfoto
+- Profilbezogener Online-Modus, der ausschließlich neue `LOCAL ONLY`-QSOs direkt zu Wavelog pusht
+- Unabhängige Optionen für einen vollständigen bidirektionalen Sync beim App-Start und beim Beenden
+- Modales Statusfenster für automatische Start- und Abschluss-Syncs mit Ergebniszusammenfassung und bewusster OK-Freigabe
+- TUNE-/ATU-Befehl im normalen QSO-Fenster über die vorhandene Hamlib-CAT-Verbindung
+- Profilbezogener Autostart des UDP-Empfängers
+- Automatisierte Linux-Pakete für x64 und ARM64 als DEB, AppImage und Arch-Paket
+- Ausführliches Benutzerhandbuch mit echten, anonymitätsbewusst ausgewählten App-Screenshots
+
+### Changed
+
+- Einstellungen sind in **Allgemein**, **Station & Wavelog**, **Callbook & Online-Dienste** und **Daten & Verbindungen** gegliedert
+- Online-Erreichbarkeit wird direkt an der konfigurierten Wavelog-API geprüft; ohne Verbindung bleibt die App still im Modus `LOCAL ONLY`
+- Beim Abschluss-Sync werden CAT, DX-Cluster und UDP-Empfang zuerst gestoppt, damit während des letzten Abgleichs kein neues externes QSO eingeht
+- Callbook-Seitenleiste besitzt eine feste Größe und springt beim Wechsel zwischen Rufzeichen mit und ohne Foto nicht mehr
+- Das DA6IT.de-Logo öffnet die Projektwebsite im Standardbrowser
+
+### Fixed
+
+- Linux-Verbindungstests behalten Fehlermeldungen aus asynchronen Tkinter-Callbacks korrekt bei
+- Callbook-Anzeige wird nach einem vorher geladenen Foto vollständig und ohne übergroße Leerfläche zurückgesetzt
+- Automatische Laufzeit-Uploads wiederholen mehrdeutige fehlgeschlagene Erstübertragungen nicht blind und vermeiden damit mögliche Duplikate
+- Der lokale Windows-Release-Build benötigt kein `pip` mehr; das freigegebene Pillow-Wheel wird direkt geladen und gegen seine fest hinterlegte PyPI-SHA-256-Prüfsumme geprüft
+
 ## [0.15.0] - 2026-08-14
 
 ### Added

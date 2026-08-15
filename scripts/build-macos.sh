@@ -24,10 +24,17 @@ if [[ "${SKIP_TESTS:-0}" != "1" ]]; then
   "${PYTHON_BIN}" selftest.py
 fi
 
+if ! "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
+  if ! "${PYTHON_BIN}" -m ensurepip --upgrade; then
+    echo "pip fehlt. Bitte eine vollständige Python-3.12-Installation verwenden." >&2
+    exit 1
+  fi
+fi
+
 HAMLIB_DIR="${PROJECT_ROOT}/build/embedded/hamlib/macos-${ARCH}"
 "${SCRIPT_DIR}/prepare-hamlib-macos.sh" "${HAMLIB_DIR}"
 
-"${PYTHON_BIN}" -m pip install --disable-pip-version-check "pyinstaller==6.17.0"
+"${PYTHON_BIN}" -m pip install --disable-pip-version-check "pyinstaller==6.17.0" "Pillow==12.3.0"
 
 BUILD_DIR="${PROJECT_ROOT}/build/pyinstaller-macos-${ARCH}"
 PACKAGE_DIR="${BUILD_DIR}/package"
@@ -44,6 +51,7 @@ APP_NAME="DA6IT.de Wavelog Offline Logger"
   --osx-bundle-identifier "de.da6it.wavelog-offline-logger" \
   --target-arch "${ARCH}" \
   --add-data "${PROJECT_ROOT}/cty.dat:." \
+  --add-data "${PROJECT_ROOT}/assets:assets" \
   --add-data "${HAMLIB_DIR}:hamlib" \
   --distpath "${PACKAGE_DIR}" \
   --workpath "${BUILD_DIR}/work" \

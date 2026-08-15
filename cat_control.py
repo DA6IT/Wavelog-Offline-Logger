@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -150,9 +151,12 @@ def find_hamlib_dir() -> Path:
     for candidate in candidates:
         if (candidate / executable).is_file():
             return candidate
+    system_rigctld = shutil.which(executable)
+    if system_rigctld:
+        return Path(system_rigctld).resolve().parent
     raise CatError(
         "Die gebündelte Hamlib-Laufzeit wurde nicht gefunden. "
-        "Bitte das passende Windows- oder macOS-Release-Paket verwenden."
+        "Bitte das passende Windows-, macOS- oder Linux-Release-Paket verwenden."
     )
 
 
@@ -551,3 +555,14 @@ class HamlibManager:
         self.set_frequency(frequency_hz)
         if (logger_mode or "").strip():
             self.set_mode(logger_mode, frequency_hz)
+
+    def start_tuner(self) -> None:
+        """Ask Hamlib to run the radio's one-shot automatic tuner operation."""
+        with self._lock:
+            process = self._process
+            config = self._config
+        if process is None or config is None or process.poll() is not None:
+            raise CatError("CAT ist nicht gestartet")
+        # Hamlib's documented vfo_op command. This delegates the complete,
+        # radio-specific tune cycle to the backend and never toggles PTT here.
+        _rigctld_set_command("127.0.0.1", config.port, "G TUNE")

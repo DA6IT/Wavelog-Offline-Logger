@@ -2,7 +2,7 @@ import base64
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
-from logger_core import LogStore, MetadataDB, SyncEngine, build_fast_log_qso, qso_hash
+from logger_core import LogStore, MetadataDB, SyncEngine, WavelogOnlineSettings, build_fast_log_qso, qso_hash
 
 class FakeClient:
     def __init__(self):
@@ -193,6 +193,64 @@ with TemporaryDirectory() as d:
     db.close()
 
 print("SELFTEST OK")
+
+# Online mode has three independent profile options. During runtime it may
+# upload only never-linked LOCAL ONLY records; a full sync remains a separate
+# start/exit/manual operation.
+settings_values = {
+    "wavelog_url": "https://log.example",
+    "station_profile_id": "7",
+    "auto_sync_online": "1",
+    "full_sync_on_start": "1",
+    "full_sync_on_exit": "0",
+}
+online_settings = WavelogOnlineSettings.from_storage(
+    lambda key, default="": settings_values.get(key, default),
+    lambda: "wl2_test",
+)
+assert online_settings.configured
+assert online_settings.auto_sync
+assert online_settings.full_sync_on_start and not online_settings.full_sync_on_exit
+assert online_settings.should_auto_sync(online=True, sync_busy=False, candidate_count=1)
+assert not online_settings.should_auto_sync(online=False, sync_busy=False, candidate_count=1)
+assert not online_settings.should_auto_sync(online=True, sync_busy=True, candidate_count=1)
+assert not online_settings.should_auto_sync(online=True, sync_busy=False, candidate_count=0)
+disabled_settings = WavelogOnlineSettings.from_storage(lambda _key, default="": default, lambda: "")
+assert not disabled_settings.configured
+assert not disabled_settings.auto_sync
+assert not disabled_settings.full_sync_on_start and not disabled_settings.full_sync_on_exit
+
+with TemporaryDirectory() as d:
+    root = Path(d)
+    store = LogStore(root / "logs")
+    db = MetadataDB(root / "meta.db")
+    fc = FakeClient()
+
+    fresh = store.add(sample(call="DL1ONLINE"))
+    db.ensure_local(fresh["local_id"], qso_hash(fresh))
+
+    ambiguous = store.add(sample(call="DL2ERROR"))
+    db.ensure_local(ambiguous["local_id"], qso_hash(ambiguous))
+    db.set_status(ambiguous["local_id"], "error", error="response lost")
+
+    linked = store.add(sample(call="DL3LINKED"))
+    db.ensure_local(linked["local_id"], qso_hash(linked))
+    db.set_status(
+        linked["local_id"], "synced", wavelog_id=999,
+        last_synced_hash=qso_hash(linked), remote_hash=qso_hash(linked),
+    )
+
+    candidates = db.list_new_upload_candidates()
+    assert [row["local_id"] for row in candidates] == [fresh["local_id"]]
+    summary = SyncEngine(store, db, fc).push_new_only(7)
+    assert summary.pushed == 1 and summary.errors == 0, summary
+    assert db.get_meta(fresh["local_id"])["status"] == "synced"
+    assert db.get_meta(ambiguous["local_id"])["status"] == "error"
+    assert db.get_meta(linked["local_id"])["wavelog_id"] == 999
+    assert len(fc.rows) == 1, "runtime online push must not touch linked or ambiguous records"
+    db.close()
+
+print("ONLINE MODE SELFTEST OK")
 
 # A QSO that disappears outside the app must be restored from Wavelog. Only an
 # explicit tombstone created by the UI may propagate a deletion to Wavelog.
@@ -497,9 +555,26 @@ with patch("cat_control._rigctld_set_command") as set_command:
         ("127.0.0.1", 4550, "F 21260000"),
         ("127.0.0.1", 4550, "M USB 0"),
     ]
+with patch("cat_control._rigctld_set_command") as set_command:
+    frequency_manager.start_tuner()
+    set_command.assert_called_once_with("127.0.0.1", 4550, "G TUNE")
 frequency_manager.stop()
 
 print("CAT SELFTEST OK")
+
+# UI preferences are intentionally global and independent from profile SQLite
+# databases. Invalid/corrupt files must always fall back to safe light/German.
+from ui_preferences import UiPreferences, load_ui_preferences, save_ui_preferences, translate_text
+with TemporaryDirectory() as preferences_dir:
+    preferences_root = Path(preferences_dir)
+    assert load_ui_preferences(preferences_root) == UiPreferences()
+    save_ui_preferences(preferences_root, UiPreferences(language="en", theme="dark"))
+    assert load_ui_preferences(preferences_root) == UiPreferences(language="en", theme="dark")
+    (preferences_root / "ui_preferences.json").write_text("not json", encoding="utf-8")
+    assert load_ui_preferences(preferences_root) == UiPreferences()
+assert translate_text("QSO speichern", "en") == "Save QSO"
+assert translate_text("QSO speichern", "de") == "QSO speichern"
+print("UI PREFERENCES SELFTEST OK")
 
 # Release discovery must compare project versions correctly and remain silent
 # when the computer is offline or GitHub returns unusable data.
@@ -878,3 +953,48 @@ else:
     raise AssertionError("spotting while disconnected must fail")
 
 print("DX CLUSTER SELFTEST OK")
+
+# Callbook normalization, QRZ session handling and the offline cache must work
+# without performing a real network request.
+from callbook import CallbookResult, QrzClient, normalize_wavelog_result, parse_qrz_xml
+
+qrz_login = b'''<?xml version="1.0"?><QRZDatabase xmlns="http://www.qrz.com"><Session><Key>abc123</Key></Session></QRZDatabase>'''
+qrz_lookup = b'''<?xml version="1.0"?><QRZDatabase xmlns="http://www.qrz.com"><Callsign><call>DL1ABC</call><fname>Ada</fname><addr2>Bonn</addr2><grid>JO30AA12</grid><land>Germany</land><image>https://files.qrz.com/test.jpg</image><cqzone>14</cqzone><ituzone>28</ituzone></Callsign><Session><Key>abc123</Key></Session></QRZDatabase>'''
+parsed, session = parse_qrz_xml(qrz_lookup, "DL1ABC")
+assert session["key"] == "abc123"
+assert parsed and parsed.name == "Ada" and parsed.grid == "JO30AA12" and parsed.qth == "Bonn"
+
+class FakeXmlResponse:
+    def __init__(self, payload): self.payload = payload
+    def __enter__(self): return self
+    def __exit__(self, *_args): return False
+    def read(self): return self.payload
+
+responses = iter((qrz_login, qrz_lookup))
+requests = []
+def fake_qrz_open(request, timeout=0):
+    requests.append((request, timeout))
+    return FakeXmlResponse(next(responses))
+
+direct = QrzClient("DA6IT", "secret", opener=fake_qrz_open)
+direct_result = direct.lookup("dl1abc")
+assert direct_result.callsign == "DL1ABC" and direct_result.source == "QRZ.com"
+assert requests[0][0].method == "POST" and b"password=secret" in requests[0][0].data
+assert "password=" not in requests[0][0].full_url
+
+wavelog_result = normalize_wavelog_result({"data": {
+    "callsign": "ON4XYZ", "gridsquare": "JO20", "location": "Brussels",
+    "callbook": {"fname": "Jean", "image": "https://example.invalid/photo.jpg", "source": "QRZ"},
+}}, "ON4XYZ")
+assert wavelog_result.name == "Jean" and wavelog_result.grid == "JO20"
+assert wavelog_result.source == "Wavelog / QRZ"
+
+with TemporaryDirectory() as d:
+    cache_db = MetadataDB(Path(d) / "meta.db")
+    cached = CallbookResult(callsign="DL1ABC", name="Ada", source="QRZ.com")
+    cache_db.set_callbook_cache("dl1abc", "qrz", cached.to_json())
+    restored = CallbookResult.from_json(cache_db.get_callbook_cache("DL1ABC", "qrz") or "{}")
+    assert restored.callsign == "DL1ABC" and restored.name == "Ada"
+    cache_db.close()
+
+print("CALLBOOK SELFTEST OK")
