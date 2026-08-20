@@ -25,6 +25,7 @@ from logger_core import (
     APP_NAME, VERSION, BANDS, MODES, LogStore, MetadataDB, WavelogClient,
     WavelogError, SyncEngine, app_data_dir, default_log_dir, band_from_mhz,
     qso_hash, CountryDB, ProfileManager, WavelogOnlineSettings, build_fast_log_qso,
+    secure_urlopen,
 )
 from cat_control import (
     CAT_BAUD_RATES, CAT_DATA_BITS, CAT_HANDSHAKES, CAT_LINE_STATES,
@@ -50,6 +51,7 @@ from callbook import (
     normalize_wavelog_result,
 )
 from ui_preferences import PALETTES, UiPreferences, load_ui_preferences, save_ui_preferences, translate_text
+from notifications import notify_qso_logged
 
 try:
     from PIL import Image, ImageTk
@@ -778,11 +780,14 @@ class LoggerApp(tk.Tk):
             self._begin_close_sequence()
 
     def _open_da6it_website(self, _event=None):
+        self._open_external_url("https://da6it.de/", "DA6IT.de")
+
+    def _open_external_url(self, url: str, label: str):
         try:
-            webbrowser.open_new_tab("https://da6it.de/")
+            webbrowser.open_new_tab(url)
         except Exception as exc:
-            self.status_var.set("DA6IT.de konnte nicht geöffnet werden")
-            write_startup_log("DA6IT.de konnte nicht geöffnet werden: " + repr(exc))
+            self.status_var.set(f"{label} konnte nicht geöffnet werden")
+            write_startup_log(f"{label} konnte nicht geöffnet werden: " + repr(exc))
 
     # ---------- UI shell ----------
     def _setup_style(self, scale: float = 1.0):
@@ -945,6 +950,20 @@ class LoggerApp(tk.Tk):
         tk.Label(footer, textvariable=self.status_var, bg=BG, fg=MUTED, font=("Segoe UI", 9), anchor="w").pack(side="left", padx=(14, 0))
         self.footer_qso_var = tk.StringVar(value="0 QSOs")
         self.footer_db_var = tk.StringVar(value="")
+        support = tk.Frame(footer, bg=BG)
+        support.pack(side="right", padx=(18, 0))
+        for text, url in (
+            ("☕ Buy Me a Coffee", "https://buymeacoffee.com/da6it?new=1"),
+            ("PayPal", "https://paypal.me/DA6IT"),
+        ):
+            link = tk.Label(
+                support, text=self._tr(text), bg=BG, fg=MUTED,
+                font=("Segoe UI", 8), cursor="hand2", padx=4,
+            )
+            link.pack(side="left")
+            link.bind("<Button-1>", lambda _event, target=url, name=text: self._open_external_url(target, name))
+            link.bind("<Enter>", lambda _event, widget=link: widget.configure(fg=ACCENT))
+            link.bind("<Leave>", lambda _event, widget=link: widget.configure(fg=MUTED))
         tk.Label(footer, textvariable=self.footer_qso_var, bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="right", padx=(18, 0))
         tk.Label(footer, textvariable=self.footer_db_var, bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(side="right")
 
@@ -1305,9 +1324,6 @@ class LoggerApp(tk.Tk):
         source = self.db.get_setting("callbook_source", CALLBOOK_SOURCE_WAVELOG).strip().lower()
         if source not in {CALLBOOK_SOURCE_WAVELOG, CALLBOOK_SOURCE_QRZ, CALLBOOK_SOURCE_DISABLED}:
             source = CALLBOOK_SOURCE_WAVELOG
-        if source == CALLBOOK_SOURCE_QRZ:
-            if not self.db.get_setting("qrz_username", "").strip() or not self.db.get_secret("qrz_password"):
-                return CALLBOOK_SOURCE_WAVELOG
         return source
 
     def _schedule_callbook_lookup(self, callsign: str, *, force: bool = False):
@@ -1424,13 +1440,16 @@ class LoggerApp(tk.Tk):
                 daemon=True,
             ).start()
 
-    def _callbook_lookup_failed(self, callsign: str, generation: int, _message: str):
+    def _callbook_lookup_failed(self, callsign: str, generation: int, message: str):
         if self.closing or generation != self.callbook_generation or self.call_var.get().strip().upper() != callsign:
             return
         self.callbook_source_label.configure(text="OFFLINE", bg=NEUTRAL_BADGE_BG, fg=MUTED)
         self.callbook_name_label.configure(text=callsign)
         self.callbook_details_label.configure(text="Keine Online-Daten verfügbar.")
-        self.callbook_status_label.configure(text="Offline-Logging läuft ohne Unterbrechung weiter.", fg=MUTED)
+        detail = (message or "Callbook ist nicht erreichbar").strip()[:240]
+        self.callbook_status_label.configure(
+            text=f"{detail} · Offline-Logging läuft ohne Unterbrechung weiter.", fg=MUTED,
+        )
 
     def _load_callbook_image(self, callsign: str, generation: int, image_url: str):
         try:
@@ -1443,7 +1462,7 @@ class LoggerApp(tk.Tk):
                 image_url,
                 headers={"User-Agent": f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}", "Accept": "image/*"},
             )
-            with urllib.request.urlopen(request, timeout=8) as response:
+            with secure_urlopen(request, timeout=8) as response:
                 content_type = str(response.headers.get("Content-Type") or "").lower()
                 if content_type and not content_type.startswith("image/"):
                     return
@@ -1619,11 +1638,25 @@ class LoggerApp(tk.Tk):
             **profile,
         }
 
+    def _notify_qso_saved(self, qso: dict) -> None:
+        try:
+            notify_qso_logged(
+                qso,
+                enabled=self.ui_preferences.qso_notifications,
+                window_id=self.winfo_id(),
+                language=self.language,
+            )
+        except Exception:
+            # A desktop notification is optional and must never affect the
+            # already completed local ADI write.
+            pass
+
     def save_qso(self, new_after=False):
         try:
             q = self._collect_qso()
             q = self.store.add(q)
             self.db.ensure_local(q["local_id"], qso_hash(q))
+            self._notify_qso_saved(q)
             self.status_var.set(f"Gespeichert: {q['call']} · {q['band']} · {q['mode']} · {Path(q['_file']).name}")
             self.refresh_qsos()
             self._local_sync_change()
@@ -1877,6 +1910,7 @@ class LoggerApp(tk.Tk):
             )
             saved = self.store.add(qso)
             self.db.ensure_local(saved["local_id"], qso_hash(saved))
+            self._notify_qso_saved(saved)
             self.fast_log_session_ids.append(saved["local_id"])
             self.fast_log_call_var.set("")
             self.refresh_fast_log_page()
@@ -2231,6 +2265,7 @@ class LoggerApp(tk.Tk):
                "srx_string":rxtext if preset.get("use_text") else ""}
             if not q["contest_id"]: raise ValueError("Im Contest-Preset fehlt die ADIF Contest-ID")
             q=self.store.add(q); self.db.ensure_local(q["local_id"],qso_hash(q))
+            self._notify_qso_saved(q)
             if preset.get("use_serial"): session["next_serial"]=serial+1
             session["qso_count"]=int(session.get("qso_count") or 0)+1
             self._set_contest_session(session)
@@ -2273,17 +2308,27 @@ class LoggerApp(tk.Tk):
         self.tree.tag_configure("conflict", foreground=ERR)
         self.tree.tag_configure("error", foreground=ERR)
         self.tree.bind("<Double-1>", lambda e: self.edit_selected_qso())
+        self.tree.bind("<<TreeviewSelect>>", self._sync_selection_changed)
 
         actions = ttk.Frame(card, style="Card.TFrame")
         actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(actions, text="QSO bearbeiten", style="Secondary.TButton", command=self.edit_selected_qso).pack(side="left")
         ttk.Button(actions, text="QSO löschen", style="Secondary.TButton", command=self.delete_selected_qso).pack(side="left", padx=8)
-        ttk.Button(actions, text="Wavelog-Version übernehmen", style="Secondary.TButton", command=lambda: self.resolve_conflict(False)).pack(side="right")
-        ttk.Button(actions, text="Lokale Version erzwingen", style="Secondary.TButton", command=lambda: self.resolve_conflict(True)).pack(side="right", padx=8)
+        self.take_wavelog_button = ttk.Button(actions, text="Wavelog-Version übernehmen", style="Secondary.TButton", command=lambda: self.resolve_conflict(False))
+        self.take_wavelog_button.pack(side="right")
+        self.force_local_button = ttk.Button(actions, text="Lokale Version erzwingen", style="Secondary.TButton", command=lambda: self.resolve_conflict(True))
+        self.force_local_button.pack(side="right", padx=8)
+
+        self.sync_detail_label = tk.Label(
+            card, text="Keine offenen Sync-Details.", bg=CARD, fg=MUTED,
+            font=("Segoe UI", 9), anchor="w", justify="left", wraplength=1050,
+        )
+        self.sync_detail_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(9, 0))
 
         legend = tk.Label(card, text="QSL-Status: ✓ bestätigt · ↑ gesendet/hochgeladen · … wartet · — kein Status · ? nicht verfügbar",
                           bg=CARD, fg=MUTED, font=("Segoe UI", 8), anchor="w")
-        legend.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        legend.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self._sync_selection_changed()
 
     @staticmethod
     def _display_qsl_status(value: str | None) -> str:
@@ -2341,10 +2386,36 @@ class LoggerApp(tk.Tk):
             self.footer_qso_var.set(f"{len(qsos)} QSOs")
             profile_name = self._current_profile().get("name", "Profil")
             self.footer_db_var.set(f"{profile_name} · {Path(self.db.path).name}")
+        self._sync_selection_changed()
 
     def selected_id(self) -> str | None:
         s = self.tree.selection() if hasattr(self, "tree") else []
         return s[0] if s else None
+
+    def _sync_selection_changed(self, _event=None):
+        if not hasattr(self, "sync_detail_label"):
+            return
+        local_id = self.selected_id()
+        meta = self.db.get_meta(local_id) if local_id else None
+        status = str((meta or {}).get("status") or "")
+        is_conflict = status == "conflict"
+        button_state = "normal" if is_conflict else "disabled"
+        self.take_wavelog_button.configure(state=button_state)
+        self.force_local_button.configure(state=button_state)
+        if status == "error":
+            detail = str((meta or {}).get("last_error") or "Kein technischer Fehlertext gespeichert.").strip()
+            self.sync_detail_label.configure(text=self._tr("SYNC-FEHLER: ") + detail[:900], fg=ERR)
+        elif status == "conflict":
+            reason = str((meta or {}).get("last_error") or "Lokale und Wavelog-Version unterscheiden sich.")
+            explanations = {
+                "both_changed": "Lokale und Wavelog-Version wurden seit dem letzten gemeinsamen Stand geändert.",
+                "remote_deleted": "Das QSO wurde in Wavelog gelöscht, lokal aber anschließend verändert.",
+            }
+            self.sync_detail_label.configure(text=self._tr("KONFLIKT: ") + self._tr(explanations.get(reason, reason))[:900], fg=ERR)
+        elif local_id:
+            self.sync_detail_label.configure(text=self._tr("Keine offenen Sync-Details."), fg=MUTED)
+        else:
+            self.sync_detail_label.configure(text=self._tr("QSO auswählen, um Sync-Details anzuzeigen."), fg=MUTED)
 
     def edit_selected_qso(self):
         lid = self.selected_id()
@@ -2462,6 +2533,7 @@ class LoggerApp(tk.Tk):
                        f"neu aus Wavelog {summary.pulled} · aus Wavelog aktualisiert {summary.remote_updated} · "
                        f"remote gelöscht {summary.remote_deleted} · verknüpft {summary.linked} · "
                        f"lokal→Wavelog gelöscht {summary.deleted} · QSL-Status {summary.qsl_updated} · "
+                       f"anderes Stationsprofil übersprungen {summary.scope_skipped} · "
                        f"Konflikte {summary.conflicts} · Fehler {summary.errors} · QSL-Statusfehler {summary.qsl_errors}")
                 if not self.closing:
                     self.after(0, lambda: self._sync_finished(msg, automatic))
@@ -4320,6 +4392,7 @@ class LoggerApp(tk.Tk):
                 return
             saved = self.store.add(qso)
             self.db.ensure_local(saved["local_id"], qso_hash(saved))
+            self._notify_qso_saved(saved)
             self.udp_log_received += 1
             self.udp_log_last_label.configure(
                 text=(
@@ -4367,6 +4440,7 @@ class LoggerApp(tk.Tk):
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(3, 14))
         self.set_ui_language = tk.StringVar(value="English" if self.language == "en" else "Deutsch")
         self.set_ui_theme = tk.StringVar(value="Dunkel / Dark" if self.ui_preferences.theme == "dark" else "Hell / Light")
+        self.set_qso_notifications = tk.BooleanVar(value=self.ui_preferences.qso_notifications)
         ttk.Label(general_left, text="Sprache", style="Card.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 12), pady=7)
         ttk.Combobox(
             general_left, textvariable=self.set_ui_language, values=("Deutsch", "English"), state="readonly",
@@ -4375,6 +4449,11 @@ class LoggerApp(tk.Tk):
         ttk.Combobox(
             general_left, textvariable=self.set_ui_theme, values=("Hell / Light", "Dunkel / Dark"), state="readonly",
         ).grid(row=3, column=1, sticky="ew", pady=7)
+        ttk.Checkbutton(
+            general_left,
+            text="Systemhinweis nach gespeichertem QSO",
+            variable=self.set_qso_notifications,
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
         general_right = self._card(general_tab, row=0, column=1, sticky="nsew", padx=(8, 0))
         ttk.Label(general_right, text="Daten & Backup", style="CardTitle.TLabel").pack(anchor="w")
@@ -4430,28 +4509,33 @@ class LoggerApp(tk.Tk):
         self.station_combo = ttk.Combobox(right, textvariable=self.set_station_profile, state="readonly")
         self.station_combo.grid(row=9, column=0, sticky="ew")
         self.station_combo.bind("<<ComboboxSelected>>", lambda e: self._station_selection_changed())
-        ttk.Button(right, text="Werte aus Wavelog-Profil übernehmen", style="Secondary.TButton", command=self.copy_station_values).grid(row=10, column=0, sticky="w", pady=(8, 12))
-        ttk.Separator(right).grid(row=11, column=0, sticky="ew", pady=(2, 10))
+        ttk.Label(
+            right,
+            text="Dieses Logger-Profil synchronisiert ausschließlich QSOs des ausgewählten Wavelog-Stationsprofils.",
+            style="Muted.Card.TLabel", wraplength=450,
+        ).grid(row=10, column=0, sticky="w", pady=(4, 6))
+        ttk.Button(right, text="Werte aus Wavelog-Profil übernehmen", style="Secondary.TButton", command=self.copy_station_values).grid(row=11, column=0, sticky="w", pady=(4, 12))
+        ttk.Separator(right).grid(row=12, column=0, sticky="ew", pady=(2, 10))
         ttk.Checkbutton(
             right,
             text="Online-Modus: neue QSOs automatisch zu Wavelog pushen",
             variable=self.set_auto_sync_online,
-        ).grid(row=12, column=0, sticky="w")
+        ).grid(row=13, column=0, sticky="w")
         ttk.Checkbutton(
             right,
             text="Vollständigen Sync beim App-Start ausführen",
             variable=self.set_full_sync_on_start,
-        ).grid(row=13, column=0, sticky="w", pady=(6, 0))
+        ).grid(row=14, column=0, sticky="w", pady=(6, 0))
         ttk.Checkbutton(
             right,
             text="Vollständigen Sync beim Beenden ausführen",
             variable=self.set_full_sync_on_exit,
-        ).grid(row=14, column=0, sticky="w", pady=(6, 0))
+        ).grid(row=15, column=0, sticky="w", pady=(6, 0))
         ttk.Label(
             right,
             text="Alle Optionen gelten pro Profil und sind unabhängig wählbar. Offline werden QSOs weiter sicher lokal gespeichert.",
             style="Muted.Card.TLabel", wraplength=450,
-        ).grid(row=15, column=0, sticky="w", pady=(5, 0))
+        ).grid(row=16, column=0, sticky="w", pady=(5, 0))
 
         callbook_card = self._card(online_tab, row=0, column=0, sticky="nsew", padx=(0, 8))
         callbook_card.columnconfigure(0, weight=1)
@@ -4477,7 +4561,7 @@ class LoggerApp(tk.Tk):
         ttk.Label(callbook_card, text="Direkter QRZ.com-Zugang", style="CardTitle.TLabel").grid(row=6, column=0, columnspan=2, sticky="w")
         ttk.Label(
             callbook_card,
-            text="Nur nötig, wenn QRZ.com direkt gewählt ist. Sind die Zugangsdaten leer, wird automatisch Wavelog verwendet. QRZ kann ein XML-Abonnement voraussetzen.",
+            text="QRZ.com wird bei direkter Auswahl unabhängig von Wavelog abgefragt. Benutzername und Passwort sind dann erforderlich. QRZ kann ein XML-Abonnement voraussetzen.",
             style="Muted.Card.TLabel", wraplength=480,
         ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(3, 8))
         self.set_qrz_username = tk.StringVar()
@@ -4576,6 +4660,7 @@ class LoggerApp(tk.Tk):
     def _load_settings_to_ui(self):
         self.set_ui_language.set("English" if self.ui_preferences.language == "en" else "Deutsch")
         self.set_ui_theme.set("Dunkel / Dark" if self.ui_preferences.theme == "dark" else "Hell / Light")
+        self.set_qso_notifications.set(self.ui_preferences.qso_notifications)
         self.set_operator.set(self.db.get_setting("operator_call", ""))
         self.set_station.set(self.db.get_setting("station_call", ""))
         self.set_locator.set(self.db.get_setting("locator", ""))
@@ -4609,7 +4694,9 @@ class LoggerApp(tk.Tk):
         # If Wavelog was configured before, profile labels are loaded only on explicit test.
         sid = self.db.get_setting("station_profile_id", "")
         if sid:
-            self.set_station_profile.set(f"Profil-ID {sid}")
+            logbook_id = self.db.get_setting("station_logbook_id", "")
+            suffix = f" · Logbuch-ID {logbook_id}" if logbook_id else ""
+            self.set_station_profile.set(f"Profil-ID {sid}{suffix}")
 
     def save_settings(self):
         try:
@@ -4657,14 +4744,24 @@ class LoggerApp(tk.Tk):
             new_ui_preferences = UiPreferences(
                 language="en" if self.set_ui_language.get() == "English" else "de",
                 theme="dark" if self.set_ui_theme.get() == "Dunkel / Dark" else "light",
+                qso_notifications=self.set_qso_notifications.get(),
             )
-            restart_required = new_ui_preferences != self.ui_preferences
+            restart_required = (
+                new_ui_preferences.language != self.ui_preferences.language
+                or new_ui_preferences.theme != self.ui_preferences.theme
+            )
             save_ui_preferences(self.data_dir, new_ui_preferences)
+            # Notification changes take effect immediately. Language and theme
+            # still use the existing controlled restart path.
+            self.ui_preferences = new_ui_preferences
             self.ui_preferences = new_ui_preferences
             self._store_dx_spotter_config(spotter_config)
             selected = self.station_by_label.get(self.set_station_profile.get())
             if selected:
                 self.db.set_setting("station_profile_id", selected.get("id"))
+                logbook_id, logbook_name = self._station_logbook_details(selected)
+                self.db.set_setting("station_logbook_id", logbook_id)
+                self.db.set_setting("station_logbook_name", logbook_name)
             # Keep an existing numeric profile id if the list wasn't loaded in this session.
             self.store.set_dir(Path(self.set_log_dir.get().strip() or self._profile_default_log_dir()))
             self.form_vars["tx_pwr"].set(self.db.get_setting("default_power", ""))
@@ -4705,13 +4802,9 @@ class LoggerApp(tk.Tk):
         qrz_user = self.set_qrz_username.get().strip()
         qrz_password = self.set_qrz_password.get()
         source = selected
-        fallback_note = ""
         if source == CALLBOOK_SOURCE_DISABLED:
             self.callbook_test_label.configure(text="Callbook-Abfrage ist deaktiviert.", fg=MUTED)
             return
-        if source == CALLBOOK_SOURCE_QRZ and (not qrz_user or not qrz_password):
-            source = CALLBOOK_SOURCE_WAVELOG
-            fallback_note = " · QRZ-Zugang leer, daher Wavelog verwendet"
         self.callbook_test_label.configure(text="Verbindung wird geprüft …", fg=MUTED)
         url = self.set_url.get().strip()
         token = self.set_token.get().strip()
@@ -4727,7 +4820,7 @@ class LoggerApp(tk.Tk):
                     raise CallbookError("Keine Callbook-Daten gefunden")
                 summary = " · ".join(part for part in (result.callsign, result.name, result.grid, result.qth) if part)
                 if not self.closing:
-                    self.after(0, lambda text=summary: self.callbook_test_label.configure(text="✓ " + text + fallback_note, fg=OK))
+                    self.after(0, lambda text=summary: self.callbook_test_label.configure(text="✓ " + text, fg=OK))
             except Exception as exc:
                 if not self.closing:
                     error_message = str(exc)
@@ -4753,6 +4846,20 @@ class LoggerApp(tk.Tk):
                     self.after(0, lambda message=error_message: self._wavelog_test_fail(message))
         threading.Thread(target=worker, name="wavelog-test", daemon=True).start()
 
+    @staticmethod
+    def _station_logbook_details(station: dict) -> tuple[str, str]:
+        nested = station.get("logbook")
+        nested = nested if isinstance(nested, dict) else {}
+        logbook_id = next((
+            station.get(key) for key in ("station_logbook_id", "logbook_id")
+            if station.get(key) not in (None, "")
+        ), nested.get("id", ""))
+        logbook_name = next((
+            station.get(key) for key in ("station_logbook_name", "logbook_name")
+            if station.get(key) not in (None, "")
+        ), nested.get("name", ""))
+        return str(logbook_id or ""), str(logbook_name or "")
+
     def _wavelog_test_ok(self, info: dict, stations: list[dict]):
         owner = str(info.get("owner") or "")
         scopes = ", ".join(info.get("scopes") or [])
@@ -4773,7 +4880,13 @@ class LoggerApp(tk.Tk):
         chosen = None
         saved_id = self.db.get_setting("station_profile_id", "")
         for s in stations:
-            label = f"{s.get('name') or 'Station'} · {s.get('callsign') or '?'} · {s.get('gridsquare') or '—'} [ID {s.get('id')}]"
+            logbook_id, logbook_name = self._station_logbook_details(s)
+            logbook = ""
+            if logbook_name or logbook_id:
+                logbook = f" · Logbuch {logbook_name or logbook_id}"
+                if logbook_name and logbook_id:
+                    logbook += f" [ID {logbook_id}]"
+            label = f"{s.get('name') or 'Station'} · {s.get('callsign') or '?'} · {s.get('gridsquare') or '—'}{logbook} [Profil-ID {s.get('id')}]"
             labels.append(label)
             self.station_by_label[label] = s
             if str(s.get("id")) == saved_id or (not saved_id and s.get("active")):

@@ -7,10 +7,16 @@ param(
 $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $repository = "DA6IT/Wavelog-Offline-Logger"
-$version = "0.16.1"
+$coreVersionText = [System.IO.File]::ReadAllText((Join-Path $projectRoot "logger_core.py"))
+$coreVersionMatch = [regex]::Match($coreVersionText, '(?m)^VERSION\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)"\s*$')
+if (-not $coreVersionMatch.Success) {
+    throw "Die Release-Version konnte nicht aus logger_core.py gelesen werden."
+}
+$version = $coreVersionMatch.Groups[1].Value
 $tag = "v$version"
 $branch = "agent/v$version"
 $expectedExe = Join-Path $projectRoot "dist\DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.exe"
+$publishScriptRelativePath = "scripts/$(Split-Path -Leaf $PSCommandPath)"
 
 function Find-Tool {
     param([string]$Name, [string[]]$Candidates)
@@ -101,6 +107,7 @@ try {
     $core = Get-Content -LiteralPath "logger_core.py" -Raw -Encoding UTF8
     $bootstrap = Get-Content -LiteralPath "bootstrap_windows.go" -Raw -Encoding UTF8
     $pkgbuild = Get-Content -LiteralPath "packaging\arch\PKGBUILD" -Raw -Encoding UTF8
+    $releaseNotes = Get-Content -LiteralPath "docs\RELEASE_NOTES.md" -Raw -Encoding UTF8
     if ($core -notmatch ('(?m)^VERSION\s*=\s*"' + [regex]::Escape($version) + '"\s*$')) {
         throw "logger_core.py enthaelt nicht Version $version."
     }
@@ -109,6 +116,13 @@ try {
     }
     if ($pkgbuild -notmatch ('(?m)^pkgver=' + [regex]::Escape($version) + '\s*$')) {
         throw "packaging/arch/PKGBUILD enthaelt nicht Version $version."
+    }
+    $expectedAppDirectory = "app-v$($version -replace '[^0-9A-Za-z]', '')"
+    if ($bootstrap -notmatch ('filepath\.Join\(base,\s*"' + [regex]::Escape($expectedAppDirectory) + '"\)')) {
+        throw "bootstrap_windows.go enthaelt nicht das erwartete App-Verzeichnis $expectedAppDirectory."
+    }
+    if ($releaseNotes -notmatch ('(?m)^# .+ v' + [regex]::Escape($version) + '\s*$')) {
+        throw "docs/RELEASE_NOTES.md enthaelt nicht Version $version."
     }
 
     $remoteTagResult = Invoke-CapturedNative $git @("ls-remote", "--tags", "origin", "refs/tags/$tag")
@@ -148,15 +162,20 @@ try {
         $env:PYTHONPATH = if ($env:PYTHONPATH) { "$packagePath;$env:PYTHONPATH" } else { $packagePath }
     }
     Invoke-Checked $python @("selftest.py")
-    Invoke-Checked $python @("-m", "py_compile", "app.py", "logger_core.py", "callbook.py", "ui_preferences.py", "scripts\capture-doc-screenshots.py")
+    Invoke-Checked $python @(
+        "-m", "py_compile", "app.py", "logger_core.py", "callbook.py",
+        "notifications.py", "ui_preferences.py", "update_check.py",
+        "scripts\capture-doc-screenshots.py"
+    )
 
     foreach ($scriptPath in @(
         "scripts\build-windows.ps1",
+        "scripts\prepare-network-trust-windows.ps1",
         "scripts\prepare-pillow-windows.ps1",
         "scripts\prepare-hamlib-windows.ps1",
         "scripts\package-release.ps1",
         "scripts\capture-doc-screenshots.ps1",
-        "scripts\publish-v0.16.1.ps1"
+        $publishScriptRelativePath
     )) {
         $parseTokens = $null
         $parseErrors = $null
@@ -212,15 +231,28 @@ try {
     $releaseFiles = @(
         ".gitattributes",
         "app.py",
-        "logger_core.py",
         "bootstrap_windows.go",
+        "callbook.py",
+        "logger_core.py",
+        "notifications.py",
+        "selftest.py",
+        "ui_preferences.py",
+        "update_check.py",
         "packaging/arch/PKGBUILD",
         "README.md",
+        "THIRD_PARTY_NOTICES.md",
         "CHANGELOG.md",
+        "docs/ARCHITECTURE.md",
         "docs/RELEASE_NOTES.md",
         "docs/RELEASING.md",
-        "scripts/publish-v0.16.0.ps1",
-        "scripts/publish-v0.16.1.ps1"
+        "docs/TROUBLESHOOTING.md",
+        "docs/USER_GUIDE.md",
+        "scripts/build-linux.sh",
+        "scripts/build-macos.sh",
+        "scripts/build-windows.ps1",
+        "scripts/prepare-network-trust-windows.ps1",
+        "scripts/publish-v0.16.1.ps1",
+        $publishScriptRelativePath
     )
     $releaseFiles += $requiredScreenshots | ForEach-Object { "docs/screenshots/$_" }
     Invoke-Checked $git (@("add", "--") + $releaseFiles)

@@ -37,7 +37,7 @@ fi
 HAMLIB_DIR="${PROJECT_ROOT}/build/embedded/hamlib/linux-${MACHINE_ARCH}"
 bash "${SCRIPT_DIR}/prepare-hamlib-linux.sh" "${HAMLIB_DIR}"
 "${PYTHON_BIN}" -m pip install --disable-pip-version-check \
-  "pyinstaller==6.17.0" "Pillow==12.3.0"
+  "pyinstaller==6.17.0" "Pillow==12.3.0" "truststore==0.10.4" "certifi==2026.6.17"
 
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}/dist" "${BUILD_DIR}/work" "${BUILD_DIR}/spec"

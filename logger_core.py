@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import sqlite3
+import ssl
 import sys
 import threading
 import urllib.error
@@ -21,10 +22,47 @@ from pathlib import Path
 from typing import Any, Iterable
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.16.1"
+VERSION = "0.16.2"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
+
+
+_tls_context = None
+_tls_context_lock = threading.Lock()
+
+
+def secure_tls_context():
+    """Return a verified TLS context backed by the native OS trust store.
+
+    ``truststore`` lets Windows and macOS use their native certificate APIs,
+    including safe intermediate-certificate discovery. Linux uses its system
+    OpenSSL trust configuration. The fallback remains fully verified and can
+    additionally use certifi's Mozilla CA bundle in portable runtimes.
+    """
+    global _tls_context
+    with _tls_context_lock:
+        if _tls_context is not None:
+            return _tls_context
+        try:
+            import truststore
+            context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        except (ImportError, OSError, RuntimeError):
+            context = ssl.create_default_context()
+            try:
+                import certifi
+                context.load_verify_locations(cafile=certifi.where())
+            except (ImportError, OSError, ssl.SSLError):
+                pass
+        context.check_hostname = True
+        context.verify_mode = ssl.CERT_REQUIRED
+        _tls_context = context
+        return context
+
+
+def secure_urlopen(request, *, timeout: int = 15):
+    """Open HTTPS with certificate verification; never silently downgrade."""
+    return urllib.request.urlopen(request, timeout=timeout, context=secure_tls_context())
 
 BAND_RANGES = [
     (0.1357, 0.1378, "2190m"), (0.472, 0.479, "630m"),
@@ -1200,7 +1238,7 @@ class WavelogClient:
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(self._url(resource, ident, params), data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with secure_urlopen(req, timeout=self.timeout) as resp:
                 raw = resp.read()
                 if not raw:
                     return None
@@ -1451,6 +1489,43 @@ def legacy_remote_hash_v010(r: dict[str, Any]) -> str:
     return legacy_qso_hash_v010(remote_to_local(r, {}))
 
 
+def remote_station_profile_id(remote: dict[str, Any]) -> int | None:
+    """Read Wavelog's station-location id without assuming one JSON spelling."""
+    for key in ("station_profile_id", "station_id"):
+        value = remote.get(key)
+        try:
+            if value not in (None, ""):
+                return int(value)
+        except (TypeError, ValueError):
+            continue
+    for key in ("station_profile", "station"):
+        value = remote.get(key)
+        if isinstance(value, dict):
+            try:
+                return int(value.get("id"))
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def remote_qsos_for_station(
+    remote_rows: Iterable[dict[str, Any]], station_profile_id: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split QSO rows into the selected station location and everything else.
+
+    Wavelog's QSO list is token-scoped, not necessarily station-scoped. Importing
+    rows without checking their station id mixes multiple station logbooks into
+    one local logger profile. Unknown rows are deliberately out of scope: data
+    safety is more important than guessing.
+    """
+    selected = int(station_profile_id)
+    scoped: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+    for row in remote_rows:
+        (scoped if remote_station_profile_id(row) == selected else excluded).append(row)
+    return scoped, excluded
+
+
 @dataclass
 class SyncSummary:
     pushed: int = 0
@@ -1464,6 +1539,7 @@ class SyncSummary:
     errors: int = 0
     qsl_updated: int = 0
     qsl_errors: int = 0
+    scope_skipped: int = 0
 
 
 class SyncEngine:
@@ -1598,7 +1674,7 @@ class SyncEngine:
                 if value and not r.get(json_name):
                     r[json_name] = value
 
-    def _refresh_qsl_statuses(self) -> tuple[int, int]:
+    def _refresh_qsl_statuses(self, station_profile_id: int) -> tuple[int, int]:
         """Refresh cached service status for linked Wavelog QSOs.
 
         Sent/upload state is read from Wavelog's ADIF export where present.
@@ -1621,7 +1697,8 @@ class SyncEngine:
         qso_since = min(dates) if dates else None
 
         try:
-            remote_rows = self.client.list_qsos(since_id=0, qso_since=qso_since)
+            all_remote_rows = self.client.list_qsos(since_id=0, qso_since=qso_since)
+            remote_rows, _excluded = remote_qsos_for_station(all_remote_rows, station_profile_id)
         except Exception:
             return 0, 1
         remote_linked = [r for r in remote_rows if str(r.get("id") or "").isdigit() and int(r["id"]) in linked]
@@ -1692,10 +1769,22 @@ class SyncEngine:
         # Fetch the complete current Wavelog view first. This is what lets us
         # detect remote edits and deletions, not just newly created IDs.
         try:
-            remote_rows = self.client.list_qsos(since_id=0)
+            all_remote_rows = self.client.list_qsos(since_id=0)
         except Exception:
             summary.errors += 1
             return summary
+
+        remote_rows, excluded_remote_rows = remote_qsos_for_station(
+            all_remote_rows, station_profile_id,
+        )
+        if all_remote_rows and not any(
+            remote_station_profile_id(row) is not None for row in all_remote_rows
+        ):
+            raise WavelogError(
+                "Wavelog liefert beim QSO-Download keine Stationsprofil-ID. "
+                "Der sichere profilspezifische Import wurde abgebrochen; lokale QSOs bleiben unverändert."
+            )
+        summary.scope_skipped = len(excluded_remote_rows)
 
         # The compact JSON QSO representation may not expose all ADIF identity
         # fields. Supplement OPERATOR/STATION_CALLSIGN from the ADIF view.
@@ -1705,6 +1794,13 @@ class SyncEngine:
         for r in remote_rows:
             try:
                 remote_by_id[int(r.get("id"))] = r
+            except Exception:
+                continue
+
+        all_remote_by_id: dict[int, dict[str, Any]] = {}
+        for r in all_remote_rows:
+            try:
+                all_remote_by_id[int(r.get("id"))] = r
             except Exception:
                 continue
 
@@ -1731,6 +1827,29 @@ class SyncEngine:
                     self.db.delete_meta(lid)
                     locals_map.pop(lid, None)
                     continue
+
+                # A local profile may contain an older link created before
+                # station-scoped downloads were enforced. Preserve both the
+                # ADI record and its remote id, but make the mismatch visible.
+                # In particular, do this before the external-ADI-loss branch:
+                # dropping the metadata there would make later diagnosis and
+                # safe manual repair impossible.
+                if remote is None:
+                    other_station = all_remote_by_id.get(wid)
+                    if other_station is not None:
+                        actual_station_id = remote_station_profile_id(other_station)
+                        self.db.set_status(
+                            lid,
+                            "error",
+                            wavelog_id=wid,
+                            error=(
+                                "Das verknüpfte Wavelog-QSO gehört zum Stationsprofil "
+                                f"{actual_station_id if actual_station_id is not None else 'unbekannt'}, "
+                                f"nicht zum ausgewählten Profil {station_profile_id}."
+                            ),
+                        )
+                        summary.errors += 1
+                        continue
 
                 # An ADI record disappeared outside the app. If Wavelog still
                 # has it, restore it rather than silently deleting remote data.
@@ -1870,7 +1989,7 @@ class SyncEngine:
                 summary.errors += 1
 
         try:
-            summary.qsl_updated, summary.qsl_errors = self._refresh_qsl_statuses()
+            summary.qsl_updated, summary.qsl_errors = self._refresh_qsl_statuses(station_profile_id)
         except Exception:
             summary.qsl_errors += 1
         return summary

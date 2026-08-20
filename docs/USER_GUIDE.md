@@ -100,7 +100,7 @@ Rechte Seite:
 
 Für den Sync werden passende QSO- und Stationsrechte benötigt. Für Callbook-Abfragen über Wavelog wird zusätzlich `lookup:read` benötigt.
 
-Die drei Sync-Optionen sind unabhängig voneinander und gelten nur für das aktive Profil.
+Die drei Sync-Optionen sind unabhängig voneinander und gelten nur für das aktive Profil. Jedes lokale Logger-Profil ist fest mit dem dort ausgewählten Wavelog-Stationsprofil verknüpft. Beim Download werden nur dessen QSOs übernommen; das aktive Logbuch muss dazu in der Wavelog-Weboberfläche nicht umgestellt werden.
 
 ### 4.3 Callbook & Online-Dienste
 
@@ -112,7 +112,7 @@ Als Rufzeichenquelle stehen zur Verfügung:
 - **QRZ.com direkt:** eigene QRZ-XML-Zugangsdaten; je nach Konto kann ein XML-Abonnement nötig sein
 - **Deaktiviert:** keine automatische Online-Abfrage
 
-Sind beim direkten QRZ-Modus Benutzername oder Passwort leer, hat Wavelog automatisch Vorrang. Erfolgreiche Ergebnisse werden lokal zwischengespeichert. Name, Locator und QTH werden nur in leere oder zuvor automatisch ausgefüllte Felder geschrieben; eigene Eingaben werden nicht überschrieben.
+Der direkte QRZ-Modus arbeitet unabhängig von einer Wavelog-Konfiguration. Fehlen QRZ-Benutzername oder Passwort, zeigt der Verbindungstest dies als QRZ-Fehler an; es wird nicht unbemerkt auf Wavelog umgeschaltet. Erfolgreiche Ergebnisse werden lokal zwischengespeichert. Name, Locator und QTH werden nur in leere oder zuvor automatisch ausgefüllte Felder geschrieben; eigene Eingaben werden nicht überschrieben.
 
 Die eQSL.cc-Felder sind vorbereitet und klar als **Coming soon** markiert. Version 0.16.0 stellt noch keine eQSL-Verbindung her und führt weder Upload noch Download aus.
 
@@ -137,6 +137,8 @@ Typischer Ablauf:
 2. Frequenz, Band und Mode prüfen; bei aktivem CAT werden diese Werte übernommen.
 3. Rapporte, Leistung und optionale Aktivierungsreferenzen ergänzen.
 4. **QSO speichern** oder **Speichern + Neu** wählen.
+
+Unter **Einstellungen → Allgemein** lässt sich die plattformübliche Desktop-Benachrichtigung nach einem erfolgreich lokal gespeicherten QSO ein- oder ausschalten. Ein fehlender Benachrichtigungsdienst beeinflusst die Speicherung nicht.
 
 Rechts erscheinen, soweit verfügbar:
 
@@ -188,6 +190,8 @@ Die Tabelle zeigt lokale QSOs und deren Zustand:
 - `SYNC-FEHLER` – Übertragung nicht eindeutig erfolgreich
 
 Ein QSO kann lokal bearbeitet oder gelöscht werden. Bei einem Konflikt entscheidet der Benutzer ausdrücklich zwischen lokaler und Wavelog-Version. Ein außerhalb der App fehlendes lokales ADI-QSO ist kein automatischer Auftrag, es aus Wavelog zu löschen.
+
+Bei `SYNC-FEHLER` zeigt die Detailzeile unter der Tabelle die gespeicherte technische Ursache des ausgewählten QSOs. Eine Stationsprofil-Abweichung wird dort ausdrücklich genannt. Sie wird nicht automatisch repariert oder gelöscht.
 
 Die Spalten QRZ, LoTW, eQSL und DCL zeigen den von Wavelog gelieferten Bestätigungsstatus, sofern die API ihn bereitstellt.
 

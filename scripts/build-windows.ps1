@@ -70,6 +70,8 @@ try {
         throw "Unsicherer Python-Paketpfad: $pythonPackages"
     }
     & (Join-Path $PSScriptRoot 'prepare-pillow-windows.ps1') -OutputDirectory $pythonPackages -PillowVersion '12.3.0'
+    & (Join-Path $PSScriptRoot 'prepare-network-trust-windows.ps1') -OutputDirectory $pythonPackages `
+        -TruststoreVersion '0.10.4' -CertifiVersion '2026.6.17'
 
     & (Join-Path $PSScriptRoot 'prepare-hamlib-windows.ps1')
     if ($LASTEXITCODE -ne 0) {

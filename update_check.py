@@ -6,6 +6,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Callable
 
+from logger_core import secure_urlopen
+
 
 RELEASES_API_URL = "https://api.github.com/repos/DA6IT/Wavelog-Offline-Logger/releases?per_page=20"
 RELEASES_PAGE_URL = "https://github.com/DA6IT/Wavelog-Offline-Logger/releases"
@@ -46,7 +48,7 @@ def find_newer_release(
     current_version: str,
     *,
     timeout: float = 4.0,
-    opener: Callable = urllib.request.urlopen,
+    opener: Callable | None = None,
 ) -> ReleaseInfo | None:
     """Return a newer applicable GitHub release, or silently return None.
 
@@ -66,7 +68,8 @@ def find_newer_release(
         },
     )
     try:
-        with opener(request, timeout=timeout) as response:
+        open_request = opener or secure_urlopen
+        with open_request(request, timeout=timeout) as response:
             releases = json.loads(response.read().decode("utf-8"))
     except Exception:
         return None
