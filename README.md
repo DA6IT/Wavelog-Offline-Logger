@@ -11,10 +11,11 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - normales QSO-Logging, Fast Log/DXpedition und Contest-Logging
 - tägliche ADI-Dateien als primäres lokales Logbuch
 - mehrere getrennte Stationsprofile
-- bidirektionaler Wavelog-API-v2-Sync mit sichtbaren Konflikten
+- profilspezifischer Wavelog-API-v2-Sync mit sichtbaren Konflikten und Fehlerursachen
 - optionaler Online-Modus: nur neue QSOs sofort pushen
 - optionaler Voll-Sync beim App-Start und/oder Beenden
-- Callbook-Daten über Wavelog oder QRZ.com, einschließlich Stationsfoto
+- Callbook-Daten über Wavelog oder direkt über QRZ.com, einschließlich Stationsfoto
+- optionale Desktop-Benachrichtigung nach einem lokal gespeicherten QSO
 - CAT über mitgeliefertes Hamlib, inklusive TUNE/ATU
 - Telnet-DX-Cluster, Filter, Worked-Markierung und Spotversand
 - WSJT-X- und ADIF-Empfang über UDP
@@ -61,6 +62,11 @@ Der Logger ersetzt Wavelog nicht. Er ergänzt es für portable Einsätze, DXpedi
 - [Release-Hinweise](docs/RELEASE_NOTES.md)
 - [Architektur](docs/ARCHITECTURE.md)
 - [Mitwirken](CONTRIBUTING.md)
+
+## Projekt unterstützen
+
+Wenn dir der Logger hilft, kannst du die Weiterentwicklung freiwillig unterstützen:
+[☕ Buy Me a Coffee](https://buymeacoffee.com/da6it?new=1) · [PayPal](https://paypal.me/DA6IT)
 
 ## Entwicklung und Builds
 

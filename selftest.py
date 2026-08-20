@@ -2,7 +2,10 @@ import base64
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
-from logger_core import LogStore, MetadataDB, SyncEngine, WavelogOnlineSettings, build_fast_log_qso, qso_hash
+from logger_core import (
+    LogStore, MetadataDB, SyncEngine, WavelogOnlineSettings,
+    build_fast_log_qso, qso_hash, remote_qsos_for_station, secure_tls_context,
+)
 
 class FakeClient:
     def __init__(self):
@@ -193,6 +196,50 @@ with TemporaryDirectory() as d:
     db.close()
 
 print("SELFTEST OK")
+
+# Wavelog's token-visible QSO list can contain several station locations. A
+# logger profile may import only the explicitly selected station profile.
+with TemporaryDirectory() as d:
+    root = Path(d)
+    store = LogStore(root / "logs")
+    db = MetadataDB(root / "meta.db")
+    fc = FakeClient()
+    own = fc.create_qso({
+        "station_profile_id": 1, "call": "DL1HOME", "qso_date": "2026-08-12",
+        "time_on": "120000", "band": "20m", "mode": "SSB", "freq": 14200000,
+        "rst_sent": "59", "rst_rcvd": "59",
+    })
+    foreign = fc.create_qso({
+        "station_profile_id": 2, "call": "DL2PORT", "qso_date": "2026-08-12",
+        "time_on": "120100", "band": "40m", "mode": "SSB", "freq": 7100000,
+        "rst_sent": "59", "rst_rcvd": "59",
+    })
+    scoped, excluded = remote_qsos_for_station(fc.list_qsos(), 1)
+    assert [row["id"] for row in scoped] == [own["id"]]
+    assert [row["id"] for row in excluded] == [foreign["id"]]
+    summary = SyncEngine(store, db, fc).sync(1, {1: fc.stations()[0]})
+    assert summary.pulled == 1 and summary.scope_skipped == 1, summary
+    assert [q["call"] for q in store.scan()] == ["DL1HOME"]
+
+    # A legacy link to another station is retained and receives a readable
+    # SYNC-FEHLER instead of being deleted or silently reassigned.
+    linked = store.add(sample(call="DL3LEGACY"))
+    db.ensure_local(linked["local_id"], qso_hash(linked))
+    db.set_status(
+        linked["local_id"], "synced", wavelog_id=foreign["id"],
+        last_synced_hash=qso_hash(linked), remote_hash=qso_hash(linked),
+    )
+    summary = SyncEngine(store, db, fc).sync(1, {1: fc.stations()[0]})
+    meta = db.get_meta(linked["local_id"])
+    assert meta["status"] == "error" and "Stationsprofil 2" in meta["last_error"], meta
+    assert store.find(linked["local_id"]) is not None
+    db.close()
+
+tls_context = secure_tls_context()
+assert tls_context.check_hostname
+import ssl
+assert tls_context.verify_mode == ssl.CERT_REQUIRED
+print("STATION-SCOPED SYNC AND TLS SELFTEST OK")
 
 # Online mode has three independent profile options. During runtime it may
 # upload only never-linked LOCAL ONLY records; a full sync remains a separate
@@ -568,13 +615,20 @@ from ui_preferences import UiPreferences, load_ui_preferences, save_ui_preferenc
 with TemporaryDirectory() as preferences_dir:
     preferences_root = Path(preferences_dir)
     assert load_ui_preferences(preferences_root) == UiPreferences()
-    save_ui_preferences(preferences_root, UiPreferences(language="en", theme="dark"))
-    assert load_ui_preferences(preferences_root) == UiPreferences(language="en", theme="dark")
+    save_ui_preferences(preferences_root, UiPreferences(language="en", theme="dark", qso_notifications=False))
+    assert load_ui_preferences(preferences_root) == UiPreferences(language="en", theme="dark", qso_notifications=False)
     (preferences_root / "ui_preferences.json").write_text("not json", encoding="utf-8")
     assert load_ui_preferences(preferences_root) == UiPreferences()
 assert translate_text("QSO speichern", "en") == "Save QSO"
 assert translate_text("QSO speichern", "de") == "QSO speichern"
 print("UI PREFERENCES SELFTEST OK")
+
+from notifications import qso_notification_text
+notification_title, notification_body = qso_notification_text(sample(call="dl1notify"))
+assert notification_title == "Neues QSO geloggt"
+assert notification_body == "DL1NOTIFY · 20m · SSB"
+assert qso_notification_text(sample(call="dl1notify"), "en")[0] == "New QSO logged"
+print("NOTIFICATION SELFTEST OK")
 
 # Release discovery must compare project versions correctly and remain silent
 # when the computer is offline or GitHub returns unusable data.

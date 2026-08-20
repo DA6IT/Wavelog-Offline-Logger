@@ -17,6 +17,8 @@ bootstrap_windows.go
         +--------->  update_check.py <---->  GitHub Releases API
         |
         +--------->  callbook.py <----> Wavelog Lookup API / QRZ XML API
+        |
+        +--------->  notifications.py <----> Windows / macOS / Linux Desktop
 ```
 
 ### `bootstrap_windows.go`
@@ -40,6 +42,8 @@ Enthält die fachliche Logik:
 
 Der Online-Modus verwendet mit `push_new_only()` bewusst einen engeren Pfad als der vollständige bidirektionale Sync: Er erstellt ausschließlich noch nie verknüpfte `LOCAL ONLY`-QSOs. Fehlerhafte, bereits verknüpfte, geänderte oder gelöschte Datensätze werden nicht blind automatisch erneut übertragen und bleiben dem sicheren Voll-Sync vorbehalten.
 
+Der vollständige Download filtert die token-sichtbare QSO-Liste zusätzlich nach der im lokalen Profil gespeicherten Wavelog-Stationsprofil-ID. QSOs anderer Wavelog-Standorte werden weder importiert noch als Kandidaten für eine lokale Zusammenführung verwendet. Alte profilfremde Verknüpfungen werden sichtbar als Fehler markiert und nicht automatisch verändert.
+
 ### `cat_control.py`
 
 Verwaltet den gebündelten `rigctld`-Prozess, liest die Hamlib-Modellliste, erkennt Windows-COM-Ports und ordnet Funkgerätemodi den Logger-/ADIF-Modi zu. CAT-Einstellungen werden über die bestehende profilbezogene Einstellungsdatenbank gespeichert.
@@ -60,6 +64,12 @@ Fragt nach dem Programmstart in einem Hintergrundthread ausschließlich die öff
 
 Normalisiert die Wavelog- und QRZ.com-Antworten in ein gemeinsames Datenmodell. QRZ-Sitzungsschlüssel werden nur im Arbeitsspeicher gehalten und bei Ablauf einmal erneuert. Erfolgreiche Antworten werden profilspezifisch in SQLite zwischengespeichert; der Cache ersetzt niemals die ADI-QSO-Daten. Automatische Abfragen laufen in Hintergrundthreads und dürfen das lokale Logging bei Netzwerkfehlern nicht beeinflussen.
 
+Direkte QRZ-Abfragen sind technisch von Wavelog entkoppelt. Wavelog-Sync, Wavelog-Callbook und QRZ XML teilen lediglich die zentral abgesicherte TLS-Konfiguration; ein Fehler eines Dienstes schaltet nicht still auf einen anderen um.
+
+### `notifications.py`
+
+Sendet nach erfolgreicher lokaler Speicherung optional einen nativen, nicht blockierenden Desktop-Hinweis. Fehler des Betriebssystem-Benachrichtigungsdienstes werden abgefangen und dürfen niemals den bereits gespeicherten ADI-Datensatz als fehlgeschlagen erscheinen lassen.
+
 ### `selftest.py`
 
 Deckt Kernabläufe, lokale Verlustsicherheit, Profile, Migrationen, Contest-Felder, Hash-Migrationen, CAT-Zuordnungen, DX-Cluster-Parsing und lokales Telnet-Verhalten, UDP-/WSJT-X-Protokolle, Callbook-Normalisierung/Cache sowie die fehlertolerante Release-Prüfung ohne echte Wavelog-Instanz ab.
@@ -78,6 +88,7 @@ Ein Tombstone (`pending_delete`) darf nur durch eine ausdrückliche Löschaktion
 4. Vorhandene Baselines und Legacy-Hashes werden migrationsfähig gehalten.
 5. Benutzerdaten werden nicht ungefragt gelöscht.
 6. Der automatische Laufzeit-Push führt keine Remote-Listenabfrage, Änderung, Löschung oder Konfliktauflösung aus.
+7. Ein lokales Profil importiert ausschließlich die ausgewählte Wavelog-Stationsprofil-ID.
 
 ## Token-Schutz
 

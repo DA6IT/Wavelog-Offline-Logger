@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.16.1"
+	appVersion   = "0.16.2"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -54,6 +54,9 @@ var callbookSource []byte
 
 //go:embed ui_preferences.py
 var uiPreferencesSource []byte
+
+//go:embed notifications.py
+var notificationsSource []byte
 
 //go:embed cty.dat
 var ctyData []byte
@@ -265,6 +268,9 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "ui_preferences.py"), uiPreferencesSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "notifications.py"), notificationsSource, 0644); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "cty.dat"), ctyData, 0644); err != nil {
 		return err
 	}
@@ -332,9 +338,13 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "dx_cluster.py"),
 		filepath.Join(appDir, "callbook.py"),
 		filepath.Join(appDir, "ui_preferences.py"),
+		filepath.Join(appDir, "notifications.py"),
 		filepath.Join(appDir, "cty.dat"),
 		filepath.Join(appDir, "assets", "da6it-logo.webp"),
 		filepath.Join(appDir, "PIL", "__init__.py"),
+		filepath.Join(appDir, "truststore", "__init__.py"),
+		filepath.Join(appDir, "certifi", "__init__.py"),
+		filepath.Join(appDir, "certifi", "cacert.pem"),
 	}
 	for _, name := range hamlibFileNames {
 		required = append(required, filepath.Join(hamlibDir, name))
@@ -357,6 +367,7 @@ func embeddedAppFilesMatch(appDir string) bool {
 		"dx_cluster.py":       dxClusterSource,
 		"callbook.py":         callbookSource,
 		"ui_preferences.py":   uiPreferencesSource,
+		"notifications.py":    notificationsSource,
 		"cty.dat":             ctyData,
 		filepath.Join("assets", "da6it-logo.webp"): da6itLogo,
 	}
@@ -422,7 +433,7 @@ func main() {
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
 	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v0161")
+	appDir := filepath.Join(base, "app-v0162")
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)

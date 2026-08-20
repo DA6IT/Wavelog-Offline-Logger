@@ -12,11 +12,16 @@ PREFERENCES_FILE = "ui_preferences.json"
 class UiPreferences:
     language: str = "de"
     theme: str = "light"
+    qso_notifications: bool = True
 
     def normalized(self) -> "UiPreferences":
         language = self.language if self.language in {"de", "en"} else "de"
         theme = self.theme if self.theme in {"light", "dark"} else "light"
-        return UiPreferences(language=language, theme=theme)
+        return UiPreferences(
+            language=language,
+            theme=theme,
+            qso_notifications=bool(self.qso_notifications),
+        )
 
 
 PALETTES = {
@@ -50,6 +55,7 @@ def load_ui_preferences(data_dir: Path) -> UiPreferences:
         return UiPreferences(
             language=str(payload.get("language", "de")),
             theme=str(payload.get("theme", "light")),
+            qso_notifications=bool(payload.get("qso_notifications", True)),
         ).normalized()
     except (OSError, ValueError, TypeError):
         return UiPreferences()
@@ -62,7 +68,11 @@ def save_ui_preferences(data_dir: Path, preferences: UiPreferences) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     normalized = preferences.normalized()
     temporary.write_text(
-        json.dumps({"language": normalized.language, "theme": normalized.theme}, indent=2) + "\n",
+        json.dumps({
+            "language": normalized.language,
+            "theme": normalized.theme,
+            "qso_notifications": normalized.qso_notifications,
+        }, indent=2) + "\n",
         encoding="utf-8",
     )
     temporary.replace(path)
@@ -92,6 +102,7 @@ ENGLISH = {
     "Sprache": "Language", "Darstellung": "Appearance", "Theme": "Theme",
     "Hell / Light": "Light", "Dunkel / Dark": "Dark",
     "App-weite Einstellungen": "App-wide settings", "Deutsch": "German", "English": "English",
+    "Systemhinweis nach gespeichertem QSO": "System notification after a saved QSO",
     "Offline-Stationsprofil": "Offline station profile", "Operator-Rufzeichen": "Operator callsign",
     "Stationsrufzeichen": "Station callsign", "Eigener Locator": "Own grid locator", "QTH / Ort": "QTH / location",
     "Standardleistung (W)": "Default power (W)", "Aktuelle Aktivierung (optional)": "Current activation (optional)",
@@ -99,11 +110,13 @@ ENGLISH = {
     "Wavelog URL": "Wavelog URL", "API-v2 Token": "API v2 token",
     "Verbindung testen & Profile laden": "Test connection & load profiles",
     "Wavelog-Stationsprofil": "Wavelog station profile",
+    "Dieses Logger-Profil synchronisiert ausschließlich QSOs des ausgewählten Wavelog-Stationsprofils.": "This logger profile synchronizes only QSOs from the selected Wavelog station profile.",
     "Werte aus Wavelog-Profil übernehmen": "Use values from Wavelog profile",
     "Rufzeichen-Lookup": "Callsign lookup", "Datenquelle": "Data source",
     "Bei vollständigem Rufzeichen automatisch abfragen": "Look up complete callsigns automatically",
     "Direkter QRZ.com-Zugang": "Direct QRZ.com access", "QRZ.com Benutzername": "QRZ.com username",
     "QRZ.com Passwort": "QRZ.com password", "Callbook-Verbindung testen": "Test callbook connection",
+    "QRZ.com wird bei direkter Auswahl unabhängig von Wavelog abgefragt. Benutzername und Passwort sind dann erforderlich.": "When selected directly, QRZ.com is queried independently of Wavelog. Username and password are then required.",
     "eQSL.cc Benutzername": "eQSL.cc username", "eQSL.cc Passwort": "eQSL.cc password",
     "Lokale Logdateien": "Local log files", "DX-Spotter-Verbindung": "DX spotter connection",
     "DXSpider-Host zum Spotten": "DXSpider host for spotting", "Telnet-Port": "Telnet port",
@@ -183,6 +196,12 @@ ENGLISH = {
     "UDP starten": "Start UDP", "UDP stoppen": "Stop UDP", "UDP-Empfänger": "UDP receiver",
     "UDP-Port": "UDP port", "UDP-Status": "UDP status", "Umbenennen": "Rename",
     "Wavelog-Version übernehmen": "Use Wavelog version", "Werte aus QSO/CAT": "Values from QSO/CAT",
+    "Sync-Details": "Sync details", "Keine offenen Sync-Details.": "No open sync details.",
+    "QSO auswählen, um Sync-Details anzuzeigen.": "Select a QSO to display sync details.",
+    "SYNC-FEHLER: ": "SYNC ERROR: ", "KONFLIKT: ": "CONFLICT: ",
+    "Lokale und Wavelog-Version wurden seit dem letzten gemeinsamen Stand geändert.": "The local and Wavelog versions were both changed since the last shared state.",
+    "Das QSO wurde in Wavelog gelöscht, lokal aber anschließend verändert.": "The QSO was deleted in Wavelog but was changed locally afterwards.",
+    "Projekt unterstützen": "Support my work", "Buy Me a Coffee": "Buy Me a Coffee",
     "Datum UTC": "Date UTC", "Zeit": "Time", "DX-Rufzeichen": "DX callsign", "DX-Land": "DX country",
     "Spotter-Land": "Spotter country",
     "Rufzeichen": "Callsign", "Zeit UTC HHMMSS": "Time UTC HHMMSS", "Frequenz MHz": "Frequency MHz",
@@ -197,7 +216,7 @@ ENGLISH = {
     "Diese Daten werden in deine ADI-Dateien geschrieben und funktionieren auch komplett ohne Internet.": "These values are written to your ADI files and work completely offline.",
     "Die Aktivierungsreferenzen werden automatisch als MY_* Felder in jedes neue QSO geschrieben.": "Activation references are written to every new QSO as MY_* fields.",
     "Name, Locator, QTH und – falls vorhanden – das Stationsfoto werden beim Tippen geladen. Ohne Internet läuft das Logging still weiter.": "Name, grid locator, QTH and, if available, the station photo are loaded while typing. Logging continues silently without internet.",
-    "Nur nötig, wenn QRZ.com direkt gewählt ist. Sind die Zugangsdaten leer, wird automatisch Wavelog verwendet. QRZ kann ein XML-Abonnement voraussetzen.": "Only required when direct QRZ.com lookup is selected. Empty credentials automatically fall back to Wavelog. QRZ may require an XML subscription.",
+    "QRZ.com wird bei direkter Auswahl unabhängig von Wavelog abgefragt. Benutzername und Passwort sind dann erforderlich. QRZ kann ein XML-Abonnement voraussetzen.": "When selected directly, QRZ.com is queried independently of Wavelog. Username and password are then required. QRZ may require an XML subscription.",
     "Die Zugangsdaten können bereits profilspezifisch hinterlegt werden. Derzeit findet noch keine Verbindung, kein Download und kein Upload statt.": "Credentials can already be stored per profile. No connection, download or upload is active yet.",
     "ADI bleibt das primäre Logbuchformat. Die SQLite-Datei enthält nur Einstellungen, Sync-Metadaten und den Callbook-Cache.": "ADI remains the primary logbook format. SQLite contains only settings, sync metadata and the callbook cache.",
     "Doppelklick stimmt den TRX auf Frequenz und Mode ab. QSO übernehmen füllt anschließend das Formular.": "Double-click tunes the radio to frequency and mode. Use for QSO then fills the form.",

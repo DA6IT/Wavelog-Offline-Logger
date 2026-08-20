@@ -7,6 +7,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+
+from logger_core import secure_urlopen
 from dataclasses import asdict, dataclass, fields
 from typing import Any, Callable
 
@@ -177,7 +179,7 @@ class QrzClient:
         self.username = (username or "").strip()
         self.password = password or ""
         self.timeout = timeout
-        self.opener = opener or urllib.request.urlopen
+        self.opener = opener
         self.agent = agent
         self.session_key = ""
         self._lock = threading.Lock()
@@ -192,7 +194,8 @@ class QrzClient:
             method="POST" if post else "GET",
         )
         try:
-            with self.opener(request, timeout=self.timeout) as response:
+            open_request = self.opener or secure_urlopen
+            with open_request(request, timeout=self.timeout) as response:
                 return response.read()
         except urllib.error.HTTPError as exc:
             raise CallbookError(f"QRZ.com HTTP {exc.code}") from exc

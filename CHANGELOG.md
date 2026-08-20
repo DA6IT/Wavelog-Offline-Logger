@@ -4,6 +4,26 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-08-20
+
+### Added
+
+- Optionale plattformgerechte Desktop-Benachrichtigung nach jedem erfolgreich lokal gespeicherten QSO
+- Dezente Support-Links zu Buy Me a Coffee und PayPal in der App und in der README
+- Native Zertifikatsspeicher-Unterstützung mit geprüftem CA-Bundle als Fallback für die eingebetteten Laufzeiten
+
+### Changed
+
+- Der vollständige Wavelog-Download wird clientseitig strikt auf das im aktiven Logger-Profil gewählte Wavelog-Stationsprofil begrenzt
+- Direkte QRZ.com-Abfragen funktionieren unabhängig davon, ob Wavelog eingerichtet oder erreichbar ist
+- Profilfremde oder nicht sicher zuordenbare Wavelog-QSOs werden nicht übernommen und bestehende unpassende Verknüpfungen werden als nachvollziehbarer Sync-Fehler angezeigt
+
+### Fixed
+
+- Wavelog- und QRZ-Verbindungen verwenden unter Windows, macOS und Linux den nativen System-Zertifikatsspeicher; typische `CERTIFICATE_VERIFY_FAILED`-Fehler durch fehlende Zwischenzertifikate werden vermieden
+- Der Logger zeigt beim Profilwechsel nur das zum gewählten Wavelog-Stationsprofil gehörende Remote-Logbuch, ohne dass in Wavelog das aktive Logbuch umgestellt werden muss
+- Ein QRZ.com-Lookup wird nicht mehr durch eine fehlende Wavelog-Konfiguration blockiert
+
 ## [0.16.1] - 2026-08-16
 
 ### Changed

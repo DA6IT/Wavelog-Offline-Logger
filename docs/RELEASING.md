@@ -1,35 +1,43 @@
 # Release-Prozess
 
-## Voraussetzungen
+## Voraussetzungen unter Windows
 
-- Python 3.12.10
-- Go 1.23.2
-- für lokale macOS-Pakete: macOS 11 oder neuer mit Xcode Command Line Tools und einer vollständigen Python-Installation (`pip` wird bei Bedarf über `ensurepip` aktiviert)
-- für lokale Linux-Pakete: Debian/Ubuntu mit Build-Essentials, Tk, `python3-pip`, `dpkg-deb`, SquashFS und Zstandard
-- saubere Arbeitskopie
-- erfolgreich abgeschlossener praktischer Start- und Sync-Test
+- Git for Windows
+- GitHub CLI, mit `gh auth login` am Repository angemeldet
+- Go 1.23.2 oder eine kompatible neuere Version
+- die vom Logger eingerichtete private Python-3.12-Laufzeit oder eine lokale Python-Installation
+- Internetzugang für Abhängigkeiten, GitHub und die Plattform-Builds
+- erfolgreich abgeschlossener praktischer App-, Profil- und Sync-Test
 
-Eine lokale `pip`-Installation ist für den unterstützten Windows-Build nicht erforderlich. Das Buildskript lädt das offizielle Pillow-Wheel anhand der PyPI-Metadaten, prüft dessen veröffentlichte SHA-256-Prüfsumme und bettet es anschließend ein. Für einen frischen Build wird deshalb eine Internetverbindung benötigt.
+Eine lokale `pip`-Installation ist für den unterstützten Windows-Build nicht erforderlich. Die Buildskripte laden benötigte Wheels anhand der offiziellen PyPI-Metadaten, prüfen festgelegte SHA-256-Prüfsummen und betten sie anschließend ein.
 
 ## Vollständige Freigabe von Windows aus
 
-Für v0.16.1 übernimmt das vorbereitete Skript Tests, lokalen Windows-Build, Branch, Pull Request, CI-Prüfung, Merge, Tag und das Warten auf alle Plattformpakete. Da sich der Inhalt der dokumentierten Seiten in diesem Patch nicht geändert hat, wird der bereits geprüfte Screenshot-Satz weiterverwendet:
+Das wiederverwendbare Skript liest die Version aus `logger_core.py` und prüft sie gegen den Windows-Bootstrapper und das Arch-Paket. Anschließend übernimmt es:
+
+1. GitHub-Anmeldung und Werkzeugprüfung
+2. vollständige Dokumentations-Screenshots
+3. Python-Selftests sowie PowerShell-, Shell- und Go-Prüfungen
+4. lokalen Windows-Release-Build
+5. Release-Branch und kontrolliertes Staging ausschließlich freigegebener Dateien
+6. Pull Request, alle CI-Prüfungen und Merge
+7. Tag auf exakt dem bestätigten Merge-Commit
+8. Warten auf Windows-, macOS- und Linux-Pakete im GitHub-Release
+
+Aus einer normalen PowerShell starten:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\publish-v0.16.1.ps1" -SkipScreenshotCapture
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\publish-release.ps1"
 ```
 
-Der Push wird bewusst aus der normalen PowerShell des Repository-Eigentümers ausgeführt. Das Skript prüft vor dem Commit, dass weder `AGENTS.md`, Build-Verzeichnisse, ADI/SQLite-Dateien noch lokale Profil- oder Token-Dateien gestaged sind.
+Das Skript prüft vor dem Commit, dass weder `AGENTS.md`, Build-Verzeichnisse, ADI/SQLite-Dateien noch lokale Profil- oder Token-Dateien gestaged sind. Existiert der Release-Tag bereits auf GitHub, wird er nicht verschoben oder überschrieben.
 
-## Release Candidate bauen
+Nur in begründeten Fällen können bereits geprüfte Schritte übersprungen werden:
 
 ```powershell
-python selftest.py
-.\scripts\capture-doc-screenshots.ps1
-.\scripts\package-release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\publish-release.ps1" -SkipScreenshotCapture
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\scripts\publish-release.ps1" -SkipLocalBuild
 ```
-
-Anschließend EXE und ZIP aus `dist\` auf einem Windows-Testsystem prüfen.
 
 ## Version finalisieren
 
@@ -41,43 +49,32 @@ Für ein Release müssen mindestens diese Stellen konsistent auf dieselbe Versio
 - `packaging/arch/PKGBUILD`
 - `CHANGELOG.md`
 - `docs/RELEASE_NOTES.md`
-- vollständiger Screenshot-Satz unter `docs/screenshots/`
 
-Danach Tests und Paket-Build erneut ausführen.
+Vor der Freigabe außerdem README, Benutzerhandbuch, Fehlerhilfe, Architektur- und Lizenzhinweise auf inhaltliche Änderungen prüfen.
 
 ## GitHub-Release
 
-Der Workflow `.github/workflows/release.yml` reagiert auf Tags im Format `v*` und prüft, dass Tag und Quellversion übereinstimmen.
-
-```powershell
-git tag -a v0.16.1 -m "DA6IT.de Wavelog Offline Logger v0.16.1"
-git push origin v0.16.1
-```
-
-Der Workflow:
+Der Workflow `.github/workflows/release.yml` reagiert auf Tags im Format `v*` und prüft, dass Tag und Quellversion übereinstimmen. Er:
 
 1. führt die Selftests aus,
-2. baut den Windows-x64-Bootstrapper,
-3. erstellt das GitHub-Release mit Windows-EXE, ZIP und SHA-256-Prüfsummen,
-4. baut anschließend auf echten GitHub-macOS-Runnern getrennte App-Bundles für Apple Silicon und Intel,
-5. lädt beide macOS-ZIPs und ihre SHA-256-Dateien in dasselbe Release,
-6. baut auf nativen Linux-x64- und Linux-ARM64-Runnern DEB, AppImage und ein Arch-Paket und lädt sie in dasselbe Release.
+2. baut Windows x64 als EXE und ZIP,
+3. baut macOS getrennt für Apple Silicon und Intel,
+4. baut Linux x64 und ARM64 als DEB, AppImage und Arch-Paket,
+5. veröffentlicht alle Pakete und SHA-256-Dateien im selben GitHub-Release.
 
-Tags mit Bindestrich wie `v0.11.2-rc1` werden als Vorabversion veröffentlicht.
+Tags mit Bindestrich wie `v0.17.0-rc1` werden als Vorabversion veröffentlicht.
 
 ## Manuelle Freigabeprüfung
 
-- frische Windows-Benutzerumgebung
-- Erststart einschließlich Runtime-Download
-- bestehende Installation und Profilmigration
+- frische Windows-Benutzerumgebung und bestehende Installation
 - lokales Logging ohne Internet
-- Upload, Download, Konflikt und bewusste Löschung
-- Profilwechsel und Profilduplikat
-- Contest-Session
+- Profilwechsel mit getrennten lokalen und Wavelog-Stationsprofilen
+- Upload, profilbezogener Download, sichtbarer Sync-Fehler und bewusste Konfliktlösung
+- direkter QRZ.com-Lookup ohne Wavelog-Konfiguration
+- TLS-Verbindung zu Wavelog und QRZ
+- QSO-Benachrichtigung, UDP, CAT und DX-Cluster
 - Prüfsummen aus dem Release
-- macOS Apple Silicon: Entpacken, Erststart per Rechtsklick **Öffnen**, lokales QSO und CAT
-- macOS Intel: Entpacken, Erststart per Rechtsklick **Öffnen**, lokales QSO und CAT
-- Linux x64: DEB und AppImage starten, lokales QSO, QRZ-Foto und CAT prüfen
-- Linux ARM64: DEB und AppImage starten, lokales QSO und CAT prüfen
+- macOS Apple Silicon und Intel: Entpacken, Erststart per Rechtsklick **Öffnen**, lokales QSO und CAT
+- Linux x64 und ARM64: DEB und AppImage starten, lokales QSO, QRZ-Foto, Benachrichtigung und CAT
 
-Die macOS-Pakete sind ad-hoc signiert, aber ohne Apple-Developer-Zertifikat nicht notarisiert. Vor jeder stabilen Freigabe müssen deshalb mindestens die erzeugten CI-Artefakte praktisch auf einem Apple-Silicon-Mac und einem Intel-Mac getestet werden.
+Die macOS-Pakete sind ad-hoc signiert, aber ohne Apple-Developer-Zertifikat nicht notarisiert. Vor einer stabilen Freigabe sollten die erzeugten CI-Artefakte zusätzlich praktisch auf den verfügbaren Zielsystemen getestet werden.

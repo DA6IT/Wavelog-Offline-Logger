@@ -29,3 +29,21 @@ Pillow is distributed under the MIT-CMU license.
 
 - Project: https://github.com/python-pillow/Pillow
 - License: https://github.com/python-pillow/Pillow/blob/main/LICENSE
+
+## Truststore
+
+Release packages include truststore 0.10.4 so HTTPS certificate validation can
+use the native trust stores and certificate services of Windows, macOS and Linux.
+Truststore is distributed under the MIT license.
+
+- Project: https://github.com/sethmlarson/truststore
+- License: https://github.com/sethmlarson/truststore/blob/main/LICENSE
+
+## Certifi
+
+Release packages include certifi 2026.6.17 as a verified CA-bundle fallback for
+portable Python runtimes. Certifi is distributed under the Mozilla Public
+License 2.0.
+
+- Project: https://github.com/certifi/python-certifi
+- License: https://github.com/certifi/python-certifi/blob/master/LICENSE

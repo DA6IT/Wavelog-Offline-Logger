@@ -48,6 +48,12 @@ Prüfe:
 
 Tokens niemals in einem öffentlichen Issue posten.
 
+Bei `CERTIFICATE_VERIFY_FAILED` verwendet ein aktueller Build zuerst den nativen Zertifikatsspeicher des Betriebssystems und zusätzlich ein gebündeltes CA-Paket als Fallback. Prüfe trotzdem Systemdatum, ausstehende Betriebssystem-Zertifikatsupdates sowie TLS-inspektierende Firmen-Proxys oder Virenscanner. Die Zertifikatsprüfung wird aus Sicherheitsgründen nicht abschaltbar gemacht.
+
+## SYNC-FEHLER in der Logbuchtabelle
+
+Markiere das rote QSO. Unter der Tabelle erscheint die gespeicherte Ursache. Gehört die verknüpfte Wavelog-ID zu einem anderen Stationsprofil, bleiben ADI-Datensatz und Zuordnung unangetastet; eine automatische Reparatur findet bewusst nicht statt. Sichere vor einer manuellen Korrektur den ADI-Ordner und die Profildaten.
+
 ## QSOs fehlen nach dem Sync
 
 Nicht sofort Dateien oder Metadaten löschen. Sichere zuerst den ADI-Ordner und die Anwendungsdaten. Prüfe danach das aktive Profil, den eingestellten Logpfad, Stationsprofil und Operatorfilter.
