@@ -1,6 +1,6 @@
 # Benutzerhandbuch
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.16.0. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.17.0. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -54,6 +54,7 @@ Die linke Navigation öffnet:
 - **Logbuch** – vollständiges QSO-Formular
 - **Fast Log / DXpedition** – Rufzeichen und Enter für schnelle Serien
 - **Contest Logging** – Seriennummern, Exchanges und Contest-Sitzung
+- **xOTA** – portable POTA-, SOTA-, WWFF-, IOTA-, COTA- und WCA-Aktivierungen vorbereiten
 - **Logbuch & Sync** – lokale QSOs, Sync- und QSL-Status
 - **Statistiken** – lokale Auswertungen
 - **DX Cluster** – Spots empfangen, filtern und übernehmen
@@ -177,7 +178,24 @@ Ein Contest-Preset enthält unter anderem:
 
 Nach dem Start einer Sitzung werden Seriennummern und Exchanges in die entsprechenden ADIF-Felder geschrieben. QSOs bleiben Teil des normalen lokalen ADI-Logbuchs und werden über denselben Wavelog-Sync verarbeitet.
 
-## 8. Logbuch und Synchronisierung
+## 8. xOTA-Aktivierungen
+
+![xOTA-Aktivierung](screenshots/xota.png)
+
+Der xOTA-Bereich fasst mehrere portable Programme in einer Aktivierung zusammen. Eine Aktivierung kann gleichzeitig mehrere bestätigte Referenzen enthalten, etwa einen POTA-Park und ein WWFF-Gebiet oder mehrere überlappende POTA-Parks.
+
+1. Rufzeichen und optional Leistung eintragen.
+2. Den aktuellen Standort per GPS übernehmen oder Breiten- und Längengrad manuell eintragen. Der Locator wird lokal berechnet.
+3. Optional Standortdaten online ergänzen.
+4. **Mögliche Referenzen suchen** wählen.
+5. Einen oder mehrere Treffer mit `Strg` beziehungsweise `Shift` markieren, bewusst prüfen und übernehmen.
+6. Aktivierung starten. Danach gespeicherte QSOs werden der aktiven Aktivierung zugeordnet und bleiben zuerst lokal.
+
+Für POTA lädt der Logger den offiziellen Gesamtkatalog in einen lokalen Cache. Kandidaten bis 10 km gelten als nahe Katalogmarker; Treffer bis 25 km werden zusätzlich angezeigt, weil der Mittelpunkt eines großen Parks deutlich vom eigenen Standort entfernt liegen kann. Die Koordinate beweist keine Zugehörigkeit zur Parkfläche. Mit **POTA-Grenze prüfen** öffnet der Logger deshalb den ausgewählten Park auf `pota-map.info`; die endgültige Bestätigung bleibt immer beim Benutzer.
+
+GPS, Internet und Referenzdienste sind optional. Fällt GPS aus oder wird die Standortfreigabe verweigert, können alle Werte manuell erfasst werden. Eine fertige Aktivierung lässt sich später wiederholen oder einer vorhandenen Wavelog Station Location zuordnen. Eine neue Wavelog Location wird nur nach ausdrücklicher Bestätigung angelegt.
+
+## 9. Logbuch und Synchronisierung
 
 ![Logbuch und Sync](screenshots/logbook-sync.png)
 
@@ -195,7 +213,7 @@ Bei `SYNC-FEHLER` zeigt die Detailzeile unter der Tabelle die gespeicherte techn
 
 Die Spalten QRZ, LoTW, eQSL und DCL zeigen den von Wavelog gelieferten Bestätigungsstatus, sofern die API ihn bereitstellt.
 
-### 8.1 Online-Modus
+### 9.1 Online-Modus
 
 Die App prüft regelmäßig die konfigurierte Wavelog-API:
 
@@ -204,7 +222,7 @@ Die App prüft regelmäßig die konfigurierte Wavelog-API:
 
 Bei aktivierter Option werden im laufenden Betrieb ausschließlich neue, noch nie verknüpfte `LOCAL ONLY`-QSOs gepusht. Ein fehlgeschlagener oder mehrdeutiger Upload wird nicht blind wiederholt. Änderungen, Downloads, Löschungen und Konflikte sind Aufgabe des vollständigen Syncs.
 
-### 8.2 Vollständiger Sync beim Start oder Beenden
+### 9.2 Vollständiger Sync beim Start oder Beenden
 
 ![Laufender automatischer Sync](screenshots/sync-progress-running.png)
 
@@ -214,13 +232,19 @@ Während eines automatischen Voll-Syncs sperrt ein Statusfenster die Bedienung. 
 
 Nach Abschluss zeigt das Fenster die Zusammenfassung. Erst **OK** gibt die App frei beziehungsweise beendet sie. Scheitert der Sync, bleiben die lokalen ADI-Daten erhalten und die Fehlermeldung wird im Fenster angezeigt.
 
-## 9. Statistiken
+### ADIF importieren und exportieren
+
+Unter **Logbuch & Sync** kann ein ADIF-Log importiert oder das aktuelle Profil-Log exportiert werden. Vor einem Import legt die App eine Sicherung an, prüft Pflichtfelder, überspringt natürliche Dubletten und verifiziert die neu geschriebene Datei durch erneutes Einlesen.
+
+Ab Version 0.17.0 verwendet jedes Profil genau eine fortlaufende ADI-Datei. Beim ersten Öffnen eines älteren Profils werden vorhandene Tagesdateien zuerst als ZIP gesichert, anschließend zusammengeführt und byte-semantisch geprüft. Erst nach erfolgreicher Prüfung verschiebt die App die alten Quelldateien in das Wiederherstellungsverzeichnis `.migration-backups`.
+
+## 10. Statistiken
 
 ![Lokale Statistiken](screenshots/statistics.png)
 
 Statistiken werden ausschließlich aus dem lokalen Logbuch berechnet. Filterbar sind Zeitraum und Operator. Angezeigt werden unter anderem QSO-Anzahl, DXCC-Entities, Bänder, Modes, Länder, häufige Rufzeichen sowie Sync- und QSL-Status.
 
-## 10. CAT und Hamlib
+## 11. CAT und Hamlib
 
 ![CAT Setup](screenshots/cat-setup.png)
 
@@ -237,7 +261,7 @@ Beim Stoppen von CAT, Profilwechsel und Programmende wird der von der App gestar
 
 Der TUNE-Knopf im QSO-Fenster sendet nach einer Sicherheitsabfrage den Hamlib-Tunerbefehl. Während der Vorgang läuft, ist der Knopf rot und deaktiviert; danach wird er wieder neutral. Die App schaltet PTT nicht selbst ein. Ob und wie der Befehl arbeitet, hängt von Funkgerät, Firmware und Hamlib-Unterstützung ab.
 
-## 11. DX Cluster
+## 12. DX Cluster
 
 ![DX Cluster](screenshots/dx-cluster.png)
 
@@ -261,7 +285,7 @@ Fehlt der Mode, wertet die App Kommentar, typische FT8-Frequenzen und eindeutige
 - **QSO übernehmen:** ausgewählten Spot in das QSO-Formular übertragen
 - **DX-Spot senden:** aktuellen QSO-Kandidaten über die getrennte DXSpider-Verbindung melden
 
-## 12. UDP Logging / WSJT-X
+## 13. UDP Logging / WSJT-X
 
 ![UDP Logging](screenshots/udp-logging.png)
 
@@ -275,7 +299,7 @@ Empfohlene lokale Bind-Adresse ist `127.0.0.1`. Der Port ist frei wählbar und m
 
 **UDP Logging beim App-Start automatisch starten** ist profilbezogen. Eingehende QSOs werden sofort lokal gespeichert und erscheinen als `LOCAL ONLY`; der normale Online-Modus beziehungsweise Sync übernimmt die spätere Übertragung.
 
-## 13. Lokale Daten sichern und wiederherstellen
+## 14. Lokale Daten sichern und wiederherstellen
 
 Version 0.16.0 enthält noch keinen automatischen ZIP-Backup-/Restore-Knopf. Für eine vollständige manuelle Sicherung die App beenden und den gesamten Anwendungsordner kopieren. Damit werden Profile, Einstellungen, Sync-Metadaten, Callbook-Cache und standardmäßig auch die verwalteten ADI-Ordner erfasst.
 
@@ -290,11 +314,11 @@ Zur Wiederherstellung:
 
 Eine einzelne ADI-Datei darf bei geschlossener App ersetzt oder aus einer Sicherung zurückkopiert werden. Niemals nur die SQLite-Datei als QSO-Sicherung behandeln – ADI ist das primäre Logbuch.
 
-## 14. Updates
+## 15. Updates
 
 Beim Start prüft die App im Hintergrund, ob ein neueres GitHub-Release vorhanden ist. Ohne Internet erscheint keine Fehlermeldung. Ein Update wird nicht automatisch installiert; der Benutzer entscheidet selbst über Download und Start der neuen Version.
 
-## 15. Datenschutz und Netzwerkzugriffe
+## 16. Datenschutz und Netzwerkzugriffe
 
 Offline verfügbar sind QSO-Erfassung, ADI-Speicherung, Profile, Statistiken, CTY.DAT-Ländererkennung und die lokale Logbuchansicht.
 
@@ -308,7 +332,7 @@ Netzwerk benötigen nur ausdrücklich konfigurierte oder gestartete Funktionen:
 
 Zugangsdaten und Benutzerdaten gehören nicht in Git, Screenshots oder Fehlermeldungen. Das Dokumentations-Screenshot-Skript verwendet deshalb immer ein temporäres Demo-Profil.
 
-## 16. Fehlerhilfe
+## 17. Fehlerhilfe
 
 Typische Ursachen und Diagnosepfade stehen in [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Hilfreich sind Betriebssystem, App-Version, Funkgerät, Verbindungsart und der genaue Meldungstext. API-Tokens und Passwörter vor dem Teilen immer entfernen.
 

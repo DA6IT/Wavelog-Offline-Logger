@@ -143,7 +143,7 @@ try {
         }
     }
     $requiredScreenshots = @(
-        "qso-logging.png", "fast-log.png", "contest-logging.png", "logbook-sync.png",
+        "qso-logging.png", "fast-log.png", "contest-logging.png", "xota.png", "logbook-sync.png",
         "statistics.png", "cat-setup.png", "dx-cluster.png", "udp-logging.png",
         "settings-general.png", "settings-wavelog.png", "settings-callbook.png",
         "settings-data-connections.png", "sync-progress-running.png", "sync-progress-complete.png",
@@ -165,7 +165,7 @@ try {
     Invoke-Checked $python @(
         "-m", "py_compile", "app.py", "logger_core.py", "callbook.py",
         "notifications.py", "ui_preferences.py", "update_check.py",
-        "scripts\capture-doc-screenshots.py"
+        "xota.py", "scripts\capture-doc-screenshots.py", "scripts\set-windows-icon.py"
     )
 
     foreach ($scriptPath in @(
@@ -238,6 +238,9 @@ try {
         "selftest.py",
         "ui_preferences.py",
         "update_check.py",
+        "xota.py",
+        "assets/da6it-icon.ico",
+        "assets/da6it-icon.png",
         "packaging/arch/PKGBUILD",
         "README.md",
         "THIRD_PARTY_NOTICES.md",
@@ -247,11 +250,14 @@ try {
         "docs/RELEASING.md",
         "docs/TROUBLESHOOTING.md",
         "docs/USER_GUIDE.md",
+        "docs/SCREENSHOTS.md",
         "scripts/build-linux.sh",
         "scripts/build-macos.sh",
         "scripts/build-windows.ps1",
+        "scripts/capture-doc-screenshots.py",
+        "scripts/capture-doc-screenshots.ps1",
+        "scripts/set-windows-icon.py",
         "scripts/prepare-network-trust-windows.ps1",
-        "scripts/publish-v0.16.1.ps1",
         $publishScriptRelativePath
     )
     $releaseFiles += $requiredScreenshots | ForEach-Object { "docs/screenshots/$_" }
@@ -537,7 +543,42 @@ try {
     Write-Host "Release-Workflow: $($releaseRun.url)"
     Invoke-Checked $gh @("run", "watch", [string]$releaseRun.databaseId, "--repo", $repository, "--exit-status", "--interval", "10")
 
-    $releaseUrl = "https://github.com/$repository/releases/tag/$tag"
+    Write-Host "Release-Dateien auf Vollstaendigkeit pruefen ..."
+    $releaseResult = Invoke-CapturedNative $gh @(
+        "release", "view", $tag, "--repo", $repository, "--json", "url,assets"
+    )
+    if ($releaseResult.ExitCode -ne 0) {
+        throw "GitHub-Release konnte nach erfolgreichem Workflow nicht gelesen werden: $(Convert-NativeOutputToText $releaseResult.Output)"
+    }
+    try {
+        $releaseInfo = ConvertFrom-Json -InputObject (Convert-NativeOutputToText $releaseResult.Output)
+    } catch {
+        throw "GitHub-Release lieferte ungueltiges JSON."
+    }
+    $assetNames = @($releaseInfo.assets | ForEach-Object { [string]$_.name })
+    $requiredAssetPatterns = @(
+        "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.exe",
+        "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.zip",
+        "DA6IT.de-Wavelog-Offline-Logger-v$version-macos-arm64.zip",
+        "DA6IT.de-Wavelog-Offline-Logger-v$version-macos-x64.zip",
+        "DA6IT.de-Wavelog-Offline-Logger-v$version-linux-x64.deb",
+        "DA6IT.de-Wavelog-Offline-Logger-v$version-linux-arm64.deb",
+        "DA6IT.de-Wavelog-Offline-Logger-v$version-linux-x64.AppImage",
+        "DA6IT.de-Wavelog-Offline-Logger-v$version-linux-arm64.AppImage",
+        "wavelog-offline-logger-$version-1-x86_64.pkg.tar.zst",
+        "wavelog-offline-logger-$version-1-aarch64.pkg.tar.zst",
+        "SHA256SUMS.txt"
+    )
+    $missingAssets = @($requiredAssetPatterns | Where-Object { $_ -notin $assetNames })
+    if ($missingAssets.Count -gt 0) {
+        throw "Release ist noch unvollstaendig. Fehlende Datei(en): $($missingAssets -join ', ')"
+    }
+
+    $releaseUrl = if ([string]::IsNullOrWhiteSpace([string]$releaseInfo.url)) {
+        "https://github.com/$repository/releases/tag/$tag"
+    } else {
+        [string]$releaseInfo.url
+    }
     Write-Host ""
     Write-Host "RELEASE ERFOLGREICH: $releaseUrl" -ForegroundColor Green
     if (Test-Path -LiteralPath $expectedExe) {

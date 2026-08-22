@@ -231,6 +231,19 @@ ENGLISH = {
     "DX Cluster ist getrennt · zum Empfangen bitte manuell verbinden.": "DX Cluster is disconnected · connect manually to receive spots.",
     "UDP-Logging ist ausgeschaltet.": "UDP logging is off.",
     "UDP-Logging ist ausgeschaltet · zum Empfangen bitte UDP starten.": "UDP logging is off · start UDP to receive QSOs.",
+    "Mit Wavelog verbinden & synchronisieren": "Connect and synchronize with Wavelog",
+    "Wavelog verbinden": "Connect Wavelog", "Aktivierung beenden": "End activation", "Beenden": "End",
+    "Aktuellen Standort verwenden": "Use current location", "GPS übernehmen": "Use GPS",
+    "Standortdaten online ergänzen": "Complete location online", "Standort ergänzen": "Complete location",
+    "Mögliche Referenzen suchen": "Find possible references", "Referenzen suchen": "Find references",
+    "Aktivierung starten": "Start activation", "Starten": "Start",
+    "Ausgewählte Treffer übernehmen": "Use selected matches", "Treffer übernehmen": "Use matches",
+    "POTA-Grenze prüfen": "Check POTA boundary", "POTA-Map": "POTA map",
+    "Referenzdaten aktualisieren": "Update reference data", "Daten aktualisieren": "Update data",
+    "Ausgewählte Aktivierung wiederholen": "Repeat selected activation",
+    "Aktivierung wiederholen": "Repeat activation",
+    "Mögliche Referenzen · Mehrfachauswahl mit Strg/Shift": "Possible references · multi-select with Ctrl/Shift",
+    "Mögliche Referenzen · Strg/Shift": "Possible references · Ctrl/Shift",
 }
 
 

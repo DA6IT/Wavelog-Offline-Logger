@@ -9,7 +9,9 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 ## Highlights
 
 - normales QSO-Logging, Fast Log/DXpedition und Contest-Logging
-- tägliche ADI-Dateien als primäres lokales Logbuch
+- eine fortlaufende ADI-Datei je Profil als primäres lokales Logbuch
+- geprüfter ADIF-Import und -Export mit Backup und Dublettenschutz
+- integrierter xOTA-Modus für kombinierte POTA-, SOTA-, WWFF-, IOTA- und COTA/WCA-Aktivierungen
 - mehrere getrennte Stationsprofile
 - profilspezifischer Wavelog-API-v2-Sync mit sichtbaren Konflikten und Fehlerursachen
 - optionaler Online-Modus: nur neue QSOs sofort pushen
@@ -22,6 +24,16 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - deutsche und englische Oberfläche, Light- und Dark-Theme
 - responsive Oberfläche ohne Scrollleisten mit automatischer Größenanpassung
 - Builds für Windows x64, macOS Apple Silicon/Intel und Linux x64/ARM64
+
+## xOTA und ADIF
+
+![xOTA-Aktivierung mit Mehrfachreferenzen](docs/screenshots/xota.png)
+
+Der integrierte **xOTA-Modus** kombiniert mehrere Aktivierungsprogramme in einer portablen Session. GPS und die Maidenhead-Berechnung funktionieren offline; Online-Dienste ergänzen lediglich Standort- und mögliche Referenzdaten. Für POTA wird der vollständige offizielle Parkkatalog lokal gespeichert. Die Suche zeigt nahe Katalogmarker bis 10 km und zusätzlich deutlich markierte Kandidaten bis 25 km, damit große oder grenzüberschreitende Parks nicht durch einen weit entfernten Mittelpunkt übersehen werden. Da die Katalogkoordinate keine exakte Parkgrenze ist, lässt sich ein ausgewählter Treffer direkt auf **pota-map.info** kontrollieren. Einen vorgeschlagenen Treffer muss der Benutzer stets selbst prüfen und übernehmen.
+
+QSOs werden weiterhin zuerst lokal gespeichert. Eine Aktivierung kann später einer vorhandenen Wavelog Station Location zugeordnet oder – erst nach ausdrücklicher Bestätigung – als neue Location angelegt werden. ADIF-Import und -Export befinden sich unter **Logbuch & Sync**.
+
+Beim ersten Start werden vorhandene Tages-ADI-Dateien vor der Zusammenführung als ZIP gesichert. Die neue Profil-Datei wird gelesen und verifiziert; erst danach werden die alten Dateien in ein Wiederherstellungsverzeichnis verschoben.
 
 ## Installation
 

@@ -52,6 +52,11 @@ from callbook import (
 )
 from ui_preferences import PALETTES, UiPreferences, load_ui_preferences, save_ui_preferences, translate_text
 from notifications import notify_qso_logged
+from xota import (
+    GPSService, ActivationReferenceService, ReverseGeocodeService,
+    WavelogStationService, XotaActivation, XotaRepository,
+    XOTA_PROGRAMS, maidenhead_locator, merge_candidate_references, normalize_references,
+)
 
 try:
     from PIL import Image, ImageTk
@@ -328,6 +333,7 @@ class LoggerApp(tk.Tk):
         self.active_profile_id = self.profile_manager.active_id
         self.db = None
         self.store = None
+        self.pending_adif_migration_report = None
         self._open_profile_storage(self.active_profile_id)
 
         self._setup_style()
@@ -335,6 +341,7 @@ class LoggerApp(tk.Tk):
         self._build_log_page()
         self._build_fast_log_page()
         self._build_contest_page()
+        self._build_xota_page()
         self._build_qsos_page()
         self._build_stats_page()
         self._build_cat_page()
@@ -351,6 +358,7 @@ class LoggerApp(tk.Tk):
         self._tick_clock()
         self.refresh_qsos()
         self.after(90, self._present_main_window)
+        self.after(350, self._show_adif_migration_report)
         self.after(600, self._autostart_udp_log)
         self.after(1500, self._start_update_check)
         self.after(2200, self._start_wavelog_monitor)
@@ -376,6 +384,20 @@ class LoggerApp(tk.Tk):
         except tk.TclError:
             pass
         self.after(180, self._finish_window_presentation)
+
+    def _show_adif_migration_report(self):
+        report = self.pending_adif_migration_report
+        self.pending_adif_migration_report = None
+        if not report or self.closing:
+            return
+        messagebox.showinfo(
+            "ADI-Logbuch zusammengeführt",
+            f"{report.get('sources', 0)} bisherige ADI-Datei(en) wurden sicher in eine Datei "
+            f"mit {report.get('records', 0)} QSO(s) zusammengeführt.\n\n"
+            f"Neue Logdatei:\n{report.get('target', '')}\n\n"
+            f"Wiederherstellungs-ZIP:\n{report.get('backup', '')}",
+            parent=self,
+        )
 
     def _finish_window_presentation(self):
         if self.closing:
@@ -437,6 +459,7 @@ class LoggerApp(tk.Tk):
             return
         scale = responsive_ui_scale(self.winfo_width(), self.winfo_height())
         if not force and abs(scale - self._ui_scale) < 0.001:
+            self._apply_xota_responsive_layout()
             return
         self._ui_scale = scale
 
@@ -462,10 +485,16 @@ class LoggerApp(tk.Tk):
                 max(12, int(round(22 * scale))),
                 max(9, int(round(16 * scale))),
             ))
+        if hasattr(self, "clock_card"):
+            self.clock_card.configure(
+                width=max(150, int(round(178 * scale))),
+                height=max(44, int(round(52 * scale))),
+            )
         if hasattr(self, "log_page"):
             self.log_page.columnconfigure(1, minsize=max(255, int(round(370 * scale))))
         if hasattr(self, "callbook_image_frame"):
             self.callbook_image_frame.configure(height=max(105, int(round(160 * scale))))
+        self._apply_xota_responsive_layout()
         self._render_brand_logo()
         if self.callbook_image_bytes:
             self._render_callbook_image(self.callbook_image_bytes)
@@ -856,7 +885,17 @@ class LoggerApp(tk.Tk):
             write_startup_log("Logo konnte nicht geladen werden: " + repr(exc))
             return None
 
+    def _load_window_icon(self):
+        """Use the square DA6IT brand mark for the window and taskbar."""
+        try:
+            resource_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+            self.app_icon_photo = tk.PhotoImage(file=str(resource_root / "assets" / "da6it-icon.png"))
+            self.iconphoto(True, self.app_icon_photo)
+        except Exception as exc:
+            write_startup_log("App-Icon konnte nicht geladen werden: " + repr(exc))
+
     def _build_shell(self):
+        self._load_window_icon()
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
 
@@ -881,6 +920,7 @@ class LoggerApp(tk.Tk):
             ("log", "▣   Logbuch"),
             ("fast_log", "ϟ   Fast Log / DXpedition"),
             ("contest", "#   Contest Logging"),
+            ("xota", "⌖   xOTA"),
             ("qsos", "☁   Logbuch & Sync"),
             ("stats", "▤   Statistiken"),
             ("dx_cluster", "◎   DX Cluster"),
@@ -929,11 +969,12 @@ class LoggerApp(tk.Tk):
         ttk.Button(profile_card, text="Verwalten", style="Secondary.TButton", command=self.manage_profiles).pack(side="left", padx=(6, 6), pady=4)
         self._refresh_profile_selector()
 
-        clock_card = tk.Frame(header, bg=CARD, highlightbackground=BORDER, highlightthickness=1)
-        clock_card.grid(row=0, column=2, sticky="e")
-        self.clock_label = tk.Label(clock_card, text="--:--:--", bg=CARD, fg=TEXT, font=("Segoe UI Semibold", 18), padx=16, pady=5)
+        self.clock_card = tk.Frame(header, bg=CARD, width=178, height=52, highlightbackground=BORDER, highlightthickness=1)
+        self.clock_card.grid(row=0, column=2, sticky="e")
+        self.clock_card.pack_propagate(False)
+        self.clock_label = tk.Label(self.clock_card, text="--:--:--", width=8, anchor="center", bg=CARD, fg=TEXT, font=("Consolas", 18, "bold"), padx=8, pady=5)
         self.clock_label.pack(side="left")
-        self.clock_zone_label = tk.Label(clock_card, text="UTC", bg=CARD, fg=MUTED, font=("Segoe UI Semibold", 9), padx=(0), pady=5)
+        self.clock_zone_label = tk.Label(self.clock_card, text="UTC", width=5, anchor="center", bg=CARD, fg=MUTED, font=("Segoe UI Semibold", 9), padx=0, pady=5)
         self.clock_zone_label.pack(side="left", padx=(0, 12))
 
         self.page_container = ttk.Frame(self.main)
@@ -980,7 +1021,15 @@ class LoggerApp(tk.Tk):
         if not raw_log_dir:
             raw_log_dir = str(fallback)
             self.db.set_setting("log_dir", raw_log_dir)
-        self.store = LogStore(Path(raw_log_dir))
+        self.store = LogStore(Path(raw_log_dir), profile_id)
+        if self.store.migration_report:
+            self.pending_adif_migration_report = self.store.migration_report
+        self.xota_repository = XotaRepository(self.db)
+        self.xota_references = ActivationReferenceService(self.xota_repository, self.db.get_setting)
+        self.xota_geocoder = ReverseGeocodeService(
+            self.xota_repository,
+            self.db.get_setting("xota_reverse_geocode_url", ""),
+        )
         self.db.reconcile_index(self.store.scan())
 
     def _current_profile(self) -> dict:
@@ -1047,6 +1096,7 @@ class LoggerApp(tk.Tk):
             if hasattr(self, "contest_power_var"):
                 self.contest_power_var.set(self.db.get_setting("default_power", ""))
             self.refresh_contest_page()
+            self.refresh_xota_page()
             self.refresh_qsos()
             self.refresh_stats()
             self._refresh_profile_selector()
@@ -1121,11 +1171,12 @@ class LoggerApp(tk.Tk):
         return f
 
     def _show_page(self, name: str):
-        titles = {"log": "QSO loggen", "fast_log": "Fast Log / DXpedition", "contest": "Contest Logging", "qsos": "Logbuch & Sync", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "udp_log": "UDP Logging", "settings": "Einstellungen"}
+        titles = {"log": "QSO loggen", "fast_log": "Fast Log / DXpedition", "contest": "Contest Logging", "xota": "xOTA", "qsos": "Logbuch & Sync", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "udp_log": "UDP Logging", "settings": "Einstellungen"}
         subtitles = {
             "log": "Neues QSO erfassen und sicher lokal speichern.",
             "fast_log": "Pileups zügig abarbeiten: Rufzeichen und Enter.",
             "contest": "Seriennummern und Austauschdaten effizient protokollieren.",
+            "xota": "Portable Aktivierungen offline vorbereiten, kombinieren und sicher protokollieren.",
             "qsos": "Lokale QSOs prüfen und Wavelog bewusst manuell synchronisieren.",
             "stats": "Das lokale Logbuch auf einen Blick.",
             "cat": "Funkgerät über das eingebettete Hamlib steuern.",
@@ -1143,6 +1194,8 @@ class LoggerApp(tk.Tk):
             self.fast_log_call_entry.focus_set()
         elif name == "contest":
             self.refresh_contest_page()
+        elif name == "xota":
+            self.refresh_xota_page()
         elif name == "qsos":
             self.refresh_qsos()
         elif name == "stats":
@@ -1564,7 +1617,7 @@ class LoggerApp(tk.Tk):
         self.after(250, self._tick_clock)
 
     def _profile_values(self) -> dict[str, str]:
-        return {
+        values = {
             "operator_call": self.db.get_setting("operator_call", "").upper(),
             "station_call": self.db.get_setting("station_call", "").upper(),
             "my_gridsquare": self.db.get_setting("locator", "").upper(),
@@ -1573,6 +1626,25 @@ class LoggerApp(tk.Tk):
             "my_sota_ref": self.db.get_setting("my_sota_ref", "").upper(),
             "my_wwff_ref": self.db.get_setting("my_wwff_ref", "").upper(),
         }
+        activation = self.xota_repository.active() if hasattr(self, "xota_repository") else None
+        if activation:
+            refs = normalize_references(activation.references)
+            values.update({
+                "station_call": activation.callsign,
+                "my_gridsquare": activation.gridsquare,
+                "my_qth": activation.city,
+                "my_state": activation.state,
+                "my_dxcc": activation.dxcc,
+                "my_cq_zone": activation.cq_zone,
+                "my_itu_zone": activation.itu_zone,
+                "my_pota_ref": ",".join(refs["POTA"]),
+                "my_sota_ref": ",".join(refs["SOTA"]),
+                "my_wwff_ref": ",".join(refs["WWFF"]),
+                "my_iota": ",".join(refs["IOTA"]),
+                "my_sig": "WCA" if refs["WCA"] else "",
+                "my_sig_info": ",".join(refs["WCA"]),
+            })
+        return values
 
     def _update_profile_summary(self):
         p = self._profile_values()
@@ -1595,11 +1667,14 @@ class LoggerApp(tk.Tk):
     def _update_logfile_preview(self):
         if not hasattr(self, "logfile_preview"):
             return
-        p = self._profile_values()
-        date_s = self.qso_date_var.get() if hasattr(self, "qso_date_var") else datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        call = p["station_call"] or p["operator_call"] or "NOCALL"
-        safe = call.replace("/", "_")
-        self.logfile_preview.configure(text=f"{self.store.log_dir}\n{safe}.{date_s}.adi")
+        self.logfile_preview.configure(text=str(self.store.canonical_path))
+
+    def _bind_active_xota_qso(self, qso: dict) -> None:
+        if not hasattr(self, "xota_repository"):
+            return
+        activation = self.xota_repository.active()
+        if activation and qso.get("local_id"):
+            self.xota_repository.bind_qso(activation.uuid, qso["local_id"])
 
     def _collect_qso(self) -> dict:
         call = self.call_var.get().strip().upper()
@@ -1656,6 +1731,7 @@ class LoggerApp(tk.Tk):
             q = self._collect_qso()
             q = self.store.add(q)
             self.db.ensure_local(q["local_id"], qso_hash(q))
+            self._bind_active_xota_qso(q)
             self._notify_qso_saved(q)
             self.status_var.set(f"Gespeichert: {q['call']} · {q['band']} · {q['mode']} · {Path(q['_file']).name}")
             self.refresh_qsos()
@@ -1910,6 +1986,7 @@ class LoggerApp(tk.Tk):
             )
             saved = self.store.add(qso)
             self.db.ensure_local(saved["local_id"], qso_hash(saved))
+            self._bind_active_xota_qso(saved)
             self._notify_qso_saved(saved)
             self.fast_log_session_ids.append(saved["local_id"])
             self.fast_log_call_var.set("")
@@ -2264,7 +2341,7 @@ class LoggerApp(tk.Tk):
                "stx_string":str(preset.get("sent_exchange") or "") if preset.get("use_text") else "",
                "srx_string":rxtext if preset.get("use_text") else ""}
             if not q["contest_id"]: raise ValueError("Im Contest-Preset fehlt die ADIF Contest-ID")
-            q=self.store.add(q); self.db.ensure_local(q["local_id"],qso_hash(q))
+            q=self.store.add(q); self.db.ensure_local(q["local_id"],qso_hash(q)); self._bind_active_xota_qso(q)
             self._notify_qso_saved(q)
             if preset.get("use_serial"): session["next_serial"]=serial+1
             session["qso_count"]=int(session.get("qso_count") or 0)+1
@@ -2275,6 +2352,337 @@ class LoggerApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Contest-QSO konnte nicht gespeichert werden", str(e), parent=self)
 
+    # ---------- xOTA ----------
+    def _build_xota_page(self):
+        p = self._new_page("xota")
+        p.columnconfigure(0, weight=3); p.columnconfigure(1, weight=2)
+        p.rowconfigure(1, weight=1)
+
+        status = self._card(p, row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        status.columnconfigure(0, weight=1)
+        self.xota_status_label = ttk.Label(status, text="Keine Aktivierung aktiv", style="CardTitle.TLabel")
+        self.xota_status_label.grid(row=0, column=0, sticky="w")
+        self.xota_status_detail = ttk.Label(status, text="", style="Muted.Card.TLabel")
+        self.xota_status_detail.grid(row=1, column=0, sticky="w", pady=(3, 0))
+        self.xota_wavelog_button = ttk.Button(
+            status, text="Mit Wavelog verbinden & synchronisieren", style="Secondary.TButton",
+            command=self._xota_assign_station,
+        )
+        self.xota_wavelog_button.grid(row=0, column=1, rowspan=2, padx=6)
+        self.xota_finish_button = ttk.Button(
+            status, text="Aktivierung beenden", style="Secondary.TButton", command=self._xota_finish,
+        )
+        self.xota_finish_button.grid(row=0, column=2, rowspan=2)
+
+        form = self._card(p, row=1, column=0, sticky="nsew", padx=(0, 8))
+        for c in range(4): form.columnconfigure(c, weight=1)
+        ttk.Label(form, text="Neue xOTA-Aktivierung", style="CardTitle.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
+        ttk.Label(form, text="GPS, Internet und Referenzdienste sind optional. Alle Werte bleiben editierbar.",
+                  style="Muted.Card.TLabel").grid(row=1, column=0, columnspan=4, sticky="w", pady=(2, 8))
+        self.xota_vars = {name: tk.StringVar() for name in (
+            "callsign","latitude","longitude","accuracy","locator","city","state","country",
+            "dxcc","cq","itu","power","note","POTA","SOTA","WWFF","IOTA","COTA","WCA",
+        )}
+        fields = (
+            ("Callsign", "callsign"), ("Breitengrad", "latitude"), ("Längengrad", "longitude"), ("Locator", "locator"),
+            ("Ort / QTH", "city"), ("Bundesland / State", "state"), ("Land", "country"), ("Leistung (W)", "power"),
+            ("DXCC", "dxcc"), ("CQ-Zone", "cq"), ("ITU-Zone", "itu"), ("GPS-Genauigkeit (m)", "accuracy"),
+        )
+        for index, (label, key) in enumerate(fields):
+            row = 2 + (index // 4) * 2; col = index % 4
+            ttk.Label(form, text=label, style="Card.TLabel").grid(row=row, column=col, sticky="w", padx=(0, 8))
+            ttk.Entry(form, textvariable=self.xota_vars[key]).grid(row=row+1, column=col, sticky="ew", padx=(0, 8), pady=(2, 7))
+        ref_row = 8
+        ttk.Label(form, text="Bestätigte Referenzen (mehrere mit Komma)", style="CardTitle.TLabel").grid(row=ref_row, column=0, columnspan=4, sticky="w", pady=(6, 4))
+        for index, key in enumerate(XOTA_PROGRAMS):
+            row = ref_row + 1 + (index // 3) * 2; col = index % 3
+            ttk.Label(form, text=key, style="Card.TLabel").grid(row=row, column=col, sticky="w", padx=(0, 8))
+            ttk.Entry(form, textvariable=self.xota_vars[key]).grid(row=row+1, column=col, sticky="ew", padx=(0, 8), pady=(2, 7))
+        note_row = ref_row + 5
+        ttk.Label(form, text="Notiz", style="Card.TLabel").grid(row=note_row, column=0, sticky="w")
+        ttk.Entry(form, textvariable=self.xota_vars["note"]).grid(row=note_row+1, column=0, columnspan=4, sticky="ew", pady=(2, 8))
+        controls = ttk.Frame(form, style="Card.TFrame"); controls.grid(row=note_row+2, column=0, columnspan=4, sticky="ew")
+        for column in range(4):
+            controls.columnconfigure(column, weight=1, uniform="xota-form-actions")
+        self.xota_gps_button = ttk.Button(controls, text="Aktuellen Standort verwenden", style="Secondary.TButton", command=self._xota_use_gps)
+        self.xota_geocode_button = ttk.Button(controls, text="Standortdaten online ergänzen", style="Secondary.TButton", command=self._xota_reverse_geocode)
+        self.xota_find_button = ttk.Button(controls, text="Mögliche Referenzen suchen", style="Secondary.TButton", command=self._xota_find_references)
+        self.xota_start_button = ttk.Button(controls, text="Aktivierung starten", style="Primary.TButton", command=self._xota_start)
+        for column, button in enumerate((self.xota_gps_button, self.xota_geocode_button, self.xota_find_button, self.xota_start_button)):
+            button.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 3, 0 if column == 3 else 3))
+
+        right = self._card(p, row=1, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1); right.rowconfigure(1, weight=1); right.rowconfigure(4, weight=1)
+        self.xota_candidate_title = ttk.Label(right, text="Mögliche Referenzen · Mehrfachauswahl mit Strg/Shift", style="CardTitle.TLabel")
+        self.xota_candidate_title.grid(row=0, column=0, sticky="w")
+        self.xota_candidate_tree = ttk.Treeview(
+            right, columns=("program","ref","name","distance","status"),
+            show="headings", height=8, selectmode="extended",
+        )
+        for key, title, width in (("program","Programm",75),("ref","Referenz",95),("name","Name",180),("distance","Distanz",75),("status","Hinweis",155)):
+            self.xota_candidate_tree.heading(key, text=title); self.xota_candidate_tree.column(key, width=width, minwidth=35, stretch=False)
+        self.xota_candidate_tree.grid(row=1, column=0, sticky="nsew", pady=(6, 5))
+        self.xota_candidate_tree.bind("<Configure>", self._xota_resize_candidate_columns, add="+")
+        self.xota_candidates = []
+        buttons = ttk.Frame(right, style="Card.TFrame"); buttons.grid(row=2, column=0, sticky="ew")
+        for column in range(3):
+            buttons.columnconfigure(column, weight=1, uniform="xota-reference-actions")
+        self.xota_accept_button = ttk.Button(buttons, text="Ausgewählte Treffer übernehmen", style="Secondary.TButton", command=self._xota_accept_candidate)
+        self.xota_map_button = ttk.Button(buttons, text="POTA-Grenze prüfen", style="Secondary.TButton", command=self._xota_open_pota_map)
+        self.xota_update_button = ttk.Button(buttons, text="Referenzdaten aktualisieren", style="Secondary.TButton", command=self._xota_update_references)
+        for column, button in enumerate((self.xota_accept_button, self.xota_map_button, self.xota_update_button)):
+            button.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 3, 0 if column == 2 else 3))
+        self.xota_provider_label = ttk.Label(right, text="", style="Muted.Card.TLabel", wraplength=520)
+        self.xota_provider_label.grid(row=3, column=0, sticky="ew", pady=(8, 5))
+        ttk.Label(right, text="Letzte Aktivierungen", style="CardTitle.TLabel").grid(row=4, column=0, sticky="nw", pady=(8, 0))
+        self.xota_history = ttk.Treeview(right, columns=("start","call","refs","qsos","state"), show="headings", height=7)
+        for key, title, width in (("start","Start",120),("call","Call",85),("refs","Referenzen",190),("qsos","QSOs",45),("state","Status",65)):
+            self.xota_history.heading(key, text=title); self.xota_history.column(key, width=width, minwidth=32, stretch=False)
+        self.xota_history.grid(row=5, column=0, sticky="nsew", pady=(5, 5))
+        self.xota_history.bind("<Configure>", self._xota_resize_history_columns, add="+")
+        self.xota_repeat_button = ttk.Button(right, text="Ausgewählte Aktivierung wiederholen", style="Secondary.TButton", command=self._xota_repeat)
+        self.xota_repeat_button.grid(row=6, column=0, sticky="e")
+        for key in ("latitude", "longitude"):
+            self.xota_vars[key].trace_add("write", lambda *_args: self._xota_coordinates_changed())
+        self.refresh_xota_page()
+
+    def _xota_resize_candidate_columns(self, event=None):
+        width = max(320, int(getattr(event, "width", self.xota_candidate_tree.winfo_width())) - 4)
+        ratios = {"program": 0.13, "ref": 0.17, "name": 0.31, "distance": 0.16, "status": 0.23}
+        for key, ratio in ratios.items():
+            self.xota_candidate_tree.column(key, width=max(42, int(width * ratio)), stretch=False)
+
+    def _xota_resize_history_columns(self, event=None):
+        width = max(320, int(getattr(event, "width", self.xota_history.winfo_width())) - 4)
+        ratios = {"start": 0.24, "call": 0.17, "refs": 0.37, "qsos": 0.10, "state": 0.12}
+        for key, ratio in ratios.items():
+            self.xota_history.column(key, width=max(32, int(width * ratio)), stretch=False)
+
+    def _apply_xota_responsive_layout(self):
+        if not hasattr(self, "xota_gps_button"):
+            return
+        compact = self.winfo_width() < 1220
+        full = {
+            self.xota_wavelog_button: "Mit Wavelog verbinden & synchronisieren",
+            self.xota_finish_button: "Aktivierung beenden",
+            self.xota_gps_button: "Aktuellen Standort verwenden",
+            self.xota_geocode_button: "Standortdaten online ergänzen",
+            self.xota_find_button: "Mögliche Referenzen suchen",
+            self.xota_start_button: "Aktivierung starten",
+            self.xota_accept_button: "Ausgewählte Treffer übernehmen",
+            self.xota_map_button: "POTA-Grenze prüfen",
+            self.xota_update_button: "Referenzdaten aktualisieren",
+            self.xota_repeat_button: "Ausgewählte Aktivierung wiederholen",
+        }
+        short = {
+            self.xota_wavelog_button: "Wavelog verbinden",
+            self.xota_finish_button: "Beenden",
+            self.xota_gps_button: "GPS übernehmen",
+            self.xota_geocode_button: "Standort ergänzen",
+            self.xota_find_button: "Referenzen suchen",
+            self.xota_start_button: "Starten",
+            self.xota_accept_button: "Treffer übernehmen",
+            self.xota_map_button: "POTA-Map",
+            self.xota_update_button: "Daten aktualisieren",
+            self.xota_repeat_button: "Aktivierung wiederholen",
+        }
+        labels = short if compact else full
+        for button, label in labels.items():
+            button.configure(text=self._tr(label))
+        title = "Mögliche Referenzen · Strg/Shift" if compact else "Mögliche Referenzen · Mehrfachauswahl mit Strg/Shift"
+        self.xota_candidate_title.configure(text=self._tr(title))
+
+    def _xota_coordinates(self):
+        return float(self.xota_vars["latitude"].get().replace(",", ".")), float(self.xota_vars["longitude"].get().replace(",", "."))
+
+    def _xota_coordinates_changed(self):
+        try:
+            lat, lon = self._xota_coordinates()
+            self.xota_vars["locator"].set(maidenhead_locator(lat, lon, 6))
+        except (ValueError, tk.TclError):
+            pass
+
+    def _xota_use_gps(self):
+        self.status_var.set("Betriebssystem-Standort wird abgefragt …")
+        def worker():
+            try: result, error = GPSService.current_position(), ""
+            except Exception as exc: result, error = None, str(exc)
+            self.after(0, lambda: self._xota_gps_finished(result, error))
+        threading.Thread(target=worker, name="xota-gps", daemon=True).start()
+
+    def _xota_gps_finished(self, fix, error):
+        if error:
+            messagebox.showwarning("xOTA GPS", error + "\n\nKoordinaten können weiterhin manuell eingetragen werden.", parent=self); return
+        self.xota_vars["latitude"].set(f"{fix.latitude:.6f}"); self.xota_vars["longitude"].set(f"{fix.longitude:.6f}")
+        self.xota_vars["accuracy"].set("" if fix.accuracy is None else f"{fix.accuracy:.0f}")
+        self.status_var.set(f"GPS übernommen · {maidenhead_locator(fix.latitude, fix.longitude)} · offline berechnet")
+
+    def _xota_reverse_geocode(self):
+        try: lat, lon = self._xota_coordinates()
+        except ValueError: messagebox.showerror("xOTA", "Bitte gültige Koordinaten eintragen.", parent=self); return
+        self.status_var.set("Standortdaten werden online ergänzt …")
+        def worker():
+            try: result, error = self.xota_geocoder.reverse(lat, lon), ""
+            except Exception as exc: result, error = {}, str(exc)
+            self.after(0, lambda: self._xota_geocode_finished(result, error))
+        threading.Thread(target=worker, name="xota-geocode", daemon=True).start()
+
+    def _xota_geocode_finished(self, result, error):
+        if error: messagebox.showwarning("xOTA Standortdaten", "Online-Abfrage fehlgeschlagen: " + error + "\nDie Aktivierung kann trotzdem gestartet werden.", parent=self); return
+        for key in ("city","state","country"):
+            if result.get(key): self.xota_vars[key].set(result[key])
+        self.status_var.set("Standortdaten ergänzt · © OpenStreetMap contributors")
+
+    def _xota_find_references(self):
+        try: lat, lon = self._xota_coordinates()
+        except ValueError: messagebox.showerror("xOTA", "Bitte gültige Koordinaten eintragen.", parent=self); return
+        self.status_var.set("Lokale und verfügbare Online-Referenzen werden gesucht …")
+        def worker():
+            try: result, error = self.xota_references.find_nearby(lat, lon, refresh_pota=True), ""
+            except Exception as exc: result, error = [], str(exc)
+            self.after(0, lambda: self._xota_references_finished(result, error))
+        threading.Thread(target=worker, name="xota-reference-search", daemon=True).start()
+
+    def _xota_references_finished(self, result, error):
+        self.xota_candidates = list(result); self.xota_candidate_tree.delete(*self.xota_candidate_tree.get_children())
+        for index, item in enumerate(self.xota_candidates):
+            status = item.warning or ("möglicher Treffer" if item.eligible else "außerhalb Radius")
+            self.xota_candidate_tree.insert("", "end", iid=str(index), values=(item.program,item.reference,item.name,f"{item.distance_m:.0f} m",status))
+        self.xota_provider_label.configure(text=(error or f"{len(result)} mögliche Treffer im Umkreis. POTA nutzt den lokalen Gesamtkatalog; Parkgrenzen bitte mit ‚POTA-Grenze prüfen‘ kontrollieren."))
+        self.status_var.set(f"xOTA: {len(result)} mögliche Referenz(en) gefunden")
+
+    def _xota_open_pota_map(self):
+        reference = ""
+        selected = self.xota_candidate_tree.selection()
+        if selected:
+            candidate = self.xota_candidates[int(selected[0])]
+            if candidate.program == "POTA" or candidate.references.get("POTA"):
+                reference = (candidate.references.get("POTA") or [candidate.reference])[0]
+        url = "https://pota-map.info/"
+        if reference:
+            url += "?p=" + urllib.parse.quote(reference, safe="-")
+        self._open_external_url(url, "POTA-Map")
+
+    def _xota_accept_candidate(self):
+        selected = self.xota_candidate_tree.selection()
+        if not selected:
+            return
+        candidates = [self.xota_candidates[int(item_id)] for item_id in sorted(selected, key=int)]
+        warnings = [candidate for candidate in candidates if candidate.warning]
+        if warnings:
+            references = ", ".join(candidate.reference for candidate in warnings)
+            message = (
+                f"Die Grenzen der ausgewählten Referenzen ({references}) wurden nicht automatisch "
+                "nachgewiesen. Katalogkoordinaten sind nur Näherungspunkte.\n\n"
+                "Alle ausgewählten Referenzen trotzdem bewusst übernehmen?"
+            )
+            if not messagebox.askyesno("Referenzen übernehmen", message, parent=self):
+                return
+        current = {program: self.xota_vars[program].get() for program in XOTA_PROGRAMS}
+        merged = merge_candidate_references(candidates, current)
+        for program, references in merged.items():
+            self.xota_vars[program].set(", ".join(references))
+        self.status_var.set(f"xOTA: {len(candidates)} ausgewählte Referenz(en) übernommen")
+
+    def _xota_update_references(self):
+        try: lat, lon = self._xota_coordinates()
+        except ValueError: lat = lon = None
+        self.status_var.set("xOTA-Referenzdaten werden aktualisiert …")
+        def worker():
+            result = self.xota_references.update_all(lat, lon)
+            self.after(0, lambda: self._xota_update_finished(result))
+        threading.Thread(target=worker, name="xota-reference-update", daemon=True).start()
+
+    def _xota_update_finished(self, result):
+        text = " · ".join(f"{name}: {value}" for name, value in result.items())
+        self.xota_provider_label.configure(text=text); self.status_var.set("xOTA-Referenzdaten aktualisiert")
+
+    def _xota_activation_from_form(self):
+        callsign = self.xota_vars["callsign"].get().strip().upper()
+        if not callsign: raise ValueError("Bitte das Aktivierungsrufzeichen eingeben")
+        lat_text, lon_text = self.xota_vars["latitude"].get().strip(), self.xota_vars["longitude"].get().strip()
+        lat = float(lat_text.replace(",", ".")) if lat_text else None; lon = float(lon_text.replace(",", ".")) if lon_text else None
+        if (lat is None) != (lon is None): raise ValueError("Breiten- und Längengrad bitte gemeinsam angeben")
+        locator = self.xota_vars["locator"].get().strip().upper()
+        if not locator and lat is not None: locator = maidenhead_locator(lat, lon)
+        refs = {program: self.xota_vars[program].get() for program in XOTA_PROGRAMS}
+        return self.xota_repository.create(
+            self.active_profile_id, callsign, latitude=lat, longitude=lon,
+            gps_accuracy=float(self.xota_vars["accuracy"].get().replace(",", ".")) if self.xota_vars["accuracy"].get().strip() else None,
+            gridsquare=locator, city=self.xota_vars["city"].get().strip(), state=self.xota_vars["state"].get().strip(),
+            country=self.xota_vars["country"].get().strip(), dxcc=self.xota_vars["dxcc"].get().strip(),
+            cq_zone=self.xota_vars["cq"].get().strip(), itu_zone=self.xota_vars["itu"].get().strip(),
+            references=refs, power=self.xota_vars["power"].get().strip(), note=self.xota_vars["note"].get().strip(),
+        )
+
+    def _xota_start(self):
+        try:
+            activation = self._xota_activation_from_form(); self.xota_repository.start(activation.uuid)
+            self.form_vars["tx_pwr"].set(activation.power or self.form_vars["tx_pwr"].get())
+            self.refresh_xota_page(); self._update_profile_summary(); self.status_var.set(f"xOTA aktiv: {activation.callsign} · QSOs bleiben zuerst lokal")
+        except Exception as exc: messagebox.showerror("xOTA-Aktivierung", str(exc), parent=self)
+
+    def _xota_finish(self):
+        activation = self.xota_repository.active()
+        if not activation: messagebox.showinfo("xOTA", "Es läuft keine Aktivierung.", parent=self); return
+        if messagebox.askyesno("xOTA beenden", f"Aktivierung {activation.callsign} mit {self.xota_repository.qso_count(activation.uuid)} QSO(s) beenden?", parent=self):
+            self.xota_repository.finish(activation.uuid); self.refresh_xota_page(); self._update_profile_summary()
+
+    def _xota_repeat(self):
+        selected = self.xota_history.selection()
+        if not selected: return
+        activation = self.xota_repository.get(selected[0])
+        if not activation: return
+        values = {"callsign":activation.callsign,"latitude":"" if activation.latitude is None else str(activation.latitude),"longitude":"" if activation.longitude is None else str(activation.longitude),
+                  "accuracy":"" if activation.gps_accuracy is None else str(activation.gps_accuracy),"locator":activation.gridsquare,"city":activation.city,"state":activation.state,
+                  "country":activation.country,"dxcc":activation.dxcc,"cq":activation.cq_zone,"itu":activation.itu_zone,"power":activation.power,"note":activation.note}
+        for key, value in values.items(): self.xota_vars[key].set(value)
+        for program, refs in activation.references.items(): self.xota_vars[program].set(", ".join(refs))
+
+    def refresh_xota_page(self):
+        if not hasattr(self, "xota_history"): return
+        active = self.xota_repository.active()
+        if active:
+            refs = [f"{p} {'/'.join(v)}" for p, v in active.references.items() if v]
+            station = f"Wavelog Station {active.wavelog_station_id}" if active.wavelog_station_id else "noch keiner Wavelog Station zugeordnet"
+            self.xota_status_label.configure(text=f"● AKTIV · {active.callsign} · {active.gridsquare or 'ohne Locator'}")
+            self.xota_status_detail.configure(text=f"{self.xota_repository.qso_count(active.uuid)} QSO(s) · {' · '.join(refs) or 'manuelle Aktivierung ohne Referenz'} · {station}")
+        else:
+            self.xota_status_label.configure(text="Keine xOTA-Aktivierung aktiv"); self.xota_status_detail.configure(text="Offline-Logging ist jederzeit möglich.")
+        self.xota_history.delete(*self.xota_history.get_children())
+        for item in self.xota_repository.list(50):
+            refs = " · ".join(f"{p} {'/'.join(v)}" for p, v in item.references.items() if v)
+            self.xota_history.insert("", "end", iid=item.uuid, values=(item.started_at[:16].replace("T"," "),item.callsign,refs,self.xota_repository.qso_count(item.uuid),item.status))
+
+    def _xota_assign_station(self):
+        activation = self.xota_repository.active()
+        if not activation:
+            selected = self.xota_history.selection(); activation = self.xota_repository.get(selected[0]) if selected else None
+        if not activation: messagebox.showinfo("xOTA", "Bitte eine aktive oder gespeicherte Aktivierung auswählen.", parent=self); return
+        try:
+            client = self._client_from_settings(); stations = client.stations(); service = WavelogStationService(client)
+            current = next((s for s in stations if int(s.get("id") or 0) == int(activation.wavelog_station_id or 0)), None)
+            match = current or service.confident_match(activation, stations)
+            if match:
+                if not messagebox.askyesno("Wavelog Station Location", f"Vorhandene Location verwenden?\n\n{match.get('name','')} · ID {match.get('id')}", parent=self): return
+            else:
+                candidates = service.candidates(activation, stations)[:8]
+                if candidates:
+                    lines = [f"{i+1}: ID {row[2].get('id')} · {row[2].get('name','')} · Treffer {row[0]}" for i, row in enumerate(candidates)]
+                    choice = simpledialog.askinteger("Wavelog Location auswählen", "0 = neue Location erstellen\n\n" + "\n".join(lines), minvalue=0, maxvalue=len(lines), parent=self)
+                    if choice is None: return
+                    match = candidates[choice-1][2] if choice else None
+                if not match:
+                    if not all((activation.dxcc, activation.cq_zone, activation.itu_zone)):
+                        raise ValueError("Zum Erstellen benötigt Wavelog DXCC, CQ- und ITU-Zone. Bitte die Werte ergänzen.")
+                    name = simpledialog.askstring("Wavelog Location erstellen", "Name der neuen Station Location:", initialvalue=" · ".join([activation.callsign] + [refs[0] for refs in activation.references.values() if refs])[:80], parent=self)
+                    if not name: return
+                    if not messagebox.askyesno("Station Location erstellen", f"Neue Wavelog Station Location wirklich erstellen?\n\n{name}", parent=self): return
+                    match = service.create(activation, name)
+            station_id = int(match.get("id")); self.xota_repository.set_wavelog_station(activation.uuid, station_id, str(match.get("uuid") or ""))
+            self.refresh_xota_page(); self.status_var.set(f"xOTA ist Wavelog Station {station_id} zugeordnet"); self.sync_now()
+        except Exception as exc: messagebox.showerror("xOTA / Wavelog", str(exc), parent=self)
+
     # ---------- QSO list / sync ----------
     def _build_qsos_page(self):
         p = self._new_page("qsos")
@@ -2283,6 +2691,8 @@ class LoggerApp(tk.Tk):
         top = self._card(p, row=0, column=0, sticky="ew", pady=(0, 10))
         ttk.Button(top, text="Synchronisieren", style="Primary.TButton", command=self.sync_now).pack(side="left")
         ttk.Button(top, text="ADI-Ordner öffnen", style="Secondary.TButton", command=self.open_log_dir).pack(side="left", padx=8)
+        ttk.Button(top, text="ADIF importieren", style="Secondary.TButton", command=self.import_adif).pack(side="left")
+        ttk.Button(top, text="ADIF exportieren", style="Secondary.TButton", command=self.export_adif).pack(side="left", padx=8)
         self.sync_label = tk.Label(top, text="", bg=CARD, fg=MUTED, font=("Segoe UI", 9))
         self.sync_label.pack(side="right")
 
@@ -2391,6 +2801,45 @@ class LoggerApp(tk.Tk):
     def selected_id(self) -> str | None:
         s = self.tree.selection() if hasattr(self, "tree") else []
         return s[0] if s else None
+
+    def import_adif(self):
+        source = filedialog.askopenfilename(
+            title="ADIF importieren", filetypes=(("ADIF-Dateien", "*.adi *.adif"), ("Alle Dateien", "*.*")), parent=self,
+        )
+        if not source:
+            return
+        if not messagebox.askyesno(
+            "ADIF importieren",
+            "Die Datei wird geprüft und mit dem lokalen Profil-Logbuch zusammengeführt. "
+            "Dubletten werden übersprungen und vorher wird automatisch ein ZIP-Backup erzeugt.\n\nFortfahren?",
+            parent=self,
+        ):
+            return
+        try:
+            report = self.store.import_adif(Path(source))
+            self.db.reconcile_index(self.store.scan()); self.refresh_qsos(); self.refresh_stats()
+            invalid = f"\nUngültig: {len(report['invalid'])}" if report["invalid"] else ""
+            messagebox.showinfo(
+                "ADIF-Import abgeschlossen",
+                f"Importiert: {report['imported']}\nDubletten übersprungen: {report['skipped']}{invalid}\n\nBackup: {report['backup']}",
+                parent=self,
+            )
+        except Exception as exc:
+            messagebox.showerror("ADIF-Import fehlgeschlagen", str(exc), parent=self)
+
+    def export_adif(self):
+        initial = f"wavelog-offline-{self._current_profile().get('name','profil')}.adi"
+        target = filedialog.asksaveasfilename(
+            title="ADIF exportieren", defaultextension=".adi", initialfile=initial,
+            filetypes=(("ADIF-Datei", "*.adi"), ("Alle Dateien", "*.*")), parent=self,
+        )
+        if not target:
+            return
+        try:
+            report = self.store.export_adif(Path(target))
+            messagebox.showinfo("ADIF-Export abgeschlossen", f"{report['exported']} QSO(s) exportiert nach:\n{report['target']}", parent=self)
+        except Exception as exc:
+            messagebox.showerror("ADIF-Export fehlgeschlagen", str(exc), parent=self)
 
     def _sync_selection_changed(self, _event=None):
         if not hasattr(self, "sync_detail_label"):
@@ -4392,6 +4841,7 @@ class LoggerApp(tk.Tk):
                 return
             saved = self.store.add(qso)
             self.db.ensure_local(saved["local_id"], qso_hash(saved))
+            self._bind_active_xota_qso(saved)
             self._notify_qso_saved(saved)
             self.udp_log_received += 1
             self.udp_log_last_label.configure(
@@ -4610,6 +5060,23 @@ class LoggerApp(tk.Tk):
         logrow.columnconfigure(0, weight=1)
         ttk.Entry(logrow, textvariable=self.set_log_dir).grid(row=0, column=0, sticky="ew")
         ttk.Button(logrow, text="…", width=4, command=self.choose_log_dir).grid(row=0, column=1, padx=(6, 0))
+        ttk.Separator(data_left).grid(row=3, column=0, sticky="ew", pady=14)
+        ttk.Label(data_left, text="xOTA-Datenquellen", style="CardTitle.TLabel").grid(row=4, column=0, sticky="w")
+        ttk.Label(
+            data_left,
+            text="POTA, SOTA und WWFF verwenden die eingebauten Quellen. Für IOTA und COTA/WCA kann optional eine eigene CSV-URL hinterlegt werden; ohne Quelle bleibt die manuelle Eingabe verfügbar.",
+            style="Muted.Card.TLabel", wraplength=450,
+        ).grid(row=5, column=0, sticky="w", pady=(3, 8))
+        self.set_xota_iota_url = tk.StringVar()
+        self.set_xota_cota_url = tk.StringVar()
+        self.set_xota_geocode_url = tk.StringVar()
+        for row, label, variable in (
+            (6, "IOTA CSV-URL (optional)", self.set_xota_iota_url),
+            (8, "COTA/WCA CSV-URL (optional)", self.set_xota_cota_url),
+            (10, "Reverse-Geocoding-URL", self.set_xota_geocode_url),
+        ):
+            ttk.Label(data_left, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", pady=(5, 2))
+            ttk.Entry(data_left, textvariable=variable).grid(row=row+1, column=0, sticky="ew")
 
         spotter = self._card(data_tab, row=0, column=1, sticky="nsew", padx=(8, 0))
         spotter.columnconfigure(0, weight=2)
@@ -4682,6 +5149,9 @@ class LoggerApp(tk.Tk):
         self.set_eqsl_username.set(self.db.get_setting("eqsl_username", ""))
         self.set_eqsl_password.set(self.db.get_secret("eqsl_password"))
         self.set_log_dir.set(self.db.get_setting("log_dir", str(self.store.log_dir)))
+        self.set_xota_iota_url.set(self.db.get_setting("xota_iota_data_url", ""))
+        self.set_xota_cota_url.set(self.db.get_setting("xota_cota_wca_data_url", ""))
+        self.set_xota_geocode_url.set(self.db.get_setting("xota_reverse_geocode_url", "https://nominatim.openstreetmap.org/reverse"))
         self.time_mode_var.set(self.db.get_setting("time_mode", "UTC") or "UTC")
         self.form_vars["tx_pwr"].set(self.db.get_setting("default_power", ""))
         self._update_profile_summary()
@@ -4741,6 +5211,9 @@ class LoggerApp(tk.Tk):
             self.db.set_setting("eqsl_username", self.set_eqsl_username.get().strip())
             self.db.set_secret("eqsl_password", self.set_eqsl_password.get())
             self.db.set_setting("log_dir", self.set_log_dir.get().strip())
+            self.db.set_setting("xota_iota_data_url", self.set_xota_iota_url.get().strip())
+            self.db.set_setting("xota_cota_wca_data_url", self.set_xota_cota_url.get().strip())
+            self.db.set_setting("xota_reverse_geocode_url", self.set_xota_geocode_url.get().strip())
             new_ui_preferences = UiPreferences(
                 language="en" if self.set_ui_language.get() == "English" else "de",
                 theme="dark" if self.set_ui_theme.get() == "Dunkel / Dark" else "light",
@@ -4764,6 +5237,8 @@ class LoggerApp(tk.Tk):
                 self.db.set_setting("station_logbook_name", logbook_name)
             # Keep an existing numeric profile id if the list wasn't loaded in this session.
             self.store.set_dir(Path(self.set_log_dir.get().strip() or self._profile_default_log_dir()))
+            self.xota_references = ActivationReferenceService(self.xota_repository, self.db.get_setting)
+            self.xota_geocoder = ReverseGeocodeService(self.xota_repository, self.db.get_setting("xota_reverse_geocode_url", ""))
             self.form_vars["tx_pwr"].set(self.db.get_setting("default_power", ""))
             self._update_profile_summary()
             self._update_logfile_preview()

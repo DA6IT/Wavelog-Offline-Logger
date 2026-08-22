@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import zipfile
 from ctypes import wintypes
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.16.2"
+VERSION = "0.17.0"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -748,9 +749,16 @@ def qso_to_adif_fields(qso: dict[str, Any]) -> dict[str, Any]:
         "PROP_MODE": (qso.get("prop_mode") or "").upper(),
         "MY_GRIDSQUARE": (qso.get("my_gridsquare") or "").upper(),
         "MY_CITY": qso.get("my_qth"),
+        "MY_STATE": qso.get("my_state"),
+        "MY_DXCC": qso.get("my_dxcc"),
+        "MY_CQ_ZONE": qso.get("my_cq_zone"),
+        "MY_ITU_ZONE": qso.get("my_itu_zone"),
         "MY_POTA_REF": qso.get("my_pota_ref"),
         "MY_SOTA_REF": qso.get("my_sota_ref"),
         "MY_WWFF_REF": qso.get("my_wwff_ref"),
+        "MY_IOTA": qso.get("my_iota"),
+        "MY_SIG": qso.get("my_sig"),
+        "MY_SIG_INFO": qso.get("my_sig_info"),
     }
     return f
 
@@ -804,9 +812,16 @@ def adif_fields_to_qso(f: dict[str, str]) -> dict[str, Any]:
         "prop_mode": f.get("PROP_MODE", "").upper(),
         "my_gridsquare": f.get("MY_GRIDSQUARE", "").upper(),
         "my_qth": f.get("MY_CITY", ""),
+        "my_state": f.get("MY_STATE", ""),
+        "my_dxcc": f.get("MY_DXCC", ""),
+        "my_cq_zone": f.get("MY_CQ_ZONE", ""),
+        "my_itu_zone": f.get("MY_ITU_ZONE", ""),
         "my_pota_ref": f.get("MY_POTA_REF", ""),
         "my_sota_ref": f.get("MY_SOTA_REF", ""),
         "my_wwff_ref": f.get("MY_WWFF_REF", ""),
+        "my_iota": f.get("MY_IOTA", ""),
+        "my_sig": f.get("MY_SIG", ""),
+        "my_sig_info": f.get("MY_SIG_INFO", ""),
     }
 
 
@@ -816,40 +831,70 @@ def qso_to_adif_record(qso: dict[str, Any]) -> str:
         APP_ID_FIELD, "CALL", "QSO_DATE", "TIME_ON", "QSO_DATE_OFF", "TIME_OFF", "BAND", "FREQ", "MODE", "SUBMODE",
         "RST_SENT", "RST_RCVD", "GRIDSQUARE", "COUNTRY", "CONT", "CQZ", "ITUZ", "NAME", "QTH", "POTA_REF", "SOTA_REF", "WWFF_REF",
         "TX_PWR", "COMMENT", "NOTES", "OPERATOR", "STATION_CALLSIGN", "CONTEST_ID", "STX", "SRX", "STX_STRING", "SRX_STRING", "PROP_MODE", "MY_GRIDSQUARE", "MY_CITY",
-        "MY_POTA_REF", "MY_SOTA_REF", "MY_WWFF_REF",
+        "MY_STATE", "MY_DXCC", "MY_CQ_ZONE", "MY_ITU_ZONE",
+        "MY_POTA_REF", "MY_SOTA_REF", "MY_WWFF_REF", "MY_IOTA", "MY_SIG", "MY_SIG_INFO",
     ]
     return "".join(adif_field(k, fields.get(k)) for k in order) + "<EOR>\n"
 
 
 class LogStore:
-    def __init__(self, log_dir: Path):
+    def __init__(self, log_dir: Path, profile_key: str = ""):
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.profile_key = re.sub(r"[^A-Za-z0-9_-]", "", str(profile_key or ""))[:12]
         self.lock = threading.RLock()
+        self.migration_report: dict[str, Any] | None = None
+        self._consolidate_existing_files()
 
-    def set_dir(self, path: Path):
+    @property
+    def canonical_path(self) -> Path:
+        suffix = f"-{self.profile_key[:6]}" if self.profile_key else ""
+        return self.log_dir / f"wavelog-offline-logbook{suffix}.adi"
+
+    def set_dir(self, path: Path, profile_key: str | None = None):
         with self.lock:
             self.log_dir = Path(path)
             self.log_dir.mkdir(parents=True, exist_ok=True)
+            if profile_key is not None:
+                self.profile_key = re.sub(r"[^A-Za-z0-9_-]", "", str(profile_key or ""))[:12]
+            self._consolidate_existing_files()
 
     def file_for(self, qso: dict[str, Any]) -> Path:
-        call = sanitize_call_for_filename(qso.get("station_call") or qso.get("operator_call") or "NOCALL")
-        date = str(qso.get("qso_date") or datetime.now(timezone.utc).date().isoformat())
-        return self.log_dir / f"{call}.{date}.adi"
+        # A profile owns one continuously maintained ADIF file.  The filename
+        # is intentionally independent from date and callsign changes.
+        return self.canonical_path
+
+    @staticmethod
+    def _decode_adif(path: Path) -> str:
+        raw = path.read_bytes()
+        try:
+            return raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return raw.decode("iso-8859-1")
+
+    def _read_file_strict(self, path: Path) -> list[dict[str, Any]]:
+        if not path.exists() or path.stat().st_size == 0:
+            return []
+        text = self._decode_adif(path)
+        fields = parse_adif(text)
+        if "<EOR" in text.upper() and not fields:
+            raise ValueError(f"ADIF-Datei kann nicht gelesen werden: {path.name}")
+        if "<EOR" not in text.upper() and text.strip():
+            raise ValueError(f"ADIF-Datei enthält keinen vollständigen QSO-Datensatz: {path.name}")
+        records = []
+        for values in fields:
+            qso = adif_fields_to_qso(values)
+            qso["_file"] = str(path)
+            records.append(qso)
+        return records
 
     def _read_file(self, path: Path) -> list[dict[str, Any]]:
         if not path.exists():
             return []
         try:
-            text = path.read_text(encoding="utf-8-sig", errors="replace")
+            return self._read_file_strict(path)
         except Exception:
             return []
-        records = []
-        for fields in parse_adif(text):
-            q = adif_fields_to_qso(fields)
-            q["_file"] = str(path)
-            records.append(q)
-        return records
 
     def _write_file(self, path: Path, records: Iterable[dict[str, Any]]):
         recs = list(records)
@@ -862,11 +907,75 @@ class LogStore:
         tmp.write_text(data, encoding="utf-8", newline="\n")
         os.replace(tmp, path)
 
+    @staticmethod
+    def _record_signature(qso: dict[str, Any]) -> str:
+        return hashlib.sha256(qso_to_adif_record(qso).encode("utf-8")).hexdigest()
+
+    def _backup_files(self, paths: Iterable[Path], label: str) -> Path | None:
+        existing = [Path(path) for path in paths if Path(path).exists()]
+        if not existing:
+            return None
+        backup_dir = self.log_dir / ".migration-backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        target = backup_dir / f"{label}-{stamp}.zip"
+        with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in existing:
+                archive.write(path, arcname=path.name)
+        return target
+
+    def _consolidate_existing_files(self) -> None:
+        """Safely migrate daily ADIF files into the profile's single file.
+
+        Source files are zipped first and moved into a recovery directory only
+        after the new file was written and parsed back byte-semantically.
+        """
+        with self.lock:
+            sources = sorted(path for path in self.log_dir.glob("*.adi") if path.is_file())
+            target = self.canonical_path
+            if not sources or (sources == [target]):
+                return
+            all_records: list[dict[str, Any]] = []
+            seen_ids: dict[str, str] = {}
+            reassigned = 0
+            for path in sources:
+                for qso in self._read_file_strict(path):
+                    local_id = str(qso.get("local_id") or "")
+                    signature = self._record_signature(qso)
+                    if local_id in seen_ids:
+                        if seen_ids[local_id] == signature:
+                            continue
+                        # Preserve both contacts. Only the second identity is
+                        # changed; the original sync mapping remains untouched.
+                        qso["local_id"] = str(uuid.uuid4())
+                        local_id = qso["local_id"]
+                        signature = self._record_signature(qso)
+                        reassigned += 1
+                    seen_ids[local_id] = signature
+                    all_records.append(qso)
+            backup = self._backup_files(sources, "adif-consolidation")
+            self._write_file(target, all_records)
+            verified = self._read_file_strict(target)
+            expected = sorted(self._record_signature(row) for row in all_records)
+            actual = sorted(self._record_signature(row) for row in verified)
+            if expected != actual:
+                raise RuntimeError("Die zusammengeführte ADIF-Datei konnte nicht vollständig verifiziert werden")
+            recovery_dir = self.log_dir / ".migration-backups" / f"sources-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}"
+            moved = 0
+            for path in sources:
+                if path == target:
+                    continue
+                recovery_dir.mkdir(parents=True, exist_ok=True)
+                os.replace(path, recovery_dir / path.name)
+                moved += 1
+            self.migration_report = {
+                "records": len(all_records), "sources": len(sources), "archived": moved,
+                "reassigned_ids": reassigned, "backup": str(backup or ""), "target": str(target),
+            }
+
     def scan(self) -> list[dict[str, Any]]:
         with self.lock:
-            out: list[dict[str, Any]] = []
-            for p in sorted(self.log_dir.glob("*.adi")):
-                out.extend(self._read_file(p))
+            out = self._read_file(self.canonical_path)
             out.sort(key=lambda q: (q.get("qso_date", ""), q.get("time_on", "")), reverse=True)
             return out
 
@@ -915,6 +1024,69 @@ class LogStore:
             records = [q for q in self._read_file(path) if q.get("local_id") != local_id]
             self._write_file(path, records)
             return True
+
+    @staticmethod
+    def _natural_key(qso: dict[str, Any]) -> tuple[str, ...]:
+        return tuple(str(qso.get(key) or "").strip().upper() for key in (
+            "call", "qso_date", "time_on", "band", "mode", "freq", "station_call",
+        ))
+
+    def import_adif(self, source: Path) -> dict[str, Any]:
+        source = Path(source)
+        with self.lock:
+            incoming = self._read_file_strict(source)
+            existing = self.scan()
+            existing_ids = {str(row.get("local_id") or "") for row in existing}
+            existing_keys = {self._natural_key(row) for row in existing}
+            imported, skipped, invalid = [], 0, []
+            for index, row in enumerate(incoming, start=1):
+                if not row.get("call") or not row.get("qso_date") or not row.get("time_on"):
+                    invalid.append(f"Datensatz {index}: CALL/QSO_DATE/TIME_ON fehlt")
+                    continue
+                if not row.get("band") and row.get("freq"):
+                    row["band"] = band_from_mhz(str(row.get("freq") or ""))
+                if not row.get("band") or not row.get("mode"):
+                    invalid.append(f"Datensatz {index}: BAND oder MODE fehlt")
+                    continue
+                natural_key = self._natural_key(row)
+                if natural_key in existing_keys:
+                    skipped += 1
+                    continue
+                local_id = str(row.get("local_id") or "")
+                if not local_id or local_id in existing_ids:
+                    row["local_id"] = str(uuid.uuid4())
+                existing_ids.add(row["local_id"])
+                existing_keys.add(natural_key)
+                imported.append(row)
+            backup = self._backup_files([self.canonical_path], "before-adif-import")
+            combined = existing + imported
+            self._write_file(self.canonical_path, combined)
+            verified = self._read_file_strict(self.canonical_path)
+            if sorted(self._record_signature(row) for row in combined) != sorted(self._record_signature(row) for row in verified):
+                raise RuntimeError("Der ADIF-Import konnte nach dem Schreiben nicht verifiziert werden")
+            return {
+                "parsed": len(incoming), "imported": len(imported), "skipped": skipped,
+                "invalid": invalid, "backup": str(backup or ""), "target": str(self.canonical_path),
+            }
+
+    def export_adif(self, target: Path, local_ids: Iterable[str] | None = None) -> dict[str, Any]:
+        target = Path(target)
+        with self.lock:
+            records = self.scan()
+            if local_ids is not None:
+                wanted = {str(value) for value in local_ids}
+                records = [row for row in records if str(row.get("local_id")) in wanted]
+            if not records:
+                raise ValueError("Keine QSOs für den Export vorhanden")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_suffix(target.suffix + ".tmp")
+            tmp.write_text(adif_header() + "".join(qso_to_adif_record(row) for row in records), encoding="utf-8", newline="\n")
+            parsed = self._read_file_strict(tmp)
+            if len(parsed) != len(records):
+                tmp.unlink(missing_ok=True)
+                raise RuntimeError("Der ADIF-Export konnte nicht verifiziert werden")
+            os.replace(tmp, target)
+            return {"exported": len(records), "target": str(target)}
 
 
 # ---------- settings + sync metadata database ----------
@@ -1163,6 +1335,50 @@ class MetadataDB:
                 "SELECT * FROM sync_meta WHERE wavelog_id IS NULL AND status IN ('local_only','pending') ORDER BY created_at"
             )]
 
+    def xota_station_id_for_qso(self, local_id: str) -> int | None:
+        with self.lock:
+            exists = self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='xota_activation_qsos'"
+            ).fetchone()
+            if not exists:
+                return None
+            row = self.conn.execute(
+                "SELECT station_id FROM xota_activation_qsos WHERE local_id=?", (local_id,),
+            ).fetchone()
+        return int(row[0]) if row and row[0] not in (None, "") else None
+
+    def xota_station_ids(self) -> list[int]:
+        with self.lock:
+            exists = self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='xota_activation_qsos'"
+            ).fetchone()
+            if not exists:
+                return []
+            rows = self.conn.execute(
+                "SELECT DISTINCT station_id FROM xota_activation_qsos WHERE station_id IS NOT NULL"
+            ).fetchall()
+        return sorted({int(row[0]) for row in rows})
+
+    def bind_xota_remote_qso(self, station_id: int, local_id: str) -> None:
+        with self.lock:
+            exists = self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='xota_activations'"
+            ).fetchone()
+            if not exists:
+                return
+            row = self.conn.execute(
+                "SELECT activation_uuid FROM xota_activations WHERE wavelog_station_id=? ORDER BY created_at DESC LIMIT 1",
+                (int(station_id),),
+            ).fetchone()
+            if not row:
+                return
+            self.conn.execute(
+                "INSERT INTO xota_activation_qsos(activation_uuid,local_id,station_id,created_at) VALUES(?,?,?,?) "
+                "ON CONFLICT(local_id) DO UPDATE SET activation_uuid=excluded.activation_uuid,station_id=excluded.station_id",
+                (str(row[0]), local_id, int(station_id), utc_now_iso()),
+            )
+            self.conn.commit()
+
 
 # ---------- Wavelog API ----------
 class WavelogError(RuntimeError):
@@ -1263,6 +1479,15 @@ class WavelogClient:
         data = r.get("data") or []
         return data if isinstance(data, list) else []
 
+    def get_station(self, station_id: int) -> dict[str, Any]:
+        r = self._request("GET", "station", ident=int(station_id)) or {}
+        return r.get("data") or {}
+
+    def create_station(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create a location through Wavelog API v2 (Wavelog >= 3.1.0)."""
+        r = self._request("POST", "station", payload=payload) or {}
+        return r.get("data") or {}
+
     def lookup_callsign(self, callsign: str, *, band: str = "", mode: str = "", include_callbook: bool = True) -> dict[str, Any]:
         params = {
             "callsign": (callsign or "").strip().upper(),
@@ -1273,11 +1498,14 @@ class WavelogClient:
         }
         return self._request("GET", "lookup", params=params) or {}
 
-    def list_qsos(self, *, since_id: int = 0, qso_since: str | None = None, qso_until: str | None = None) -> list[dict[str, Any]]:
+    def list_qsos(self, *, since_id: int = 0, qso_since: str | None = None, qso_until: str | None = None,
+                  station_ids: Iterable[int] | None = None) -> list[dict[str, Any]]:
         page = 1
         out: list[dict[str, Any]] = []
         while True:
-            params = {"since_id": since_id, "qso_since": qso_since, "qso_until": qso_until, "page": page, "per_page": 5000}
+            station_filter = ",".join(str(int(value)) for value in (station_ids or []))
+            params = {"since_id": since_id, "qso_since": qso_since, "qso_until": qso_until,
+                      "station_id": station_filter, "page": page, "per_page": 5000}
             r = self._request("GET", "qso", params=params) or {}
             data = r.get("data") or []
             if isinstance(data, list):
@@ -1288,11 +1516,14 @@ class WavelogClient:
             page += 1
         return out
 
-    def export_qsos_adif(self, *, qso_since: str | None = None, qso_until: str | None = None) -> list[dict[str, str]]:
+    def export_qsos_adif(self, *, qso_since: str | None = None, qso_until: str | None = None,
+                         station_ids: Iterable[int] | None = None) -> list[dict[str, str]]:
         page = 1
         out: list[dict[str, str]] = []
         while True:
-            params = {"format":"adif", "qso_since":qso_since, "qso_until":qso_until, "page":page, "per_page":5000}
+            station_filter = ",".join(str(int(value)) for value in (station_ids or []))
+            params = {"format":"adif", "qso_since":qso_since, "qso_until":qso_until,
+                      "station_id": station_filter, "page":page, "per_page":5000}
             r = self._request("GET", "qso", params=params) or {}
             data = r.get("data") or {}
             adif = data.get("adif") if isinstance(data, dict) else None
@@ -1576,8 +1807,9 @@ class SyncEngine:
                 self.db.delete_meta(local_id)
                 continue
             try:
+                target_station_id = self.db.xota_station_id_for_qso(local_id) or station_profile_id
                 remote = self.client.create_qso(
-                    local_to_wavelog(qso, station_profile_id, include_operator=True)
+                    local_to_wavelog(qso, target_station_id, include_operator=True)
                 )
                 wavelog_id = int(remote.get("id"))
                 self.db.set_status(
@@ -1631,7 +1863,7 @@ class SyncEngine:
             return self.store.update(local_id, rq)
         return self.store.add(rq)
 
-    def _enrich_remote_identity_from_adif(self, remote_rows: list[dict[str, Any]]) -> None:
+    def _enrich_remote_identity_from_adif(self, remote_rows: list[dict[str, Any]], station_ids: Iterable[int] | None = None) -> None:
         """Fill OPERATOR/STATION_CALLSIGN when the compact JSON QSO object omits them.
 
         Wavelog's ADIF export carries the standard identity fields. Matching is
@@ -1649,7 +1881,7 @@ class SyncEngine:
                 dates.append(dt)
         qso_since = min(dates) if dates else None
         try:
-            adif_rows = self.client.export_qsos_adif(qso_since=qso_since)
+            adif_rows = self.client.export_qsos_adif(qso_since=qso_since, station_ids=station_ids)
         except Exception:
             return
         by_key: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
@@ -1674,7 +1906,7 @@ class SyncEngine:
                 if value and not r.get(json_name):
                     r[json_name] = value
 
-    def _refresh_qsl_statuses(self, station_profile_id: int) -> tuple[int, int]:
+    def _refresh_qsl_statuses(self, station_profile_id: int, station_ids: Iterable[int] | None = None) -> tuple[int, int]:
         """Refresh cached service status for linked Wavelog QSOs.
 
         Sent/upload state is read from Wavelog's ADIF export where present.
@@ -1697,8 +1929,9 @@ class SyncEngine:
         qso_since = min(dates) if dates else None
 
         try:
-            all_remote_rows = self.client.list_qsos(since_id=0, qso_since=qso_since)
-            remote_rows, _excluded = remote_qsos_for_station(all_remote_rows, station_profile_id)
+            allowed = {int(value) for value in (station_ids or [station_profile_id])}
+            all_remote_rows = self.client.list_qsos(since_id=0, qso_since=qso_since, station_ids=allowed)
+            remote_rows = [row for row in all_remote_rows if remote_station_profile_id(row) in allowed]
         except Exception:
             return 0, 1
         remote_linked = [r for r in remote_rows if str(r.get("id") or "").isdigit() and int(r["id"]) in linked]
@@ -1712,7 +1945,7 @@ class SyncEngine:
         # own OPERATOR QSOs; cached status for other operators must not be wiped.
         statuses: dict[int, dict[str,str]] = {wid:{"qrz":"unknown","lotw":"unknown","eqsl":"unknown","dcl":"unknown"} for wid in linked if wid in visible_ids}
         try:
-            adif_rows = self.client.export_qsos_adif(qso_since=qso_since)
+            adif_rows = self.client.export_qsos_adif(qso_since=qso_since, station_ids=allowed)
             for f in adif_rows:
                 ids = by_key.get(_adif_status_key(f)) or []
                 if not ids:
@@ -1748,6 +1981,7 @@ class SyncEngine:
         summary = SyncSummary()
         station_map = station_map or {}
         locals_map = self._local_map()
+        allowed_station_ids = {int(station_profile_id), *self.db.xota_station_ids()}
 
         # Clubstation safety: a normal member token intentionally sees only the
         # QSOs of its acting OPERATOR. In that case an absent QSO must NOT be
@@ -1769,14 +2003,13 @@ class SyncEngine:
         # Fetch the complete current Wavelog view first. This is what lets us
         # detect remote edits and deletions, not just newly created IDs.
         try:
-            all_remote_rows = self.client.list_qsos(since_id=0)
+            all_remote_rows = self.client.list_qsos(since_id=0, station_ids=allowed_station_ids)
         except Exception:
             summary.errors += 1
             return summary
 
-        remote_rows, excluded_remote_rows = remote_qsos_for_station(
-            all_remote_rows, station_profile_id,
-        )
+        remote_rows = [row for row in all_remote_rows if remote_station_profile_id(row) in allowed_station_ids]
+        excluded_remote_rows = [row for row in all_remote_rows if remote_station_profile_id(row) not in allowed_station_ids]
         if all_remote_rows and not any(
             remote_station_profile_id(row) is not None for row in all_remote_rows
         ):
@@ -1788,7 +2021,7 @@ class SyncEngine:
 
         # The compact JSON QSO representation may not expose all ADIF identity
         # fields. Supplement OPERATOR/STATION_CALLSIGN from the ADIF view.
-        self._enrich_remote_identity_from_adif(remote_rows)
+        self._enrich_remote_identity_from_adif(remote_rows, allowed_station_ids)
 
         remote_by_id: dict[int, dict[str, Any]] = {}
         for r in remote_rows:
@@ -1918,7 +2151,8 @@ class SyncEngine:
                     self.db.set_status(lid, "conflict", wavelog_id=wid, error="both_changed")
                     summary.conflicts += 1
                 elif local_changed:
-                    patched = self.client.patch_qso(wid, local_to_wavelog(q, station_profile_id))
+                    target_station_id = self.db.xota_station_id_for_qso(lid) or station_profile_id
+                    patched = self.client.patch_qso(wid, local_to_wavelog(q, target_station_id))
                     rh = remote_hash(patched) if patched else local_now_hash
                     self.db.set_status(lid, "synced", wavelog_id=wid,
                                        last_synced_hash=local_now_hash, remote_hash=rh)
@@ -1954,6 +2188,9 @@ class SyncEngine:
                 updated = self._replace_local_from_remote(match["local_id"], r, station_map)
                 self.db.set_status(match["local_id"], "synced", wavelog_id=wid,
                                    last_synced_hash=qso_hash(updated), remote_hash=remote_hash(r))
+                actual_station_id = remote_station_profile_id(r)
+                if actual_station_id in set(self.db.xota_station_ids()):
+                    self.db.bind_xota_remote_qso(actual_station_id, match["local_id"])
                 locals_now = [updated if q.get("local_id") == match["local_id"] else q for q in locals_now]
                 summary.linked += 1
             else:
@@ -1961,6 +2198,9 @@ class SyncEngine:
                 q = self.store.add(q)
                 self.db.set_status(q["local_id"], "synced", wavelog_id=wid,
                                    last_synced_hash=qso_hash(q), remote_hash=remote_hash(r))
+                actual_station_id = remote_station_profile_id(r)
+                if actual_station_id in set(self.db.xota_station_ids()):
+                    self.db.bind_xota_remote_qso(actual_station_id, q["local_id"])
                 locals_now.append(q)
                 summary.pulled += 1
 
@@ -1979,7 +2219,8 @@ class SyncEngine:
                 self.db.delete_meta(lid)
                 continue
             try:
-                remote = self.client.create_qso(local_to_wavelog(q, station_profile_id, include_operator=True))
+                target_station_id = self.db.xota_station_id_for_qso(lid) or station_profile_id
+                remote = self.client.create_qso(local_to_wavelog(q, target_station_id, include_operator=True))
                 wid = int(remote.get("id"))
                 self.db.set_status(lid, "synced", wavelog_id=wid,
                                    last_synced_hash=qso_hash(q), remote_hash=remote_hash(remote))
@@ -1989,7 +2230,7 @@ class SyncEngine:
                 summary.errors += 1
 
         try:
-            summary.qsl_updated, summary.qsl_errors = self._refresh_qsl_statuses(station_profile_id)
+            summary.qsl_updated, summary.qsl_errors = self._refresh_qsl_statuses(station_profile_id, allowed_station_ids)
         except Exception:
             summary.qsl_errors += 1
         return summary

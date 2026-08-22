@@ -75,6 +75,14 @@ Danach ein Issue mit anonymisierten Beispieldaten eröffnen.
 
 Prüfe, ob der Ordner noch existiert und das Benutzerkonto Schreibrechte besitzt. Netzlaufwerke oder synchronisierte Cloudordner können vorübergehend nicht erreichbar oder gesperrt sein.
 
+## Die ADI-Zusammenführung schlägt fehl
+
+Die App lässt die vorhandenen Tagesdateien unangetastet, wenn Sicherung, Schreiben oder anschließende Verifikation nicht vollständig erfolgreich ist. Beende die App, kopiere den gesamten ADI-Ordner und prüfe freien Speicherplatz, Schreibrechte sowie eine mögliche Sperre durch Cloud-Synchronisation oder Virenscanner. Lösche weder das ZIP-Backup noch `.migration-backups`. Mit diesen Dateien kann der ursprüngliche Zustand nachvollzogen und wiederhergestellt werden.
+
+## xOTA findet keinen oder den falschen Park
+
+Prüfe zuerst Breiten- und Längengrad sowie die angezeigte GPS-Genauigkeit. Aktualisiere bei bestehender Internetverbindung die Referenzdaten und suche erneut. Ein POTA-Katalogpunkt ist nur ein Marker und kann bei großen Parks weit vom tatsächlichen Standort entfernt liegen. Kandidaten bis 25 km werden deshalb angezeigt, müssen aber mit **POTA-Grenze prüfen** und der offiziellen Parkinformation bewusst bestätigt werden. Eine fehlende Standortfreigabe verhindert nicht die manuelle Koordinateneingabe.
+
 ## Diagnoseinformationen für ein Issue
 
 - Programmversion
