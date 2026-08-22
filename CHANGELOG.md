@@ -4,6 +4,27 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-08-22
+
+### Added
+
+- Bidirektionaler Wavelog-Abgleich von Contest-Sessions, Einstellungen und QSO-Zuordnungen
+- Automatische Übernahme der von Wavelog vergebenen Contest-Session-ID und der nächsten freien Seriennummer
+- Automatischer Layout-Check aller Hauptseiten, Einstellungs-Tabs und unterstützten Fenstergrößen vor einem Release
+
+### Changed
+
+- Contest-Presets verwenden den Wavelog-Contest-Katalog; neue Contest-QSOs werden nach dem Online-Push der passenden Session zugeordnet
+- Falls Wavelog die Contest-Session-API noch nicht anbietet, werden vorhandene Contest-QSOs anhand von `CONTEST_ID` und Jahr als lokale Presets rekonstruiert
+- Modale Formulare verwenden kompakte, größenveränderbare Layouts statt starrer Fensterabmessungen
+- Schrift, Karten, Widget-Abstände und Aktionsleisten reagieren nun gemeinsam auf die Fenstergröße; nicht notwendige Erklärungstexte weichen in der Kompaktansicht den Eingabefeldern
+
+### Fixed
+
+- Einstellungen und Aktionsschaltflächen werden bei kleineren Fenstern nicht mehr unterhalb oder seitlich außerhalb des sichtbaren Bereichs abgeschnitten
+- Eine fehlende Wavelog-Catalog-API beendet den Contest-Abgleich nicht mehr vor der eigentlichen Funktionsprüfung
+- Numerische Wavelog-IDs können nicht mehr versehentlich als ADIF Contest-ID gespeichert oder weitergeloggt werden
+
 ## [0.17.0] - 2026-08-22
 
 ### Added

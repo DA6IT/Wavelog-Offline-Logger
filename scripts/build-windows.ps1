@@ -15,8 +15,32 @@ $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 
 Push-Location $projectRoot
 try {
-    $python = (Get-Command python -ErrorAction Stop).Source
-    $go = (Get-Command go -ErrorAction Stop).Source
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    $python = if ($pythonCommand -and $pythonCommand.Source -notlike '*WindowsApps*') {
+        $pythonCommand.Source
+    } else {
+        @(
+            (Join-Path $env:LOCALAPPDATA 'AFU-Tools\WavelogOfflineLogger\runtime\python312\python.exe'),
+            (Join-Path $projectRoot 'build\embedded\python312\python.exe')
+        ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    }
+    if (-not $python) {
+        throw 'Python 3.12 wurde weder im PATH noch in der privaten Logger-Laufzeit gefunden.'
+    }
+
+    $goCommand = Get-Command go -ErrorAction SilentlyContinue
+    $go = if ($goCommand) {
+        $goCommand.Source
+    } else {
+        @(
+            (Join-Path $projectRoot '..\go1.23.2-complete\go\bin\go.exe'),
+            (Join-Path $projectRoot '..\go1.23.2-windows-amd64\go\bin\go.exe'),
+            (Join-Path $projectRoot '..\go1.23.2-runtime\go\bin\go.exe')
+        ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    }
+    if (-not $go) {
+        throw 'Go 1.23.2 wurde weder im PATH noch neben dem Projekt gefunden.'
+    }
 
     $pythonVersion = (& $python -c "import sys; print('.'.join(map(str, sys.version_info[:3])))").Trim()
     if ($LASTEXITCODE -ne 0 -or -not $pythonVersion.StartsWith('3.12.')) {

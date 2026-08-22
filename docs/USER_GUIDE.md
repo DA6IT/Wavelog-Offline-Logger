@@ -1,6 +1,6 @@
 # Benutzerhandbuch
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.17.0. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.17.1. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -63,6 +63,8 @@ Die linke Navigation öffnet:
 - **Einstellungen** – App, Station, Online-Dienste und Speicherorte
 
 Das DA6IT.de-Logo oben links ist anklickbar und öffnet `https://da6it.de/`. Der Status unten und links zeigt `LOCAL ONLY` oder `WAVELOG ONLINE`.
+
+Die Oberfläche passt Schrift, Karten, Tabellenzeilen, Abstände und Aktionsleisten gemeinsam an die Fenstergröße an. Bei geringer Höhe werden in den Einstellungen ausschließlich zusätzliche Erklärungstexte ausgeblendet; Eingabefelder und Schaltflächen bleiben erreichbar. Unterstützt werden Fenster ab 900 × 580 Pixel. Der Release-Prozess kontrolliert alle Hauptseiten und Einstellungs-Tabs automatisch in mehreren Größen.
 
 ## 4. Profile und Einstellungen
 
@@ -171,12 +173,17 @@ Auch im Online-Modus wird jedes Fast-Log-QSO zuerst lokal gespeichert. Nur der n
 
 Ein Contest-Preset enthält unter anderem:
 
-- Name und ADIF Contest-ID
+- Name und ADIF Contest-ID aus dem lokal gespeicherten Wavelog-Katalog
+- Start und Ende der Contest-Session in UTC
 - Start-Seriennummer
 - gesendeten Text-Exchange
 - Standardfrequenz und Standard-RST
 
-Nach dem Start einer Sitzung werden Seriennummern und Exchanges in die entsprechenden ADIF-Felder geschrieben. QSOs bleiben Teil des normalen lokalen ADI-Logbuchs und werden über denselben Wavelog-Sync verarbeitet.
+Mit **Mit Wavelog abgleichen** lädt der Logger die für das gewählte Stationsprofil vorhandenen Contest-Sessions und legt ein nur lokal erstelltes Preset bei Wavelog an, sofern die Wavelog-Instanz bereits `/api/v2/contest` anbietet. Die numerische Session-ID vergibt Wavelog; sie darf nicht als ADIF-Name eingetragen werden. Das lokale Profil kann gewechselt werden, ohne in der Wavelog-Weboberfläche ein aktives Logbuch oder Stationsprofil umzustellen.
+
+Nach dem Start einer Sitzung werden Seriennummern und Exchanges in die entsprechenden ADIF-Felder geschrieben. Bereits zur exakten Session gehörende QSOs bestimmen automatisch die nächste freie gesendete Seriennummer. QSOs bleiben Teil des normalen lokalen ADI-Logbuchs: Ein Online-Push überträgt zunächst das QSO und ordnet es danach der passenden Wavelog-Contest-Session zu. Der vollständige Sync lädt Session, Einstellungen und QSO-Zuordnungen wieder zurück.
+
+Für diesen Abgleich benötigt der API-v2-Token `contest:read` und `contest:write` zusätzlich zu den QSO- und Stationsrechten. Bei einer Clubstation darf jedes Mitglied eigene QSOs einer Session zuordnen; das Anlegen oder Ändern der Session verlangt in Wavelog Club-Officer-Rechte. Unterstützt die verwendete Wavelog-Version die Contest-API noch nicht, bleiben Logging und normaler QSO-Sync vollständig nutzbar: `CONTEST_ID`, STX/SRX und Exchanges werden weiterhin übertragen. Bereits synchronisierte QSOs werden anhand von ADIF-Contest-Name und Jahr als lokale Contest-Auswahl rekonstruiert. Nur der Eintrag im Wavelog-Bereich **Contest Management** kann dann noch nicht automatisch erzeugt oder verknüpft werden.
 
 ## 8. xOTA-Aktivierungen
 

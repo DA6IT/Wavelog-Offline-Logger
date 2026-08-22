@@ -8,7 +8,7 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 
 ## Highlights
 
-- normales QSO-Logging, Fast Log/DXpedition und Contest-Logging
+- normales QSO-Logging, Fast Log/DXpedition und Contest-Logging mit Wavelog-Session-Abgleich
 - eine fortlaufende ADI-Datei je Profil als primäres lokales Logbuch
 - geprüfter ADIF-Import und -Export mit Backup und Dublettenschutz
 - integrierter xOTA-Modus für kombinierte POTA-, SOTA-, WWFF-, IOTA- und COTA/WCA-Aktivierungen
@@ -16,13 +16,14 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - profilspezifischer Wavelog-API-v2-Sync mit sichtbaren Konflikten und Fehlerursachen
 - optionaler Online-Modus: nur neue QSOs sofort pushen
 - optionaler Voll-Sync beim App-Start und/oder Beenden
+- bidirektionaler Abgleich von Wavelog-Contest-Sessions und deren QSO-Zuordnungen; Session-IDs werden automatisch übernommen
 - Callbook-Daten über Wavelog oder direkt über QRZ.com, einschließlich Stationsfoto
 - optionale Desktop-Benachrichtigung nach einem lokal gespeicherten QSO
 - CAT über mitgeliefertes Hamlib, inklusive TUNE/ATU
 - Telnet-DX-Cluster, Filter, Worked-Markierung und Spotversand
 - WSJT-X- und ADIF-Empfang über UDP
 - deutsche und englische Oberfläche, Light- und Dark-Theme
-- responsive Oberfläche ohne Scrollleisten mit automatischer Größenanpassung
+- responsive Oberfläche ohne Scrollleisten; Felder, Aktionen und Abstände passen sich gemeinsam an und werden vor jedem Release in mehreren Fenstergrößen geprüft
 - Builds für Windows x64, macOS Apple Silicon/Intel und Linux x64/ARM64
 
 ## xOTA und ADIF

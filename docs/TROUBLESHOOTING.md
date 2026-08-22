@@ -50,6 +50,12 @@ Tokens niemals in einem öffentlichen Issue posten.
 
 Bei `CERTIFICATE_VERIFY_FAILED` verwendet ein aktueller Build zuerst den nativen Zertifikatsspeicher des Betriebssystems und zusätzlich ein gebündeltes CA-Paket als Fallback. Prüfe trotzdem Systemdatum, ausstehende Betriebssystem-Zertifikatsupdates sowie TLS-inspektierende Firmen-Proxys oder Virenscanner. Die Zertifikatsprüfung wird aus Sicherheitsgründen nicht abschaltbar gemacht.
 
+## Contest-Sessions erscheinen nicht oder werden nicht verknüpft
+
+Führe im Contest-Bereich **Mit Wavelog abgleichen** aus und prüfe den dort angezeigten Contest-API-Status. Der API-v2-Token benötigt `contest:read` zum Laden sowie `contest:write` zum Anlegen, Ändern und Verknüpfen. Der gewählte Contest muss in Wavelogs Contest-Katalog aktiv sein. Bei Clubstationen kann ein Mitglied eigene QSOs verknüpfen; zum Erstellen oder Bearbeiten der gemeinsamen Session sind Club-Officer-Rechte erforderlich.
+
+Die Contest-API ist noch nicht in jeder Wavelog-Version enthalten. Ein `404`, `405` oder fehlender Contest-Scope verhindert deshalb bewusst weder das lokale Speichern noch den normalen QSO-Sync. Die Session bleibt lokal und kann nach einem Wavelog-Update erneut abgeglichen werden.
+
 ## SYNC-FEHLER in der Logbuchtabelle
 
 Markiere das rote QSO. Unter der Tabelle erscheint die gespeicherte Ursache. Gehört die verknüpfte Wavelog-ID zu einem anderen Stationsprofil, bleiben ADI-Datensatz und Zuordnung unangetastet; eine automatische Reparatur findet bewusst nicht statt. Sichere vor einer manuellen Korrektur den ADI-Ordner und die Profildaten.

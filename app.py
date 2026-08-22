@@ -15,7 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -23,8 +23,8 @@ from tkinter import font as tkfont
 
 from logger_core import (
     APP_NAME, VERSION, BANDS, MODES, LogStore, MetadataDB, WavelogClient,
-    WavelogError, SyncEngine, app_data_dir, default_log_dir, band_from_mhz,
-    qso_hash, CountryDB, ProfileManager, WavelogOnlineSettings, build_fast_log_qso,
+    WavelogError, SyncEngine, ContestSyncEngine, app_data_dir, default_log_dir, band_from_mhz,
+    qso_hash, CountryDB, ProfileManager, WavelogOnlineSettings, build_fast_log_qso, valid_contest_adif_name,
     secure_urlopen,
 )
 from cat_control import (
@@ -106,6 +106,11 @@ def responsive_ui_scale(width: int, height: int) -> float:
     return max(0.65, min(1.10, stepped))
 
 
+def responsive_spacing_scale(ui_scale: float) -> float:
+    """Shrink decorative spacing faster than readable text."""
+    return max(0.35, min(1.10, (float(ui_scale) - 0.65) / 0.35))
+
+
 def _set_palette(theme: str) -> None:
     palette = PALETTES.get(theme, PALETTES["light"])
     globals().update(palette)
@@ -163,6 +168,19 @@ def display_now(time_mode: str) -> datetime:
     return datetime.now().astimezone() if time_mode == "LOCAL" else datetime.now(timezone.utc)
 
 
+def configure_responsive_dialog(dialog: tk.Toplevel, preferred: tuple[int, int], minimum: tuple[int, int]) -> None:
+    """Fit a dialog to the usable screen and keep its content resizable."""
+    screen_width = max(360, dialog.winfo_screenwidth() - 80)
+    screen_height = max(300, dialog.winfo_screenheight() - 100)
+    width = min(preferred[0], screen_width)
+    height = min(preferred[1], screen_height)
+    min_width = min(minimum[0], width)
+    min_height = min(minimum[1], height)
+    dialog.geometry(f"{width}x{height}")
+    dialog.minsize(min_width, min_height)
+    dialog.resizable(True, True)
+
+
 class SyncProgressDialog(tk.Toplevel):
     """Modal progress/status window for automatic start and shutdown syncs."""
 
@@ -171,8 +189,7 @@ class SyncProgressDialog(tk.Toplevel):
         self.parent = parent
         self.reason = reason
         self.title(parent._tr("Wavelog-Synchronisierung"))
-        self.geometry("640x330")
-        self.resizable(False, False)
+        configure_responsive_dialog(self, (640, 330), (460, 260))
         self.transient(parent)
         self.configure(bg=CARD)
         self.protocol("WM_DELETE_WINDOW", lambda: None)
@@ -250,7 +267,9 @@ class LoggerApp(tk.Tk):
         self._responsive_resize_job = None
         self._responsive_fonts: list[tuple[tkfont.Font, int]] = []
         self._responsive_wraplengths: list[tuple[tk.Widget, int]] = []
+        self._responsive_geometry_paddings: list[tuple[tk.Widget, str, str, tuple[int, ...]]] = []
         self._responsive_card_frames: list[ttk.Frame] = []
+        self._settings_optional_help: list[tk.Widget] = []
         self._brand_logo_source = None
         self.data_dir = app_data_dir()
         self.ui_preferences = load_ui_preferences(self.data_dir)
@@ -424,6 +443,14 @@ class LoggerApp(tk.Tk):
         """Remember original visual metrics so resizing can zoom without drift."""
         self._responsive_fonts.clear()
         self._responsive_wraplengths.clear()
+        self._responsive_geometry_paddings.clear()
+
+        def padding_values(value) -> tuple[int, ...]:
+            try:
+                parts = self.tk.splitlist(str(value))
+                return tuple(int(round(float(part))) for part in parts)
+            except (TypeError, ValueError, tk.TclError):
+                return ()
 
         def visit(widget):
             try:
@@ -451,6 +478,21 @@ class LoggerApp(tk.Tk):
             except (KeyError, TypeError, ValueError, tk.TclError):
                 pass
 
+            try:
+                manager = widget.winfo_manager()
+                if manager == "grid":
+                    info = widget.grid_info()
+                elif manager == "pack":
+                    info = widget.pack_info()
+                else:
+                    info = {}
+                for option in ("padx", "pady", "ipadx", "ipady"):
+                    values = padding_values(info.get(option, ""))
+                    if values and any(values):
+                        self._responsive_geometry_paddings.append((widget, manager, option, values))
+            except (KeyError, TypeError, ValueError, tk.TclError):
+                pass
+
         visit(self)
 
     def _apply_responsive_scale(self, force: bool = False):
@@ -459,6 +501,7 @@ class LoggerApp(tk.Tk):
             return
         scale = responsive_ui_scale(self.winfo_width(), self.winfo_height())
         if not force and abs(scale - self._ui_scale) < 0.001:
+            self._apply_settings_responsive_layout()
             self._apply_xota_responsive_layout()
             return
         self._ui_scale = scale
@@ -469,6 +512,19 @@ class LoggerApp(tk.Tk):
         for widget, base_wraplength in self._responsive_wraplengths:
             try:
                 widget.configure(wraplength=max(80, int(round(base_wraplength * scale))))
+            except tk.TclError:
+                pass
+        # Empty space must contract more quickly than text.  Otherwise a page
+        # can be clipped even though every individual font was scaled down.
+        spacing_scale = responsive_spacing_scale(scale)
+        for widget, manager, option, base_values in self._responsive_geometry_paddings:
+            try:
+                scaled = tuple(max(0, int(round(value * spacing_scale))) for value in base_values)
+                value = scaled[0] if len(scaled) == 1 else scaled
+                if manager == "grid":
+                    widget.grid_configure(**{option: value})
+                elif manager == "pack":
+                    widget.pack_configure(**{option: value})
             except tk.TclError:
                 pass
         for card_frame in self._responsive_card_frames:
@@ -494,10 +550,25 @@ class LoggerApp(tk.Tk):
             self.log_page.columnconfigure(1, minsize=max(255, int(round(370 * scale))))
         if hasattr(self, "callbook_image_frame"):
             self.callbook_image_frame.configure(height=max(105, int(round(160 * scale))))
+        self._apply_settings_responsive_layout()
         self._apply_xota_responsive_layout()
         self._render_brand_logo()
         if self.callbook_image_bytes:
             self._render_callbook_image(self.callbook_image_bytes)
+
+    def _apply_settings_responsive_layout(self):
+        """Keep every settings action reachable without a scrolling page."""
+        if not self._settings_optional_help:
+            return
+        compact = self.winfo_height() < 810
+        for widget in self._settings_optional_help:
+            try:
+                if compact:
+                    widget.grid_remove()
+                else:
+                    widget.grid()
+            except tk.TclError:
+                pass
 
     def _render_brand_logo(self):
         if self._brand_logo_source is None or not hasattr(self, "brand_label") or ImageTk is None:
@@ -767,9 +838,9 @@ class LoggerApp(tk.Tk):
 
         def worker():
             try:
-                summary = SyncEngine(self.store, self.db, WavelogClient(settings.base_url, settings.token)).push_new_only(
-                    settings.station_id
-                )
+                client = WavelogClient(settings.base_url, settings.token)
+                summary = SyncEngine(self.store, self.db, client).push_new_only(settings.station_id)
+                ContestSyncEngine(self.store, self.db, client).link_pending()
                 if not self.closing:
                     self.after(0, lambda: self._new_qso_push_finished(summary))
             except Exception as exc:
@@ -2146,11 +2217,12 @@ class LoggerApp(tk.Tk):
         self.contest_stop_btn = ttk.Button(sbtn, text="Session beenden", style="Secondary.TButton", command=self.stop_contest_session)
         self.contest_stop_btn.pack(side="left", padx=8)
 
-        ttk.Separator(right).grid(row=6, column=0, sticky="ew", pady=16)
-        ttk.Label(right, text="Letzte Contest-QSOs", style="CardTitle.TLabel").grid(row=7, column=0, sticky="w")
+        ttk.Button(right, text="Mit Wavelog abgleichen", style="Secondary.TButton", command=self.sync_now).grid(row=6, column=0, sticky="ew", pady=(10, 0))
+        ttk.Separator(right).grid(row=7, column=0, sticky="ew", pady=16)
+        ttk.Label(right, text="Letzte Contest-QSOs", style="CardTitle.TLabel").grid(row=8, column=0, sticky="w")
         self.contest_recent = tk.Listbox(right, height=10, font=("Consolas", 9), relief="solid", borderwidth=1)
-        self.contest_recent.grid(row=8, column=0, sticky="nsew", pady=(7, 0))
-        right.rowconfigure(8, weight=1)
+        self.contest_recent.grid(row=9, column=0, sticky="nsew", pady=(7, 0))
+        right.rowconfigure(9, weight=1)
 
     def _contest_preset_changed(self):
         self.db.set_setting("contest_active_preset", self.contest_preset_var.get())
@@ -2172,8 +2244,15 @@ class LoggerApp(tk.Tk):
             if p.get("name", "").casefold() == name.casefold() and p.get("name") != old_name:
                 raise ValueError("Ein Contest-Preset mit diesem Namen existiert bereits")
         if old_name:
+            previous = next((p for p in presets if p.get("name") == old_name), {})
+            for key in ("wavelog_session_id", "wavelog_updated_at", "local_qso_ids"):
+                if previous.get(key) not in (None, ""):
+                    preset[key] = previous[key]
+            preset["sync_dirty"] = True
             presets = [preset if p.get("name") == old_name else p for p in presets]
         else:
+            preset["sync_dirty"] = True
+            preset["sync_enabled"] = True
             presets.append(preset)
         self._save_contest_presets(presets)
         self.contest_preset_var.set(name)
@@ -2199,6 +2278,8 @@ class LoggerApp(tk.Tk):
             messagebox.showerror("Contest", "Bitte zuerst ein Contest-Preset anlegen/auswählen.", parent=self); return
         if self._contest_session().get("running"):
             messagebox.showinfo("Contest", "Es läuft bereits eine Contest-Session.", parent=self); return
+        if not valid_contest_adif_name(preset.get("contest_id")):
+            messagebox.showerror("Contest", "Bitte das Preset bearbeiten und einen ADIF-Namen wie DARC-WAG oder DARC-FT4 eintragen. Eine numerische Wavelog-ID ist hier nicht gültig.", parent=self); return
         profile = self._profile_values()
         station = profile.get("station_call") or profile.get("operator_call")
         operator = self.contest_operator_var.get().strip().upper() or profile.get("operator_call")
@@ -2208,6 +2289,20 @@ class LoggerApp(tk.Tk):
             start_serial = max(1, int(preset.get("start_serial") or 1))
         except Exception:
             start_serial = 1
+        # Continue after the highest serial already linked to this exact
+        # Wavelog/local contest session. This removes manual "free number"
+        # guessing after switching profiles, PCs or returning online.
+        for local_id in preset.get("local_qso_ids") or []:
+            qso = self.store.find(str(local_id))
+            if preset.get("serial_per_band") and str((qso or {}).get("band") or "") != self.contest_band_var.get():
+                continue
+            if str(preset.get("serial_scope") or "station") == "operator" and str((qso or {}).get("operator_call") or "").upper() != operator:
+                continue
+            try:
+                used_serial = int(str((qso or {}).get("stx") or "").strip())
+            except (TypeError, ValueError):
+                continue
+            start_serial = max(start_serial, used_serial + 1)
         session = {"running": True, "preset_name": preset["name"], "started_at": datetime.now(timezone.utc).isoformat(),
                    "next_serial": start_serial, "qso_count": 0, "operator": operator}
         self._set_contest_session(session)
@@ -2223,6 +2318,12 @@ class LoggerApp(tk.Tk):
         started = str(session.get("started_at") or "")
         session["running"] = False; session["ended_at"] = datetime.now(timezone.utc).isoformat()
         self._set_contest_session(session)
+        presets = self._contest_presets()
+        for preset in presets:
+            if preset.get("name") == session.get("preset_name"):
+                preset["time_end"] = session["ended_at"][:19].replace("T", " ")
+                preset["sync_dirty"] = True
+        self._save_contest_presets(presets)
         self.refresh_contest_page()
         messagebox.showinfo("Contest beendet", f"Contest: {session.get('preset_name','—')}\nQSOs dieser Session: {count}\nStart: {started[:19].replace('T',' ')} UTC", parent=self)
 
@@ -2295,16 +2396,29 @@ class LoggerApp(tk.Tk):
         if running:
             serial = int(session.get("next_serial") or 1)
             self.contest_serial_sent_var.set(f"{serial:03d}")
-            self.contest_session_detail.configure(text=f"{session.get('preset_name')}\nOperator: {session.get('operator','—')}\nNächste Seriennummer: {serial:03d}\nQSOs: {int(session.get('qso_count') or 0)}")
+            remote_text = f"Wavelog-Session: {preset.get('wavelog_session_id')}" if preset and preset.get("wavelog_session_id") else "Wavelog-Session: noch lokal"
+            sync_status = self.db.get_setting("contest_sync_status", "")
+            if sync_status and sync_status != "ok":
+                remote_text += "\nContest-API: " + sync_status
+            self.contest_session_detail.configure(text=f"{session.get('preset_name')}\nOperator: {session.get('operator','—')}\nNächste Seriennummer: {serial:03d}\nQSOs: {int(session.get('qso_count') or 0)}\n{remote_text}")
         else:
             try: serial=max(1,int((preset or {}).get("start_serial") or 1))
             except Exception: serial=1
             self.contest_serial_sent_var.set(f"{serial:03d}")
-            self.contest_session_detail.configure(text="Preset auswählen und Session starten.\nDie Seriennummer läuft stationsweit weiter, auch wenn der Operator wechselt.")
+            sync_status = self.db.get_setting("contest_sync_status", "")
+            remote_text = f"Wavelog-Session: {preset.get('wavelog_session_id')}" if preset and preset.get("wavelog_session_id") else "Noch nicht mit Wavelog verknüpft"
+            if sync_status and sync_status != "ok":
+                remote_text += "\nContest-API: " + sync_status
+            serial_rule = "Seriennummer je Band" if (preset or {}).get("serial_per_band") else ("Seriennummer je Operator" if str((preset or {}).get("serial_scope") or "station") == "operator" else "Seriennummer stationsweit")
+            self.contest_session_detail.configure(text=f"Preset auswählen und Session starten.\n{serial_rule}; bereits zugeordnete QSOs bestimmen die nächste freie Nummer.\n" + remote_text)
 
         self.contest_recent.delete(0, "end")
         contest_id = str((preset or {}).get("contest_id") or "").upper()
-        recent = [q for q in self.store.scan() if contest_id and str(q.get("contest_id") or "").upper() == contest_id]
+        exact_ids = {str(value) for value in ((preset or {}).get("local_qso_ids") or [])}
+        if exact_ids:
+            recent = [q for q in self.store.scan() if str(q.get("local_id") or "") in exact_ids]
+        else:
+            recent = [q for q in self.store.scan() if contest_id and str(q.get("contest_id") or "").upper() == contest_id]
         for q in sorted(recent, key=lambda x:(x.get("qso_date",""),x.get("time_on","")), reverse=True)[:12]:
             self.contest_recent.insert("end", f"{q.get('time_on','')[:4]:4}  {q.get('call',''):10}  {q.get('operator_call',''):8}  {q.get('stx','')}/{q.get('srx','')}")
 
@@ -2341,7 +2455,16 @@ class LoggerApp(tk.Tk):
                "stx_string":str(preset.get("sent_exchange") or "") if preset.get("use_text") else "",
                "srx_string":rxtext if preset.get("use_text") else ""}
             if not q["contest_id"]: raise ValueError("Im Contest-Preset fehlt die ADIF Contest-ID")
+            if not valid_contest_adif_name(q["contest_id"]): raise ValueError("Der Contest benötigt einen ADIF-Namen wie DARC-WAG oder DARC-FT4 – keine numerische Wavelog-ID")
             q=self.store.add(q); self.db.ensure_local(q["local_id"],qso_hash(q)); self._bind_active_xota_qso(q)
+            presets = self._contest_presets()
+            for item in presets:
+                if item.get("name") == preset.get("name"):
+                    local_ids = list(item.get("local_qso_ids") or [])
+                    if q["local_id"] not in local_ids:
+                        local_ids.append(q["local_id"])
+                    item["local_qso_ids"] = local_ids
+            self._save_contest_presets(presets)
             self._notify_qso_saved(q)
             if preset.get("use_serial"): session["next_serial"]=serial+1
             session["qso_count"]=int(session.get("qso_count") or 0)+1
@@ -2978,12 +3101,16 @@ class LoggerApp(tk.Tk):
                 smap = {int(s.get("id")): s for s in stations if s.get("id") is not None}
                 engine = SyncEngine(self.store, self.db, client)
                 summary = engine.sync(station_id, smap)
+                contest_summary = ContestSyncEngine(self.store, self.db, client).sync(station_id)
                 msg = (f"Upload {summary.pushed} · zu Wavelog geändert {summary.patched} · "
                        f"neu aus Wavelog {summary.pulled} · aus Wavelog aktualisiert {summary.remote_updated} · "
                        f"remote gelöscht {summary.remote_deleted} · verknüpft {summary.linked} · "
                        f"lokal→Wavelog gelöscht {summary.deleted} · QSL-Status {summary.qsl_updated} · "
                        f"anderes Stationsprofil übersprungen {summary.scope_skipped} · "
-                       f"Konflikte {summary.conflicts} · Fehler {summary.errors} · QSL-Statusfehler {summary.qsl_errors}")
+                       f"Konflikte {summary.conflicts} · Fehler {summary.errors} · QSL-Statusfehler {summary.qsl_errors} · "
+                       f"Contests neu {contest_summary.created} / geladen {contest_summary.pulled} / "
+                       f"aus QSO-Historie {contest_summary.history_imported} / "
+                       f"QSO-Links {contest_summary.linked} / Fehler {contest_summary.errors}")
                 if not self.closing:
                     self.after(0, lambda: self._sync_finished(msg, automatic))
             except Exception as e:
@@ -3001,6 +3128,7 @@ class LoggerApp(tk.Tk):
         self._set_wavelog_mode_ui(True)
         self.status_var.set(("Auto-Sync fertig · " if automatic else "Sync fertig · ") + msg)
         self.refresh_qsos()
+        self.refresh_contest_page()
         self._schedule_wavelog_check(60_000)
         if self._complete_sync_progress(True, msg):
             return
@@ -5115,14 +5243,30 @@ class LoggerApp(tk.Tk):
         )
         self.dx_spotter_status_label.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
+        # Descriptive copy remains visible at normal size.  In compact
+        # windows it yields space to the actual fields and buttons instead of
+        # pushing them beyond the lower edge of the page.
+        self._settings_optional_help.clear()
+        def collect_optional_help(widget):
+            for child in widget.winfo_children():
+                collect_optional_help(child)
+                if isinstance(child, ttk.Label):
+                    try:
+                        if child.cget("style") == "Muted.Card.TLabel":
+                            self._settings_optional_help.append(child)
+                    except tk.TclError:
+                        pass
+        collect_optional_help(notebook)
+        self._settings_optional_help.append(hint)
+
         savebar = ttk.Frame(p)
         savebar.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         ttk.Label(savebar, text="Stationsdaten sind profilspezifisch; Sprache und Theme gelten app-weit.", foreground=MUTED).pack(side="left")
         ttk.Button(savebar, text="Einstellungen speichern", style="Primary.TButton", command=self.save_settings).pack(side="right")
 
     def _settings_row(self, parent, label, var, row):
-        ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", padx=(0,12), pady=7)
-        ttk.Entry(parent, textvariable=var).grid(row=row, column=1, sticky="ew", pady=7)
+        ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", padx=(0,12), pady=4)
+        ttk.Entry(parent, textvariable=var).grid(row=row, column=1, sticky="ew", pady=4)
 
     def _load_settings_to_ui(self):
         self.set_ui_language.set("English" if self.ui_preferences.language == "en" else "Deutsch")
@@ -5466,42 +5610,80 @@ class ContestPresetDialog(tk.Toplevel):
         super().__init__(app)
         self.app=app; self.callback=callback; self.old_name=(preset or {}).get("name")
         self.title("Contest-Preset")
-        self.geometry("560x650"); self.resizable(False, False); self.transient(app); self.grab_set(); self.configure(bg=BG)
+        configure_responsive_dialog(self, (720, 540), (500, 420)); self.transient(app); self.grab_set(); self.configure(bg=BG)
         box=tk.Frame(self,bg=CARD,highlightbackground=BORDER,highlightthickness=1); box.pack(fill="both",expand=True,padx=18,pady=18)
-        inner=ttk.Frame(box,style="Card.TFrame",padding=18); inner.pack(fill="both",expand=True); inner.columnconfigure(1,weight=1)
+        inner=ttk.Frame(box,style="Card.TFrame",padding=18); inner.pack(fill="both",expand=True); inner.columnconfigure(0,weight=1)
         p=preset or {}
         self.name=tk.StringVar(value=str(p.get("name") or "")); self.cid=tk.StringVar(value=str(p.get("contest_id") or ""))
         self.serial=tk.BooleanVar(value=bool(p.get("use_serial",True))); self.grid=tk.BooleanVar(value=bool(p.get("use_grid",False))); self.text=tk.BooleanVar(value=bool(p.get("use_text",False)))
         self.sent=tk.StringVar(value=str(p.get("sent_exchange") or "")); self.start=tk.StringVar(value=str(p.get("start_serial") or "1"))
         self.freq=tk.StringVar(value=str(p.get("freq") or "")); self.band=tk.StringVar(value=str(p.get("band") or "2m")); self.mode=tk.StringVar(value=str(p.get("mode") or "SSB")); self.rst=tk.StringVar(value=str(p.get("rst_default") or "59"))
-        ttk.Label(inner,text="Contest-Preset",style="CardTitle.TLabel").grid(row=0,column=0,columnspan=2,sticky="w",pady=(0,10))
-        fields=(("Name",self.name),("ADIF Contest-ID",self.cid),("Start-Seriennummer",self.start),("Gesendeter Text-Exchange",self.sent),("Standardfrequenz (MHz)",self.freq),("Standard-RST",self.rst))
-        for r,(label,var) in enumerate(fields,start=1):
-            ttk.Label(inner,text=label,style="Card.TLabel").grid(row=r,column=0,sticky="w",padx=(0,12),pady=5); ttk.Entry(inner,textvariable=var).grid(row=r,column=1,sticky="ew",pady=5)
-        ttk.Label(inner,text="Standardband / Mode",style="Card.TLabel").grid(row=7,column=0,sticky="w",padx=(0,12),pady=5)
-        bm=ttk.Frame(inner,style="Card.TFrame"); bm.grid(row=7,column=1,sticky="ew",pady=5); bm.columnconfigure(0,weight=1); bm.columnconfigure(1,weight=1)
-        ttk.Combobox(bm,textvariable=self.band,values=BANDS,state="readonly",width=10).grid(row=0,column=0,sticky="ew",padx=(0,4))
-        ttk.Combobox(bm,textvariable=self.mode,values=MODES,state="readonly",width=10).grid(row=0,column=1,sticky="ew",padx=(4,0))
-        ttk.Separator(inner).grid(row=8,column=0,columnspan=2,sticky="ew",pady=10)
-        ttk.Label(inner,text="Exchange-Felder",style="CardTitle.TLabel").grid(row=9,column=0,columnspan=2,sticky="w")
-        ttk.Checkbutton(inner,text="Seriennummer",variable=self.serial).grid(row=10,column=0,columnspan=2,sticky="w",pady=4)
-        ttk.Checkbutton(inner,text="Grid Square",variable=self.grid).grid(row=11,column=0,columnspan=2,sticky="w",pady=4)
-        ttk.Checkbutton(inner,text="Exchange (Text)",variable=self.text).grid(row=12,column=0,columnspan=2,sticky="w",pady=4)
-        tk.Label(inner,text="Die ADIF Contest-ID muss der von Wavelog/ADIF verwendeten Contest-ID entsprechen.\nSTX/SRX sowie STX_STRING/SRX_STRING werden direkt in ADI und Wavelog geschrieben.",bg=CARD,fg=MUTED,font=("Segoe UI",9),justify="left",wraplength=440).grid(row=13,column=0,columnspan=2,sticky="w",pady=(10,0))
-        b=ttk.Frame(inner,style="Card.TFrame"); b.grid(row=14,column=0,columnspan=2,sticky="e",pady=(15,0))
+        now=datetime.now(timezone.utc).replace(microsecond=0)
+        self.time_start=tk.StringVar(value=str(p.get("time_start") or now.strftime("%Y-%m-%d %H:%M:%S")))
+        self.time_end=tk.StringVar(value=str(p.get("time_end") or (now+timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")))
+        self.comment=tk.StringVar(value=str(p.get("comment") or ""))
+        try:
+            catalog=json.loads(app.db.get_setting("contest_catalog", "[]") or "[]")
+        except Exception:
+            catalog=[]
+        self.catalog_names=[]
+        for row in catalog if isinstance(catalog,list) else []:
+            code=str(row.get("adif_name") or row.get("contest") or row.get("name") or "").strip().upper()
+            if code and code not in self.catalog_names:
+                self.catalog_names.append(code)
+        ttk.Label(inner,text="Contest-Preset",style="CardTitle.TLabel").grid(row=0,column=0,sticky="w",pady=(0,8))
+        form=ttk.Frame(inner,style="Card.TFrame"); form.grid(row=1,column=0,sticky="nsew"); inner.rowconfigure(1,weight=1)
+        for column in range(3): form.columnconfigure(column,weight=1,uniform="contest-form")
+
+        def stacked(parent,label,var,row,column,span=1,combo_values=None):
+            cell=ttk.Frame(parent,style="Card.TFrame"); cell.grid(row=row,column=column,columnspan=span,sticky="nsew",padx=(0 if column==0 else 5,5 if column+span<3 else 0),pady=3)
+            cell.columnconfigure(0,weight=1)
+            ttk.Label(cell,text=label,style="Card.TLabel").grid(row=0,column=0,sticky="w",pady=(0,2))
+            widget=(ttk.Combobox(cell,textvariable=var,values=combo_values,state="normal") if combo_values is not None else ttk.Entry(cell,textvariable=var))
+            widget.grid(row=1,column=0,sticky="ew")
+            return widget
+
+        stacked(form,"Name",self.name,0,0,3)
+        self.cid_combo=stacked(form,"Contest (ADIF-Name)",self.cid,1,0,3,self.catalog_names)
+        stacked(form,"Start UTC",self.time_start,2,0); stacked(form,"Ende UTC",self.time_end,2,1); stacked(form,"Kommentar",self.comment,2,2)
+        stacked(form,"Start-Seriennummer",self.start,3,0); stacked(form,"Standardfrequenz (MHz)",self.freq,3,1); stacked(form,"Standard-RST",self.rst,3,2)
+        stacked(form,"Gesendeter Text-Exchange",self.sent,4,0)
+        band_cell=ttk.Frame(form,style="Card.TFrame"); band_cell.grid(row=4,column=1,columnspan=2,sticky="nsew",padx=(5,0),pady=3); band_cell.columnconfigure(0,weight=1); band_cell.columnconfigure(1,weight=1)
+        ttk.Label(band_cell,text="Standardband",style="Card.TLabel").grid(row=0,column=0,sticky="w",pady=(0,2)); ttk.Label(band_cell,text="Mode",style="Card.TLabel").grid(row=0,column=1,sticky="w",padx=(5,0),pady=(0,2))
+        ttk.Combobox(band_cell,textvariable=self.band,values=BANDS,state="readonly").grid(row=1,column=0,sticky="ew",padx=(0,5)); ttk.Combobox(band_cell,textvariable=self.mode,values=MODES,state="readonly").grid(row=1,column=1,sticky="ew",padx=(5,0))
+        ttk.Separator(form).grid(row=5,column=0,columnspan=3,sticky="ew",pady=6)
+        exchange=ttk.Frame(form,style="Card.TFrame"); exchange.grid(row=6,column=0,columnspan=3,sticky="ew"); ttk.Label(exchange,text="Exchange-Felder",style="CardTitle.TLabel").pack(side="left",padx=(0,14)); ttk.Checkbutton(exchange,text="Seriennummer",variable=self.serial).pack(side="left",padx=5); ttk.Checkbutton(exchange,text="Grid Square",variable=self.grid).pack(side="left",padx=5); ttk.Checkbutton(exchange,text="Exchange (Text)",variable=self.text).pack(side="left",padx=5)
+        api_status=app.db.get_setting("contest_sync_status", "")
+        if "Unknown resource: catalog" in api_status or "Unknown resource: contest" in api_status:
+            api_status="Diese Wavelog-Version bietet noch keine Contest-Session-API. Contest-QSOs werden mit CONTEST_ID weiterhin normal synchronisiert."
+        help_text=(api_status if api_status and api_status != "ok" else "Wavelog vergibt die numerische Session-ID automatisch. Verwende den ADIF-Namen aus dem Wavelog-Katalog, keine Zahl aus der Weboberfläche.")
+        self.help_label=tk.Label(form,text=help_text,bg=CARD,fg=(WARN if api_status and api_status != "ok" else MUTED),font=("Segoe UI",9),justify="left",anchor="w",wraplength=620)
+        self.help_label.grid(row=7,column=0,columnspan=3,sticky="ew",pady=(8,0))
+        self.bind("<Configure>",lambda e:self.help_label.configure(wraplength=max(300,e.width-90)) if e.widget is self else None,add="+")
+        b=ttk.Frame(inner,style="Card.TFrame"); b.grid(row=2,column=0,sticky="e",pady=(10,0))
         ttk.Button(b,text="Abbrechen",command=self.destroy).pack(side="right"); ttk.Button(b,text="Speichern",style="Primary.TButton",command=self.save).pack(side="right",padx=8)
 
     def save(self):
         try:
             name=self.name.get().strip(); cid=self.cid.get().strip().upper()
             if not name: raise ValueError("Bitte einen Namen eingeben")
-            if not cid: raise ValueError("Bitte die ADIF Contest-ID eingeben")
+            if not cid: raise ValueError("Bitte den ADIF-Namen des Contests eingeben")
+            if not valid_contest_adif_name(cid):
+                raise ValueError("Der Contest benötigt einen ADIF-Namen wie DARC-WAG oder DARC-FT4 – keine numerische Wavelog-ID.")
             start=int(self.start.get().strip() or "1")
             if start<1: raise ValueError("Start-Seriennummer muss mindestens 1 sein")
             freq=self.freq.get().strip().replace(",", ".")
             if freq: float(freq)
+            try:
+                start_dt=datetime.fromisoformat(self.time_start.get().strip().replace("T"," "))
+                end_dt=datetime.fromisoformat(self.time_end.get().strip().replace("T"," "))
+            except ValueError:
+                raise ValueError("Start und Ende bitte als YYYY-MM-DD HH:MM[:SS] in UTC eingeben")
+            if end_dt <= start_dt: raise ValueError("Das Contest-Ende muss nach dem Start liegen")
             preset={"name":name,"contest_id":cid,"use_serial":bool(self.serial.get()),"use_grid":bool(self.grid.get()),"use_text":bool(self.text.get()),"sent_exchange":self.sent.get().strip(),"start_serial":start,
-                    "freq":freq,"band":self.band.get(),"mode":self.mode.get(),"rst_default":self.rst.get().strip()}
+                    "freq":freq,"band":self.band.get(),"mode":self.mode.get(),"rst_default":self.rst.get().strip(),
+                    "time_start":start_dt.strftime("%Y-%m-%d %H:%M:%S"),"time_end":end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "comment":self.comment.get().strip(),"station_id":int(self.app.db.get_setting("station_profile_id","0") or 0)}
             self.callback(self.old_name,preset); self.destroy()
         except Exception as e:
             messagebox.showerror("Contest-Preset",str(e),parent=self)
@@ -5512,8 +5694,7 @@ class ProfileDeleteDialog(tk.Toplevel):
         super().__init__(parent)
         self.result = None
         self.title("Profil lokal löschen")
-        self.geometry("560x300")
-        self.resizable(False, False)
+        configure_responsive_dialog(self, (560, 300), (440, 270))
         self.configure(bg=BG)
         self.transient(parent)
         self.grab_set()
@@ -5557,8 +5738,7 @@ class ProfileManagerDialog(tk.Toplevel):
         super().__init__(parent)
         self.parent = parent
         self.title("Profile verwalten")
-        self.geometry("650x430")
-        self.minsize(570, 360)
+        configure_responsive_dialog(self, (650, 430), (500, 350))
         self.configure(bg=BG)
         self.transient(parent)
         self.grab_set()
@@ -5674,13 +5854,14 @@ class EditDialog(tk.Toplevel):
         self.q = q
         self.callback = callback
         self.title(f"QSO bearbeiten · {q.get('call','')}")
-        self.geometry("520x600")
+        configure_responsive_dialog(self, (760, 520), (520, 420))
         self.transient(parent)
         self.grab_set()
         self.configure(bg=BG)
         frame = ttk.Frame(self, padding=18)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(3, weight=1)
         self.vars = {}
         fields = [
             ("call","Rufzeichen"),("qso_date","Datum UTC"),("time_on","Zeit UTC HHMMSS"),("freq","Frequenz MHz"),
@@ -5689,16 +5870,21 @@ class EditDialog(tk.Toplevel):
             ("wwff_ref","WWFF Ref"),("tx_pwr","Leistung W"),("comment","Kommentar"),
         ]
         for i, (key, label) in enumerate(fields):
-            ttk.Label(frame, text=label).grid(row=i, column=0, sticky="w", padx=(0,10), pady=4)
+            row, group = divmod(i, 2)
+            label_column = group * 2
+            entry_column = label_column + 1
+            ttk.Label(frame, text=label).grid(row=row, column=label_column, sticky="w", padx=(0,8), pady=4)
             v = tk.StringVar(value=str(q.get(key) or ""))
             self.vars[key] = v
-            ttk.Entry(frame, textvariable=v).grid(row=i, column=1, sticky="ew", pady=4)
-        ttk.Label(frame, text="Notizen").grid(row=len(fields), column=0, sticky="nw", pady=4)
+            ttk.Entry(frame, textvariable=v).grid(row=row, column=entry_column, sticky="ew", padx=(0 if group else 0,0), pady=4)
+        notes_row = (len(fields) + 1) // 2
+        ttk.Label(frame, text="Notizen").grid(row=notes_row, column=0, sticky="nw", pady=4)
         self.notes = tk.Text(frame, height=4, wrap="word", font=("Segoe UI", 9), bg=INPUT_BG, fg=TEXT, insertbackground=TEXT)
-        self.notes.grid(row=len(fields), column=1, sticky="ew", pady=4)
+        self.notes.grid(row=notes_row, column=1, columnspan=3, sticky="nsew", pady=4)
+        frame.rowconfigure(notes_row, weight=1)
         self.notes.insert("1.0", str(q.get("notes") or ""))
         btn = ttk.Frame(frame)
-        btn.grid(row=len(fields)+1, column=0, columnspan=2, sticky="e", pady=(14,0))
+        btn.grid(row=notes_row+1, column=0, columnspan=4, sticky="e", pady=(14,0))
         ttk.Button(btn, text="Abbrechen", command=self.destroy).pack(side="right")
         ttk.Button(btn, text="Speichern", style="Primary.TButton", command=self.save).pack(side="right", padx=8)
 

@@ -80,7 +80,7 @@ Die Aktivierungszuordnung erweitert den sicheren Sync-Zielkontext eines QSOs um 
 
 ### `selftest.py`
 
-Deckt Kernabläufe, lokale Verlustsicherheit, Profile, Migrationen, Contest-Felder, Hash-Migrationen, CAT-Zuordnungen, DX-Cluster-Parsing und lokales Telnet-Verhalten, UDP-/WSJT-X-Protokolle, Callbook-Normalisierung/Cache sowie die fehlertolerante Release-Prüfung ohne echte Wavelog-Instanz ab.
+Deckt Kernabläufe, lokale Verlustsicherheit, Profile, Migrationen, Contest-Felder und -Session-Abgleich, Hash-Migrationen, CAT-Zuordnungen, DX-Cluster-Parsing und lokales Telnet-Verhalten, UDP-/WSJT-X-Protokolle, Callbook-Normalisierung/Cache sowie die fehlertolerante Release-Prüfung ohne echte Wavelog-Instanz ab.
 
 ## Datenmodell
 
