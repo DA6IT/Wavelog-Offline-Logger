@@ -70,6 +70,7 @@ def main() -> int:
     from app import LoggerApp, SyncProgressDialog
     from dx_cluster import DxSpot
     from logger_core import app_data_dir, qso_hash
+    from xota import ReferenceCandidate
 
     # Scheduled callbacks that would contact the network or bind a socket are
     # replaced before LoggerApp is instantiated.  CAT is never started either.
@@ -329,6 +330,36 @@ try {
             root.contest_recent.insert("end", line)
         capture(root, "contest-logging.png")
         root.geometry("1420x820+40+40")
+
+        # xOTA with several deliberately unconfirmed references. No GPS,
+        # network service or real Wavelog station is contacted.
+        root._show_page("xota")
+        for key, value in {
+            "callsign": "DA6IT/P", "latitude": "51.408725", "longitude": "6.334693",
+            "locator": "JO31EJ", "city": "Wachtendonk", "state": "Nordrhein-Westfalen",
+            "country": "Germany", "dxcc": "230", "cq": "14", "itu": "28",
+            "accuracy": "12", "power": "25", "note": "Portable Aktivierung · Demo",
+            "POTA": "DE-0055", "WWFF": "DLFF-0012",
+        }.items():
+            root.xota_vars[key].set(value)
+        root.xota_candidates = [
+            ReferenceCandidate("POTA", "POTA", "DE-0055", "Maas-Schwalm-Nette", 51.31, 6.21, distance_m=4200, warning="Naher POTA-Marker"),
+            ReferenceCandidate("POTA", "POTA", "DE-0828", "Hülser Bruch Nature Reserve", 51.39, 6.48, distance_m=9600, warning="Naher POTA-Marker"),
+            ReferenceCandidate("POTA", "POTA", "NL-0281", "Groote Heide (Venlo) Park", 51.37, 6.20, distance_m=11800, warning="Großer Park möglich; Grenze prüfen"),
+            ReferenceCandidate("WWFF", "WWFF", "DLFF-0012", "Naturpark Demo", 51.41, 6.33, distance_m=750, warning="Benutzerbestätigung erforderlich"),
+        ]
+        root.xota_candidate_tree.delete(*root.xota_candidate_tree.get_children())
+        for index, item in enumerate(root.xota_candidates):
+            root.xota_candidate_tree.insert(
+                "", "end", iid=str(index),
+                values=(item.program, item.reference, item.name, f"{item.distance_m:.0f} m", item.warning),
+            )
+        root.xota_candidate_tree.selection_set(("0", "3"))
+        root.xota_provider_label.configure(
+            text="4 mögliche Treffer · Demo-Daten. Referenzen müssen bewusst geprüft und bestätigt werden."
+        )
+        root.status_var.set("xOTA: mehrere mögliche Referenzen gefunden · Dokumentations-Demo")
+        capture(root, "xota.png")
 
         root._show_page("qsos")
         capture(root, "logbook-sync.png")

@@ -4,6 +4,30 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-22
+
+### Added
+
+- Integrierter xOTA-Bereich für kombinierte POTA-, SOTA-, WWFF-, IOTA-, COTA- und WCA-Aktivierungen
+- Offline-GPS, lokale Maidenhead-Berechnung, editierbare Standortdaten, bestätigungspflichtige Referenzvorschläge und lokaler Referenzcache
+- Dauerhafte Aktivierungs-/QSO-Zuordnung sowie sichere Auswahl oder bestätigte Erstellung einer passenden Wavelog Station Location
+- ADIF-Import und -Export mit Prüfung, Dublettenschutz und Backup
+- Vollständiger offizieller POTA-Parkkatalog als lokaler Offline-Cache, nahe 10-km-Marker plus markierte 25-km-Kandidaten für große Parks und direkte Grenzprüfung auf pota-map.info
+- Mehrfachauswahl und gemeinsame Übernahme mehrerer gleichzeitiger xOTA-Referenzen
+- DA6IT.de-Funkmastlogo als Fenster-, Taskleisten- und Windows-Dateiicon
+
+### Changed
+
+- Ein einziges ADIF-Logbuch pro Profil; bisherige Tagesdateien werden gesichert, zusammengeführt, verifiziert und anschließend archiviert
+- Die Kopfzeilenuhr verwendet eine feste Breite und monospaced Ziffern, damit das Layout beim Sekundenwechsel nicht springt
+- Der xOTA-Bereich passt Beschriftungen, Aktionsleisten und Tabellenspalten dynamisch an die verfügbare Fensterbreite an
+
+### Fixed
+
+- Windows-GPS verwendet die aktuelle WinRT-Geoposition-API und fällt bei fehlender Freigabe kontrolliert auf manuelle Koordinaten zurück
+- Mehrere gleichzeitig markierte xOTA-Referenzen werden gemeinsam und ohne Dubletten in die Aktivierung übernommen
+- Große POTA-Parks werden nicht mehr allein wegen eines mehr als 10 km entfernten Katalogmittelpunkts ausgeblendet
+
 ## [0.16.2] - 2026-08-20
 
 ### Added

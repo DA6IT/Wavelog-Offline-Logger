@@ -108,6 +108,11 @@ try {
         throw 'Windows-Build fehlgeschlagen.'
     }
 
+    & $python (Join-Path $PSScriptRoot 'set-windows-icon.py') $outputPath (Join-Path $projectRoot 'assets\da6it-icon.ico')
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Das DA6IT.de-Icon konnte nicht in die Windows-EXE eingebettet werden.'
+    }
+
     $hash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $checksumPath = Join-Path $OutputDirectory 'SHA256SUMS.txt'
     $checksumLine = "$hash  $fileName`n"

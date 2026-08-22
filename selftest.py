@@ -1,10 +1,15 @@
 import base64
+import os
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 from logger_core import (
     LogStore, MetadataDB, SyncEngine, WavelogOnlineSettings,
     build_fast_log_qso, qso_hash, remote_qsos_for_station, secure_tls_context,
+)
+from xota import (
+    GPSService, ActivationReferenceService, XotaRepository, distance_m,
+    maidenhead_locator, merge_candidate_references, parse_reference_csv, station_match_score,
 )
 
 class FakeClient:
@@ -1052,3 +1057,66 @@ with TemporaryDirectory() as d:
     cache_db.close()
 
 print("CALLBOOK SELFTEST OK")
+
+# xOTA is offline-first: coordinates, locator, activation/QSO mapping and
+# station matching must all work without contacting an external service.
+assert maidenhead_locator(51.40831, 6.33721) == "JO31EJ"
+assert 0 < distance_m(51.40831, 6.33721, 51.409, 6.338) < 200
+old_gps_override = os.environ.get("WAVELOG_LOGGER_GPS")
+try:
+    os.environ["WAVELOG_LOGGER_GPS"] = "51.40831,6.33721,8"
+    gps_fix = GPSService.current_position()
+    assert gps_fix.latitude == 51.40831 and gps_fix.longitude == 6.33721 and gps_fix.accuracy == 8
+finally:
+    if old_gps_override is None:
+        os.environ.pop("WAVELOG_LOGGER_GPS", None)
+    else:
+        os.environ["WAVELOG_LOGGER_GPS"] = old_gps_override
+with TemporaryDirectory() as d:
+    xota_db = MetadataDB(Path(d) / "meta.db")
+    repository = XotaRepository(xota_db)
+    pota_rows = parse_reference_csv(
+        b"reference,name,latitude,longitude,type\n"
+        b"NL-TEST,Nearby Marker,51.41000,6.34000,Nature Park\n"
+        b"DE-TEST,Large Border Park,51.31000,6.18000,Nature Park\n",
+        "POTA", "POTA",
+    )
+    assert len(pota_rows) == 2 and all(row.program == "POTA" for row in pota_rows)
+    repository.replace_provider_references("POTA", pota_rows)
+    reference_service = ActivationReferenceService(repository, lambda _key, default="": default)
+    nearby = reference_service.find_nearby(51.40831, 6.33721, refresh_pota=False)
+    nearby_refs = {row.reference for row in nearby}
+    assert nearby_refs == {"NL-TEST", "DE-TEST"}
+    assert "Naher POTA-Marker" in next(row.warning for row in nearby if row.reference == "NL-TEST")
+    assert "Großer Park möglich" in next(row.warning for row in nearby if row.reference == "DE-TEST")
+    merged_refs = merge_candidate_references(nearby, {"POTA": "DE-EXISTING, NL-TEST"})
+    assert merged_refs["POTA"] == ["DE-EXISTING", "NL-TEST", "DE-TEST"]
+    activation = repository.create(
+        "portable", "DA6IT/P", latitude=51.40831, longitude=6.33721,
+        gridsquare="JO31EJ", dxcc="230", cq_zone="14", itu_zone="28",
+        references={"POTA":["DE-0001", "DE-0002"], "COTA":["NRB-001"], "WCA":["DL-00001"]},
+    )
+    repository.start(activation.uuid)
+    repository.bind_qso(activation.uuid, "local-qso-id")
+    repository.set_wavelog_station(activation.uuid, 27)
+    assert repository.qso_count(activation.uuid) == 1
+    assert repository.station_id_for_qso("local-qso-id") == 27
+    score, reasons = station_match_score(activation, {
+        "id":27, "callsign":"DA6IT/P", "gridsquare":"JO31EJ", "dxcc":230, "pota":"DE-0001",
+    })
+    assert score >= 60 and "Rufzeichen" in reasons and "POTA" in reasons
+    repository.finish(activation.uuid)
+    assert repository.active() is None
+    xota_db.close()
+
+with TemporaryDirectory() as d:
+    root = Path(d)
+    source = LogStore(root / "source")
+    source.add(sample(call="DL8XOTA"))
+    source.export_adif(root / "portable.adi")
+    target = LogStore(root / "target", "portable")
+    first = target.import_adif(root / "portable.adi")
+    second = target.import_adif(root / "portable.adi")
+    assert first["imported"] == 1 and second["imported"] == 0 and second["skipped"] == 1
+
+print("XOTA AND ADIF IMPORT/EXPORT SELFTEST OK")

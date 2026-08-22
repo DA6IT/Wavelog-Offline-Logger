@@ -31,7 +31,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $required = @(
-    "qso-logging.png", "fast-log.png", "contest-logging.png", "logbook-sync.png",
+    "qso-logging.png", "fast-log.png", "contest-logging.png", "xota.png", "logbook-sync.png",
     "statistics.png", "cat-setup.png", "dx-cluster.png", "udp-logging.png",
     "settings-general.png", "settings-wavelog.png", "settings-callbook.png",
     "settings-data-connections.png", "sync-progress-running.png", "sync-progress-complete.png",

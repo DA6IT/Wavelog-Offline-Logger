@@ -19,6 +19,8 @@ bootstrap_windows.go
         +--------->  callbook.py <----> Wavelog Lookup API / QRZ XML API
         |
         +--------->  notifications.py <----> Windows / macOS / Linux Desktop
+        |
+        +--------->  xota.py <----> GPS / Referenzkataloge / Aktivierungszuordnung
 ```
 
 ### `bootstrap_windows.go`
@@ -70,6 +72,12 @@ Direkte QRZ-Abfragen sind technisch von Wavelog entkoppelt. Wavelog-Sync, Wavelo
 
 Sendet nach erfolgreicher lokaler Speicherung optional einen nativen, nicht blockierenden Desktop-Hinweis. Fehler des Betriebssystem-Benachrichtigungsdienstes werden abgefangen und dürfen niemals den bereits gespeicherten ADI-Datensatz als fehlgeschlagen erscheinen lassen.
 
+### `xota.py`
+
+Verwaltet portable Aktivierungen, bestätigte Mehrfachreferenzen und deren QSO-Zuordnungen in der profilbezogenen Metadatenbank. GPS und Referenzdienste sind optionale Eingabehilfen; jeder Vorschlag muss in der Oberfläche bestätigt werden. Der offizielle POTA-Gesamtkatalog wird lokal zwischengespeichert, während Katalogkoordinaten ausdrücklich nicht als exakte Parkgrenze behandelt werden.
+
+Die Aktivierungszuordnung erweitert den sicheren Sync-Zielkontext eines QSOs um eine ausdrücklich gewählte Wavelog Station Location. Das normale Profil bleibt davon unberührt; fremde Station-IDs werden weiterhin nicht allgemein importiert.
+
 ### `selftest.py`
 
 Deckt Kernabläufe, lokale Verlustsicherheit, Profile, Migrationen, Contest-Felder, Hash-Migrationen, CAT-Zuordnungen, DX-Cluster-Parsing und lokales Telnet-Verhalten, UDP-/WSJT-X-Protokolle, Callbook-Normalisierung/Cache sowie die fehlertolerante Release-Prüfung ohne echte Wavelog-Instanz ab.
@@ -88,7 +96,7 @@ Ein Tombstone (`pending_delete`) darf nur durch eine ausdrückliche Löschaktion
 4. Vorhandene Baselines und Legacy-Hashes werden migrationsfähig gehalten.
 5. Benutzerdaten werden nicht ungefragt gelöscht.
 6. Der automatische Laufzeit-Push führt keine Remote-Listenabfrage, Änderung, Löschung oder Konfliktauflösung aus.
-7. Ein lokales Profil importiert ausschließlich die ausgewählte Wavelog-Stationsprofil-ID.
+7. Ein lokales Profil importiert ausschließlich die ausgewählte Wavelog-Stationsprofil-ID sowie Station-IDs, die einer lokalen xOTA-Aktivierung ausdrücklich zugeordnet wurden.
 
 ## Token-Schutz
 
