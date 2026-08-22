@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 from logger_core import (
-    LogStore, MetadataDB, SyncEngine, WavelogOnlineSettings,
+    LogStore, MetadataDB, SyncEngine, ContestSyncEngine, WavelogOnlineSettings, WavelogError,
     build_fast_log_qso, qso_hash, remote_qsos_for_station, secure_tls_context,
 )
 from xota import (
@@ -445,6 +445,119 @@ patch_payload = local_to_wavelog(contest, 1)
 assert "contest_id" not in patch_payload, "CONTEST_ID is create-only because Wavelog PATCH does not document it"
 assert patch_payload["stx"] == 17 and patch_payload["srx"] == 42
 print("CONTEST SELFTEST OK")
+
+
+class FakeContestClient:
+    def __init__(self):
+        self.sessions = {}
+        self.next_id = 40
+
+    def contest_catalog(self):
+        return [{"id": 123, "adif_name": "DARC-TEST", "name": "DARC Test"}]
+
+    def contests(self, station_ids=None):
+        allowed = {int(value) for value in (station_ids or [])}
+        return [dict(row) for row in self.sessions.values() if not allowed or int(row["station_id"]) in allowed]
+
+    def get_contest(self, session_id):
+        return dict(self.sessions[int(session_id)])
+
+    def create_contest(self, payload):
+        self.next_id += 1
+        row = {"id": self.next_id, "contest_name": "DARC Test", "qso_ids": [], "updated_at": "2026-08-23 12:00:00", **payload}
+        self.sessions[self.next_id] = row
+        return dict(row)
+
+    def patch_contest(self, session_id, payload):
+        row = self.sessions[int(session_id)]
+        if "link_qso_ids" in payload:
+            old = set(row.get("qso_ids") or [])
+            requested = {int(value) for value in payload["link_qso_ids"]}
+            row["qso_ids"] = sorted(old | requested)
+            return {"linked": len(requested - old), "skipped": []}
+        row.update(payload)
+        row["updated_at"] = "2026-08-23 12:01:00"
+        return dict(row)
+
+
+# Contest sessions are created without a user-invented numeric id, pulled
+# back into the local preset list and linked to already-uploaded QSOs.
+with TemporaryDirectory() as d:
+    root = Path(d)
+    store = LogStore(root / "logs")
+    db = MetadataDB(root / "meta.db")
+    qso = store.add({**sample(call="DL5CONTEST"), "contest_id": "DARC-TEST", "stx": "7", "srx": "19"})
+    db.ensure_local(qso["local_id"], qso_hash(qso))
+    db.set_status(qso["local_id"], "synced", wavelog_id=7654, last_synced_hash=qso_hash(qso), remote_hash=qso_hash(qso))
+    db.set_setting("contest_presets", __import__("json").dumps([{
+        "name": "DARC Test", "contest_id": "DARC-TEST", "station_id": 1,
+        "time_start": "2026-08-23 10:00:00", "time_end": "2026-08-23 18:00:00",
+        "use_serial": True, "use_grid": False, "use_text": False,
+        "local_qso_ids": [qso["local_id"]], "sync_dirty": True,
+    }]))
+    client = FakeContestClient()
+    summary = ContestSyncEngine(store, db, client).sync(1)
+    assert summary.created == 1 and summary.linked == 1 and summary.errors == 0, summary
+    presets = __import__("json").loads(db.get_setting("contest_presets"))
+    assert presets[0]["wavelog_session_id"] == 41 and not presets[0]["sync_dirty"], presets
+    assert client.sessions[41]["qso_ids"] == [7654]
+    cached = __import__("json").loads(db.get_setting("contest_catalog"))
+    assert cached[0]["adif_name"] == "DARC-TEST"
+
+    # The narrow online QSO push can safely repeat the idempotent link.
+    link_summary = ContestSyncEngine(store, db, client).link_pending()
+    assert link_summary.errors == 0 and client.sessions[41]["qso_ids"] == [7654]
+    db.close()
+
+
+class UnsupportedContestClient(FakeContestClient):
+    def contest_catalog(self):
+        raise WavelogError("HTTP 404: contest resource not available")
+
+    def contests(self, station_ids=None):
+        raise WavelogError("HTTP 404: contest resource not available")
+
+
+with TemporaryDirectory() as d:
+    root = Path(d)
+    store = LogStore(root / "logs")
+    db = MetadataDB(root / "meta.db")
+    historical = store.add({
+        **sample(call="DL4HISTORY"), "qso_date": "2026-05-12",
+        "time_on": "183700", "contest_id": "DARC-FT4", "stx": "14", "srx": "8",
+    })
+    db.ensure_local(historical["local_id"], qso_hash(historical))
+    summary = ContestSyncEngine(store, db, UnsupportedContestClient()).sync(1)
+    assert not summary.available and summary.errors == 0 and summary.history_imported == 1, summary
+    fallback_presets = __import__("json").loads(db.get_setting("contest_presets"))
+    assert fallback_presets[0]["contest_id"] == "DARC-FT4"
+    assert fallback_presets[0]["local_qso_ids"] == [historical["local_id"]]
+    fallback_catalog = __import__("json").loads(db.get_setting("contest_catalog"))
+    assert fallback_catalog[0]["adif_name"] == "DARC-FT4"
+    db.close()
+
+
+class MissingCatalogClient(FakeContestClient):
+    def contest_catalog(self):
+        raise WavelogError("HTTP 404: Unknown resource: catalog")
+
+
+with TemporaryDirectory() as d:
+    root = Path(d)
+    store = LogStore(root / "logs")
+    db = MetadataDB(root / "meta.db")
+    client = MissingCatalogClient()
+    client.create_contest({
+        "contest": "DARC-WAG", "contest_name": "Worked All Germany",
+        "time_start": "2026-10-17 15:00:00", "time_end": "2026-10-18 15:00:00", "station_id": 1,
+    })
+    summary = ContestSyncEngine(store, db, client).sync(1)
+    assert summary.available and summary.pulled == 1 and summary.errors == 0, summary
+    derived_catalog = __import__("json").loads(db.get_setting("contest_catalog"))
+    assert derived_catalog[0]["adif_name"] == "DARC-WAG"
+    db.close()
+
+print("CONTEST SESSION SYNC SELFTEST OK")
 
 # v0.11.1 hash-schema migration: v0.10 baselines must not turn into mass
 # conflicts merely because contest fields were added to the sync hash.

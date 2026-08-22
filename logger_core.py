@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.17.0"
+VERSION = "0.17.1"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -1565,6 +1565,29 @@ class WavelogClient:
     def delete_qso(self, wid: int):
         self._request("DELETE", "qso", ident=wid)
 
+    def contest_catalog(self) -> list[dict[str, Any]]:
+        r = self._request("GET", "catalog", params={"topic": "contest"}) or {}
+        data = r.get("data") or []
+        return data if isinstance(data, list) else []
+
+    def contests(self, station_ids: Iterable[int] | None = None) -> list[dict[str, Any]]:
+        station_filter = ",".join(str(int(value)) for value in (station_ids or []))
+        r = self._request("GET", "contest", params={"station_id": station_filter}) or {}
+        data = r.get("data") or []
+        return data if isinstance(data, list) else []
+
+    def get_contest(self, contest_session_id: int) -> dict[str, Any]:
+        r = self._request("GET", "contest", ident=int(contest_session_id)) or {}
+        return r.get("data") or {}
+
+    def create_contest(self, payload: dict[str, Any]) -> dict[str, Any]:
+        r = self._request("POST", "contest", payload=payload) or {}
+        return r.get("data") or {}
+
+    def patch_contest(self, contest_session_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        r = self._request("PATCH", "contest", ident=int(contest_session_id), payload=payload) or {}
+        return r.get("data") or {}
+
 
 def _status_from_adif(fields: dict[str, str], sent_names: tuple[str, ...], rcvd_names: tuple[str, ...]) -> str:
     def values(names):
@@ -1771,6 +1794,305 @@ class SyncSummary:
     qsl_updated: int = 0
     qsl_errors: int = 0
     scope_skipped: int = 0
+
+
+@dataclass
+class ContestSyncSummary:
+    available: bool = True
+    created: int = 0
+    updated: int = 0
+    pulled: int = 0
+    linked: int = 0
+    skipped: int = 0
+    errors: int = 0
+    history_imported: int = 0
+    reason: str = ""
+
+
+def _contest_exchange_fields(preset: dict[str, Any]) -> list[str]:
+    fields: list[str] = []
+    if preset.get("use_serial"):
+        fields.append("serial")
+    if preset.get("use_grid"):
+        fields.append("gridsquare")
+    if preset.get("use_text"):
+        fields.append("exchange")
+    return fields or ["serial"]
+
+
+def valid_contest_adif_name(value: object) -> bool:
+    name = str(value or "").strip().upper()
+    return bool(
+        not name.isdigit()
+        and re.fullmatch(r"[A-Z0-9][A-Z0-9_-]{1,63}", name)
+        and re.search(r"[A-Z]", name)
+    )
+
+
+def _contest_preset_from_remote(remote: dict[str, Any], existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    preset = dict(existing or {})
+    settings = remote.get("settings") if isinstance(remote.get("settings"), dict) else {}
+    exchange = settings.get("exchangefields") if isinstance(settings.get("exchangefields"), list) else ["serial"]
+    contest = str(remote.get("contest") or "").strip().upper()
+    start = str(remote.get("time_start") or "")
+    label = str(remote.get("contest_name") or contest or "Contest").strip()
+    if not existing:
+        label = f"{label} · {start[:16]}" if start else label
+    preset.update({
+        "name": str(preset.get("name") or label), "contest_id": contest,
+        "use_serial": "serial" in exchange, "use_grid": "gridsquare" in exchange,
+        "use_text": "exchange" in exchange, "time_start": start,
+        "time_end": str(remote.get("time_end") or ""), "comment": str(remote.get("comment") or ""),
+        "station_id": int(remote.get("station_id") or 0),
+        "wavelog_session_id": int(remote.get("id") or 0),
+        "wavelog_updated_at": str(remote.get("updated_at") or ""),
+        "sync_dirty": False, "sync_enabled": True,
+        "serial_per_band": bool(settings.get("serial_per_band", False)),
+        "serial_scope": str(settings.get("serial_scope") or "station"),
+    })
+    preset.setdefault("start_serial", 1)
+    preset.setdefault("freq", "")
+    preset.setdefault("band", "2m")
+    preset.setdefault("mode", "SSB")
+    preset.setdefault("rst_default", "59")
+    preset.setdefault("sent_exchange", "")
+    return preset
+
+
+class ContestSyncEngine:
+    """Mirrors Wavelog contest sessions without making local logging depend on it."""
+
+    def __init__(self, store: LogStore, db: MetadataDB, client: WavelogClient):
+        self.store, self.db, self.client = store, db, client
+
+    def _load_presets(self) -> list[dict[str, Any]]:
+        try:
+            rows = json.loads(self.db.get_setting("contest_presets", "[]") or "[]")
+            return [dict(row) for row in rows if isinstance(row, dict)]
+        except Exception:
+            return []
+
+    def _merge_qso_history(self, presets: list[dict[str, Any]], summary: ContestSyncSummary) -> list[dict[str, Any]]:
+        """Recover selectable contests from synchronized ADIF CONTEST_ID data.
+
+        Released Wavelog versions can synchronize the QSO fields even when
+        their contest-session API is not present yet. Grouping by ADIF name
+        and year mirrors Wavelog's "Import Historical Contests" fallback and
+        keeps the desktop contest chooser useful without pretending that a
+        server-side session was created.
+        """
+        groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for qso in self.store.scan():
+            contest = str(qso.get("contest_id") or "").strip().upper()
+            date = str(qso.get("qso_date") or "")[:10]
+            if not contest or len(date) < 4:
+                continue
+            groups.setdefault((contest, date[:4]), []).append(qso)
+
+        for (contest, year), qsos in sorted(groups.items()):
+            local_ids = [str(qso.get("local_id")) for qso in qsos if qso.get("local_id")]
+            existing = next((
+                row for row in presets
+                if str(row.get("contest_id") or "").upper() == contest
+                and (str(row.get("time_start") or "")[:4] in ("", year))
+            ), None)
+            if existing is not None:
+                merged_ids = list(existing.get("local_qso_ids") or [])
+                for local_id in local_ids:
+                    if local_id not in merged_ids:
+                        merged_ids.append(local_id)
+                existing["local_qso_ids"] = merged_ids
+                continue
+
+            ordered = sorted(qsos, key=lambda q: (str(q.get("qso_date") or ""), str(q.get("time_on") or "")))
+            first, last = ordered[0], ordered[-1]
+            first_time = (str(first.get("time_on") or "000000") + "000000")[:6]
+            last_time = (str(last.get("time_on") or "235959") + "235959")[:6]
+            modes = [str(q.get("mode") or "") for q in ordered if q.get("mode")]
+            bands = [str(q.get("band") or "") for q in ordered if q.get("band")]
+            presets.append({
+                "name": f"{contest} · {year}", "contest_id": contest,
+                "time_start": f"{str(first.get('qso_date'))[:10]} {first_time[:2]}:{first_time[2:4]}:{first_time[4:6]}",
+                "time_end": f"{str(last.get('qso_date'))[:10]} {last_time[:2]}:{last_time[2:4]}:{last_time[4:6]}",
+                "comment": "Aus synchronisierten Wavelog-QSOs rekonstruiert",
+                "use_serial": any(str(q.get("stx") or "").strip() for q in ordered),
+                "use_grid": any(str(q.get("gridsquare") or "").strip() for q in ordered),
+                "use_text": any(str(q.get("stx_string") or "").strip() for q in ordered),
+                "start_serial": 1, "sent_exchange": "", "freq": "",
+                "band": max(set(bands), key=bands.count) if bands else "2m",
+                "mode": max(set(modes), key=modes.count) if modes else "SSB",
+                "rst_default": "59", "local_qso_ids": local_ids,
+                "sync_dirty": False, "sync_enabled": True,
+                "session_source": "qso_history",
+            })
+            summary.history_imported += 1
+        return presets
+
+    @staticmethod
+    def _catalog_from_presets(presets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        values: dict[str, dict[str, Any]] = {}
+        for preset in presets:
+            contest = str(preset.get("contest_id") or "").strip().upper()
+            if contest and not contest.isdigit():
+                values.setdefault(contest, {"adif_name": contest, "name": contest, "source": "local"})
+        return [values[key] for key in sorted(values)]
+
+    def _link_pending_presets(self, presets: list[dict[str, Any]], summary: ContestSyncSummary) -> None:
+        """Attach already-uploaded local QSOs to their Wavelog contest session."""
+        for preset in presets:
+            remote_id = int(preset.get("wavelog_session_id") or 0)
+            if not remote_id:
+                continue
+            qso_ids: list[int] = []
+            for local_id in preset.get("local_qso_ids") or []:
+                meta = self.db.get_meta(str(local_id))
+                if meta and meta.get("wavelog_id"):
+                    qso_ids.append(int(meta["wavelog_id"]))
+            if not qso_ids:
+                continue
+            try:
+                result = self.client.patch_contest(remote_id, {"link_qso_ids": sorted(set(qso_ids))})
+                summary.linked += int(result.get("linked") or 0)
+                summary.skipped += len(result.get("skipped") or [])
+                preset.pop("sync_error", None)
+            except Exception as exc:
+                preset["sync_error"] = str(exc)
+                summary.errors += 1
+
+    def link_pending(self) -> ContestSyncSummary:
+        """Small companion operation for the automatic new-QSO push.
+
+        It deliberately avoids catalog and session-list requests. If an older
+        Wavelog instance does not expose the contest resource, normal QSO
+        upload remains successful and the reason is retained for the UI.
+        """
+        summary = ContestSyncSummary()
+        presets = self._load_presets()
+        self._link_pending_presets(presets, summary)
+        self.db.set_setting("contest_presets", json.dumps(presets, ensure_ascii=False))
+        if summary.errors:
+            summary.available = False
+            summary.reason = next((str(row.get("sync_error")) for row in presets if row.get("sync_error")), "Fehler")
+            self.db.set_setting("contest_sync_status", summary.reason)
+        return summary
+
+    def sync(self, station_id: int) -> ContestSyncSummary:
+        summary = ContestSyncSummary()
+        presets = self._load_presets()
+        catalog: list[dict[str, Any]] = []
+        catalog_error = ""
+        try:
+            catalog = self.client.contest_catalog()
+            self.db.set_setting("contest_catalog", json.dumps(catalog, ensure_ascii=False))
+        except WavelogError as exc:
+            catalog_error = str(exc)
+
+        try:
+            remote_rows = self.client.contests([station_id])
+        except WavelogError as exc:
+            text = str(exc)
+            scope_missing = "insufficient_scope" in text or "contest:read" in text or "required scope: contest" in text.lower()
+            if "HTTP 404" in text or "HTTP 405" in text or scope_missing:
+                summary.available = False
+                summary.reason = (
+                    "Der API-v2-Token benötigt contest:read und contest:write. "
+                    "Contest-QSOs werden mit CONTEST_ID weiterhin normal synchronisiert."
+                    if scope_missing else
+                    "Diese Wavelog-Version bietet noch keine Contest-Session-API. "
+                    "Contest-QSOs werden mit CONTEST_ID normal synchronisiert; "
+                    "eine Wavelog-Session kann erst nach einem Wavelog-Update automatisch angelegt werden."
+                )
+                presets = self._merge_qso_history(presets, summary)
+                if not catalog:
+                    catalog = self._catalog_from_presets(presets)
+                    self.db.set_setting("contest_catalog", json.dumps(catalog, ensure_ascii=False))
+                self.db.set_setting("contest_presets", json.dumps(presets, ensure_ascii=False))
+                self.db.set_setting("contest_sync_status", summary.reason)
+                return summary
+            summary.errors += 1
+            summary.reason = text
+            self.db.set_setting("contest_sync_status", text)
+            return summary
+
+        by_remote = {int(row.get("id") or 0): row for row in remote_rows if int(row.get("id") or 0) > 0}
+        if catalog_error and not catalog:
+            # Some transitional Wavelog builds expose /contest before the
+            # catalog resource. Derive a safe dropdown from returned sessions.
+            catalog = [
+                {"adif_name": str(row.get("contest") or "").upper(), "name": str(row.get("contest_name") or row.get("contest") or "")}
+                for row in remote_rows if row.get("contest")
+            ]
+            self.db.set_setting("contest_catalog", json.dumps(catalog, ensure_ascii=False))
+
+        # Local edits are pushed first; numeric ids are always assigned by
+        # Wavelog and are never invented by the desktop client.
+        for index, preset in enumerate(presets):
+            if not preset.get("sync_enabled", True) or not preset.get("sync_dirty"):
+                continue
+            if not valid_contest_adif_name(preset.get("contest_id")):
+                preset["sync_error"] = "Ungültiger ADIF-Contest-Name; eine numerische Wavelog-ID ist nicht zulässig."
+                summary.errors += 1
+                continue
+            try:
+                payload = {
+                    "contest": str(preset.get("contest_id") or "").upper(),
+                    "time_start": str(preset.get("time_start") or ""),
+                    "time_end": str(preset.get("time_end") or ""),
+                    "station_id": int(preset.get("station_id") or station_id),
+                    "comment": str(preset.get("comment") or ""),
+                    "settings": {
+                        "exchangefields": _contest_exchange_fields(preset),
+                        "serial_per_band": bool(preset.get("serial_per_band", False)),
+                        "serial_scope": str(preset.get("serial_scope") or "station"),
+                    },
+                }
+                remote_id = int(preset.get("wavelog_session_id") or 0)
+                if remote_id:
+                    remote = self.client.patch_contest(remote_id, payload)
+                    summary.updated += 1
+                else:
+                    remote = self.client.create_contest(payload)
+                    summary.created += 1
+                presets[index] = _contest_preset_from_remote(remote, preset)
+                by_remote[int(remote.get("id") or 0)] = remote
+            except Exception as exc:
+                preset["sync_error"] = str(exc)
+                summary.errors += 1
+
+        # Pull every remote session and its explicit QSO linkage.
+        for remote_id, row in sorted(by_remote.items()):
+            try:
+                detail = self.client.get_contest(remote_id)
+                position = next((i for i, item in enumerate(presets) if int(item.get("wavelog_session_id") or 0) == remote_id), None)
+                existing = presets[position] if position is not None else None
+                merged = _contest_preset_from_remote(detail, existing)
+                local_ids = list(merged.get("local_qso_ids") or [])
+                for remote_qso_id in detail.get("qso_ids") or []:
+                    meta = self.db.get_by_wavelog_id(int(remote_qso_id))
+                    if meta and meta.get("local_id") not in local_ids:
+                        local_ids.append(meta["local_id"])
+                merged["local_qso_ids"] = local_ids
+                if position is None:
+                    base_name = str(merged.get("name") or "Contest")
+                    used_names = {str(item.get("name") or "").casefold() for item in presets}
+                    suffix = 2
+                    while str(merged.get("name") or "").casefold() in used_names:
+                        merged["name"] = f"{base_name} ({suffix})"
+                        suffix += 1
+                    presets.append(merged); summary.pulled += 1
+                else:
+                    presets[position] = merged
+            except Exception as exc:
+                summary.errors += 1
+                summary.reason = str(exc)
+
+        # Link locally logged contest QSOs after the normal QSO sync assigned
+        # their Wavelog ids. Re-sending the list is idempotent server-side.
+        self._link_pending_presets(presets, summary)
+
+        self.db.set_setting("contest_presets", json.dumps(presets, ensure_ascii=False))
+        self.db.set_setting("contest_sync_status", "ok" if not summary.errors else (summary.reason or "Fehler"))
+        return summary
 
 
 class SyncEngine:

@@ -163,6 +163,63 @@ try {
                 return found
         return None
 
+    def assert_actions_visible(window: LoggerApp, context: str) -> None:
+        """Fail the release if a visible action is clipped by the app window."""
+        settle(window, 0.03)
+        left = window.winfo_rootx() - 2
+        top = window.winfo_rooty() - 2
+        right = left + window.winfo_width() + 4
+        bottom = top + window.winfo_height() + 4
+        clipped: list[str] = []
+
+        def visit(widget: tk.Misc) -> None:
+            for child in widget.winfo_children():
+                visit(child)
+                if not isinstance(child, (ttk.Button, tk.Button)) or not child.winfo_ismapped():
+                    continue
+                x = child.winfo_rootx()
+                y = child.winfo_rooty()
+                x2 = x + child.winfo_width()
+                y2 = y + child.winfo_height()
+                clip_left, clip_top, clip_right, clip_bottom = left, top, right, bottom
+                ancestor = child.master
+                while ancestor is not None and ancestor is not window:
+                    if ancestor.winfo_ismapped():
+                        ax = ancestor.winfo_rootx()
+                        ay = ancestor.winfo_rooty()
+                        clip_left = max(clip_left, ax)
+                        clip_top = max(clip_top, ay)
+                        clip_right = min(clip_right, ax + ancestor.winfo_width())
+                        clip_bottom = min(clip_bottom, ay + ancestor.winfo_height())
+                    ancestor = getattr(ancestor, "master", None)
+                if x < clip_left or y < clip_top or x2 > clip_right or y2 > clip_bottom:
+                    try:
+                        label = str(child.cget("text"))
+                    except tk.TclError:
+                        label = child.winfo_name()
+                    clipped.append(f"{label} [{x},{y},{x2},{y2}]")
+
+        visit(window)
+        if clipped:
+            raise RuntimeError(f"Responsive UI check failed ({context}): " + "; ".join(clipped))
+
+    def validate_responsive_pages(window: LoggerApp) -> None:
+        """Exercise every main page at representative supported sizes."""
+        page_names = ("log", "fast_log", "contest", "xota", "qsos", "stats", "cat", "dx_cluster", "udp_log", "settings")
+        for width, height in ((900, 580), (1100, 680), (1355, 790), (1420, 820)):
+            window.geometry(f"{width}x{height}+20+20")
+            settle(window, 0.04)
+            for page_name in page_names:
+                window._show_page(page_name)
+                assert_actions_visible(window, f"{page_name} at {width}x{height}")
+            window._show_page("settings")
+            settings_notebook = notebook_below(window.pages["settings"])
+            if settings_notebook is None:
+                raise RuntimeError("Settings notebook was not found during responsive UI check")
+            for tab_index in range(len(settings_notebook.tabs())):
+                settings_notebook.select(tab_index)
+                assert_actions_visible(window, f"settings tab {tab_index} at {width}x{height}")
+
     def sample_qso(
         call: str,
         band: str,
@@ -230,6 +287,9 @@ try {
             root.db.set_setting(key, value)
         root.db.set_token("wl2_documentation_demo_token")
         root._load_settings_to_ui()
+        validate_responsive_pages(root)
+        root.geometry("1420x820+40+40")
+        settle(root)
         root.set_station_profile.set("DA6IT Portable · Profil-ID 1")
 
         qsos = [
@@ -321,7 +381,7 @@ try {
         root.contest_exchange_rx_var.set("JO70")
         root.contest_operator_var.set("DA6IT")
         root.contest_session_status.configure(text="Demo-Session · 26 QSOs", fg=app_module.OK)
-        root.contest_session_detail.configure(text="Station: DA6IT\nOperator: DA6IT\nStart: 13:00 UTC\nNächste Seriennummer: 027")
+        root.contest_session_detail.configure(text="Station: DA6IT\nOperator: DA6IT\nStart: 13:00 UTC\nNächste Seriennummer: 027\nWavelog-Session: 17")
         root.contest_exchange_hint.configure(text="Gesendet: 027 · Exchange: JO31")
         root.contest_start_btn.configure(state="disabled")
         root.contest_stop_btn.configure(state="normal")
