@@ -1,6 +1,6 @@
 # Benutzerhandbuch
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.17.1. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.17.2. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -130,6 +130,8 @@ Die eQSL.cc-Felder sind vorbereitet und klar als **Coming soon** markiert. Versi
 
 ## 5. Normales QSO loggen
 
+Beim Eingeben eines Rufzeichens prüft der Logger ausschließlich das lokale Logbuch des aktiven Profils. Wurde das Rufzeichen bereits auf demselben Band und im selben Mode gearbeitet, wird das Rufzeichenfeld grün und zeigt Anzahl, Band und Mode an. Existieren nur QSOs auf einem anderen Band oder in einem anderen Mode, erscheint stattdessen ein gelber Hinweis. Unterhalb des Formulars erscheinen zusätzlich die fünf neuesten QSOs mit diesem Rufzeichen einschließlich Datum, UTC-Zeit, Band und Mode; weitere Treffer werden als Anzahl zusammengefasst. CAT-, Frequenz-, Band- und Modeänderungen aktualisieren die Anzeige sofort. Die Markierung und Historie sind nur Hinweise und verhindern das Speichern eines weiteren QSOs nicht.
+
 ![Vollständiges QSO-Formular](screenshots/qso-logging.png)
 
 Pflicht für ein übliches QSO sind mindestens Rufzeichen, Band und Mode. Datum und Zeit laufen standardmäßig live in UTC, können aber auf lokale Zeit oder manuelle Eingabe umgestellt werden.
@@ -139,7 +141,7 @@ Typischer Ablauf:
 1. Rufzeichen eingeben.
 2. Frequenz, Band und Mode prüfen; bei aktivem CAT werden diese Werte übernommen.
 3. Rapporte, Leistung und optionale Aktivierungsreferenzen ergänzen.
-4. **QSO speichern** oder **Speichern + Neu** wählen.
+4. **QSO speichern** wählen. Nach erfolgreichem Speichern wird das Formular automatisch für das nächste QSO zurückgesetzt.
 
 Unter **Einstellungen → Allgemein** lässt sich die plattformübliche Desktop-Benachrichtigung nach einem erfolgreich lokal gespeicherten QSO ein- oder ausschalten. Ein fehlender Benachrichtigungsdienst beeinflusst die Speicherung nicht.
 
@@ -304,7 +306,11 @@ Unterstützt werden:
 
 Empfohlene lokale Bind-Adresse ist `127.0.0.1`. Der Port ist frei wählbar und muss im sendenden Programm identisch sein. Ist der primäre WSJT-X-Port bereits belegt, kann der sekundäre „logged contact ADIF broadcast“ auf einen anderen freien Port zeigen.
 
-**UDP Logging beim App-Start automatisch starten** ist profilbezogen. Eingehende QSOs werden sofort lokal gespeichert und erscheinen als `LOCAL ONLY`; der normale Online-Modus beziehungsweise Sync übernimmt die spätere Übertragung.
+**UDP Logging beim App-Start und Profilwechsel automatisch starten** ist profilbezogen. Beim Profilwechsel beendet der Logger zuerst den Listener des bisherigen Profils und startet anschließend den Listener des neuen Profils mit dessen eigener Bind-Adresse und Portnummer, sofern die Option dort aktiviert ist. Eingehende QSOs werden sofort lokal gespeichert und erscheinen als `LOCAL ONLY`; der normale Online-Modus beziehungsweise Sync übernimmt die spätere Übertragung.
+
+Beim nativen WSJT-X-Protokoll verarbeitet der Logger zusätzlich die laufenden Statuspakete. Dafür muss der **primäre UDP-Server** von WSJT-X auf dieselbe Adresse und denselben Port wie der Logger zeigen; der sekundäre ADIF-Broadcast überträgt nur abgeschlossene QSOs und enthält keine Live-Statuspakete. Sobald in WSJT-X ein DX-Rufzeichen gewählt ist, werden Rufzeichen, Locator, Frequenz, Band, Mode und der aktuelle Report in das normale QSO-Formular gespiegelt. Dadurch stehen auch Callbook-Foto, Name, QTH und lokale Worked-Historie bereits während des QSOs zur Verfügung. Liegen sowohl der eigene Profil-Locator als auch der Locator der Gegenstation vor, zeigt der Callbook-Bereich zusätzlich die offline berechnete ungefähre Entfernung und Peilung an. Ein Statuspaket speichert ausdrücklich noch nichts: Erst die Bestätigung in WSJT-X und das danach gesendete `QSO Logged`-Paket erzeugen den lokalen ADI-Eintrag. Anschließend wird das Formular automatisch geleert. Eine gleichzeitig vorhandene manuelle Formulareingabe für ein anderes Rufzeichen wird nicht überschrieben.
+
+Fehlen bei einem über WSJT-X oder den ADIF/UDP-Broadcast empfangenen QSO Name, Locator oder QTH, ergänzt der Logger diese Angaben im Hintergrund über die unter **Callbook & Online-Dienste** gewählte Quelle. Bereits vom sendenden Programm gelieferte Werte werden niemals überschrieben. Das QSO wird aus Sicherheitsgründen vor der Abfrage lokal gespeichert; ohne Internet oder bei einem Lookup-Fehler bleibt es unverändert erhalten. Die automatische Ergänzung folgt der Einstellung **Bei vollständigem Rufzeichen automatisch abfragen**. Ein Batch-ADIF-Import löst bewusst keine massenhaften Online-Abfragen aus.
 
 ## 14. Lokale Daten sichern und wiederherstellen
 

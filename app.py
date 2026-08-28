@@ -34,7 +34,7 @@ from cat_control import (
     list_serial_ports, map_hamlib_mode,
 )
 from external_logging import (
-    ExternalLogError, UdpLogConfig, UdpLogEvent, UdpLogReceiver,
+    ExternalLogError, UdpLogConfig, UdpLogEvent, UdpLogReceiver, UdpStatusEvent,
     find_duplicate_qso,
 )
 from dx_cluster import (
@@ -48,14 +48,15 @@ from update_check import ReleaseInfo, find_newer_release
 from callbook import (
     CALLBOOK_SOURCE_DISABLED, CALLBOOK_SOURCE_QRZ, CALLBOOK_SOURCE_WAVELOG,
     CallbookError, CallbookResult, QrzClient, lookup_candidate,
-    normalize_wavelog_result,
+    enrich_qso_from_callbook, normalize_wavelog_result,
 )
 from ui_preferences import PALETTES, UiPreferences, load_ui_preferences, save_ui_preferences, translate_text
 from notifications import notify_qso_logged
 from xota import (
     GPSService, ActivationReferenceService, ReverseGeocodeService,
     WavelogStationService, XotaActivation, XotaRepository,
-    XOTA_PROGRAMS, maidenhead_locator, merge_candidate_references, normalize_references,
+    XOTA_PROGRAMS, distance_m, initial_bearing_degrees, maidenhead_coordinates,
+    maidenhead_locator, merge_candidate_references, normalize_references,
 )
 
 try:
@@ -299,6 +300,7 @@ class LoggerApp(tk.Tk):
         self.wavelog_check_busy = False
         self.wavelog_check_job = None
         self.auto_sync_job = None
+        self.external_enrichment_pending: set[tuple[str, str]] = set()
         self.station_rows: list[dict] = []
         self.station_by_label: dict[str, dict] = {}
         self.cat_manager = HamlibManager()
@@ -313,6 +315,7 @@ class LoggerApp(tk.Tk):
         atexit.register(self.udp_log_receiver.stop)
         self.udp_log_generation = 0
         self.udp_log_received = 0
+        self.wsjtx_live_form_call = ""
         self.dx_cluster = DxClusterClient()
         atexit.register(self.dx_cluster.stop)
         self.dx_cluster_generation = 0
@@ -327,6 +330,9 @@ class LoggerApp(tk.Tk):
         self.dx_cluster_continent_cache: dict[str, str] = {}
         self.dx_cluster_worked_calls: set[tuple[str, str, str]] = set()
         self.dx_cluster_worked_countries: set[tuple[str, str, str]] = set()
+        self.qso_worked_counts: Counter[tuple[str, str, str]] = Counter()
+        self.qso_worked_call_totals: Counter[str] = Counter()
+        self.qso_worked_history: dict[str, list[dict[str, str]]] = {}
         self.dx_cluster_filter_job = None
         self.dx_cluster_session_received = 0
         self.dx_cluster_last_spot_utc: datetime | None = None
@@ -550,6 +556,8 @@ class LoggerApp(tk.Tk):
             self.log_page.columnconfigure(1, minsize=max(255, int(round(370 * scale))))
         if hasattr(self, "callbook_image_frame"):
             self.callbook_image_frame.configure(height=max(105, int(round(160 * scale))))
+        if hasattr(self, "qso_history_frame") and hasattr(self, "call_var"):
+            self._update_qso_worked_history(self.call_var.get().strip().upper())
         self._apply_settings_responsive_layout()
         self._apply_xota_responsive_layout()
         self._render_brand_logo()
@@ -790,6 +798,8 @@ class LoggerApp(tk.Tk):
     def _request_auto_sync(self, *, delay_ms: int = 1200):
         if self.closing or self.close_requested or self.sync_progress_dialog is not None:
             return
+        if any(profile_id == self.active_profile_id for profile_id, _local_id in self.external_enrichment_pending):
+            return
         settings = self._wavelog_online_settings()
         candidate_count = len(self.db.list_new_upload_candidates())
         if not settings.should_auto_sync(
@@ -809,6 +819,8 @@ class LoggerApp(tk.Tk):
         self.auto_sync_job = None
         if self.closing or self.close_requested or self.sync_progress_dialog is not None:
             return
+        if any(profile_id == self.active_profile_id for profile_id, _local_id in self.external_enrichment_pending):
+            return
         settings = self._wavelog_online_settings()
         if settings.should_auto_sync(
             online=self.wavelog_online,
@@ -823,6 +835,8 @@ class LoggerApp(tk.Tk):
 
     def _start_new_qso_push(self):
         if self.sync_busy or self.closing or self.close_requested or self.sync_progress_dialog is not None:
+            return
+        if any(profile_id == self.active_profile_id for profile_id, _local_id in self.external_enrichment_pending):
             return
         settings = self._wavelog_online_settings()
         if not settings.should_auto_sync(
@@ -912,6 +926,15 @@ class LoggerApp(tk.Tk):
         style.configure("Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI Semibold", size(20)))
         style.configure("CardTitle.TLabel", background=CARD, foreground=TEXT, font=("Segoe UI Semibold", size(12)))
         style.configure("Call.TEntry", font=("Segoe UI Semibold", size(18)), padding=size(8, 4), fieldbackground=INPUT_BG, foreground=TEXT)
+        style.configure(
+            "Worked.Call.TEntry", font=("Segoe UI Semibold", size(18)), padding=size(8, 4),
+            fieldbackground=OK_BADGE_BG, foreground=OK,
+        )
+        style.map(
+            "Worked.Call.TEntry",
+            fieldbackground=[("readonly", OK_BADGE_BG), ("disabled", OK_BADGE_BG), ("focus", OK_BADGE_BG)],
+            foreground=[("readonly", OK), ("disabled", OK), ("focus", OK)],
+        )
         style.configure("TEntry", padding=size(6, 3), fieldbackground=INPUT_BG, foreground=TEXT)
         style.configure("TCombobox", padding=size(5, 3), fieldbackground=INPUT_BG, background=INPUT_BG, foreground=TEXT)
         style.configure("Primary.TButton", background=ACCENT, foreground="white", padding=padding(14, 8), borderwidth=0, font=("Segoe UI Semibold", size(10)))
@@ -1173,6 +1196,10 @@ class LoggerApp(tk.Tk):
             self._refresh_profile_selector()
             self._reset_wavelog_monitor(delay_ms=500)
             self.status_var.set(f"Profil gewechselt: {old} → {self._current_profile()['name']}")
+            # The previous profile's listener was stopped before its database
+            # was closed. Start the newly selected profile with its own saved
+            # host, port and autostart preference once the UI is idle again.
+            self.after_idle(self._autostart_udp_log)
         except Exception as e:
             messagebox.showerror("Profil wechseln", str(e), parent=self)
             self._refresh_profile_selector()
@@ -1296,12 +1323,25 @@ class LoggerApp(tk.Tk):
         left.columnconfigure(2, weight=1)
         left.columnconfigure(3, weight=1)
 
-        ttk.Label(left, text="Gegenstation", style="CardTitle.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        call_header = ttk.Frame(left, style="Card.TFrame")
+        call_header.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0, 8))
+        call_header.columnconfigure(0, weight=1)
+        ttk.Label(call_header, text="Gegenstation", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.wsjtx_live_badge = tk.Label(
+            call_header, text="", bg=CARD, fg=ACCENT,
+            font=("Segoe UI Semibold", 9), anchor="e", padx=8, pady=3,
+        )
+        self.wsjtx_live_badge.grid(row=0, column=1, sticky="e")
+        self.qso_worked_badge = tk.Label(
+            call_header, text="", bg=CARD, fg=MUTED, font=("Segoe UI Semibold", 9),
+            anchor="e", padx=8, pady=3,
+        )
+        self.qso_worked_badge.grid(row=0, column=2, sticky="e")
         self.call_var = tk.StringVar()
         self.call_entry = ttk.Entry(left, textvariable=self.call_var, style="Call.TEntry")
         self.call_entry.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0, 14))
         self.call_entry.bind("<KeyRelease>", self._call_changed)
-        self.call_entry.bind("<Return>", lambda e: self.save_qso(new_after=True))
+        self.call_entry.bind("<Return>", lambda e: self.save_qso())
 
         self.freq_var = tk.StringVar()
         self.band_var = tk.StringVar(value="20m")
@@ -1331,15 +1371,32 @@ class LoggerApp(tk.Tk):
 
         btns = ttk.Frame(left, style="Card.TFrame")
         btns.grid(row=12, column=0, columnspan=4, sticky="ew", pady=(16, 0))
-        ttk.Button(btns, text="QSO speichern", style="Primary.TButton", command=lambda: self.save_qso(False)).pack(side="left")
-        ttk.Button(btns, text="Speichern + Neu", style="Secondary.TButton", command=lambda: self.save_qso(True)).pack(side="left", padx=8)
-        ttk.Button(btns, text="Felder leeren", style="Secondary.TButton", command=self.clear_qso_form).pack(side="left")
+        ttk.Button(btns, text="QSO speichern", style="Primary.TButton", command=self.save_qso).pack(side="left")
+        ttk.Button(btns, text="Felder leeren", style="Secondary.TButton", command=self.clear_qso_form).pack(side="left", padx=8)
         ttk.Button(btns, text="DX-Spot senden", style="Secondary.TButton", command=self.send_current_dx_spot).pack(side="right")
         self.tune_button = ttk.Button(
             btns, text="TUNE (ATU)", style="Secondary.TButton",
             command=self.start_tuner_from_qso, state="disabled",
         )
         self.tune_button.pack(side="right", padx=(0, 8))
+
+        self.qso_history_frame = tk.Frame(
+            left, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1,
+        )
+        self.qso_history_frame.grid(row=13, column=0, columnspan=4, sticky="ew", pady=(14, 0))
+        self.qso_history_frame.columnconfigure(0, weight=1)
+        self.qso_history_title = tk.Label(
+            self.qso_history_frame, text="", bg=SURFACE, fg=TEXT,
+            font=("Segoe UI Semibold", 9), anchor="w", padx=10, pady=6,
+        )
+        self.qso_history_title.grid(row=0, column=0, sticky="ew")
+        self.qso_history_details = tk.Label(
+            self.qso_history_frame, text="", bg=SURFACE, fg=MUTED,
+            font=("Segoe UI", 9), justify="left", anchor="nw",
+            wraplength=760, padx=10, pady=5,
+        )
+        self.qso_history_details.grid(row=1, column=0, sticky="ew")
+        self.qso_history_frame.grid_remove()
 
         right = self._card(p, row=0, column=1, sticky="nsew", padx=(8, 0))
         right.columnconfigure(0, weight=1)
@@ -1382,19 +1439,24 @@ class LoggerApp(tk.Tk):
         self.callbook_name_label.grid(row=6, column=0, sticky="ew")
         self.callbook_details_label = tk.Label(right, text="", bg=CARD, fg=TEXT, font=("Segoe UI", 9), justify="left", anchor="nw", wraplength=350)
         self.callbook_details_label.grid(row=7, column=0, sticky="ew", pady=(3, 0))
+        self.callbook_distance_label = tk.Label(
+            right, text="", bg=CARD, fg=ACCENT, font=("Segoe UI Semibold", 9),
+            justify="left", anchor="w", wraplength=350,
+        )
+        self.callbook_distance_label.grid(row=8, column=0, sticky="ew", pady=(3, 0))
         self.callbook_status_label = tk.Label(
             right, text="Online-Abfrage optional · Offline-Logging bleibt immer verfügbar.",
             bg=CARD, fg=MUTED, font=("Segoe UI", 8), justify="left", anchor="w", wraplength=350,
         )
-        self.callbook_status_label.grid(row=8, column=0, sticky="ew", pady=(5, 0))
-        ttk.Button(right, text="Callbook neu laden", style="Secondary.TButton", command=self._manual_callbook_lookup).grid(row=9, column=0, sticky="w", pady=(7, 0))
+        self.callbook_status_label.grid(row=9, column=0, sticky="ew", pady=(5, 0))
+        ttk.Button(right, text="Callbook neu laden", style="Secondary.TButton", command=self._manual_callbook_lookup).grid(row=10, column=0, sticky="w", pady=(7, 0))
 
-        ttk.Separator(right).grid(row=10, column=0, sticky="ew", pady=12)
-        ttk.Label(right, text="DXCC · offline", style="CardTitle.TLabel").grid(row=11, column=0, sticky="w")
+        ttk.Separator(right).grid(row=11, column=0, sticky="ew", pady=12)
+        ttk.Label(right, text="DXCC · offline", style="CardTitle.TLabel").grid(row=12, column=0, sticky="w")
         self.country_summary = tk.Label(right, bg=CARD, fg=TEXT, font=("Segoe UI", 9), justify="left", anchor="nw", wraplength=350)
-        self.country_summary.grid(row=12, column=0, sticky="ew", pady=(5, 0))
+        self.country_summary.grid(row=13, column=0, sticky="ew", pady=(5, 0))
         self.country_source = tk.Label(right, text="CTY.DAT · keine Internetverbindung nötig", bg=CARD, fg=MUTED, font=("Segoe UI", 8), justify="left", anchor="w")
-        self.country_source.grid(row=13, column=0, sticky="ew", pady=(3, 0))
+        self.country_source.grid(row=14, column=0, sticky="ew", pady=(3, 0))
 
         # Kept for existing profile and log-file update helpers; the compact
         # footer/header now present these details instead of a second side card.
@@ -1407,6 +1469,35 @@ class LoggerApp(tk.Tk):
             "qth": self._vars["qth"], "pota_ref": self._vars["pota_ref"], "sota_ref": self._vars["sota_ref"],
             "wwff_ref": self._vars["wwff_ref"], "comment": self._vars["comment"],
         }
+        self.freq_var.trace_add("write", lambda *_args: self._update_qso_worked_status())
+        self.band_var.trace_add("write", lambda *_args: self._update_qso_worked_status())
+        self.mode_var.trace_add("write", lambda *_args: self._update_qso_worked_status())
+        self.form_vars["gridsquare"].trace_add("write", lambda *_args: self._update_callbook_distance())
+
+    def _update_callbook_distance(self):
+        if not hasattr(self, "callbook_distance_label") or self.db is None:
+            return
+        own_locator = self.db.get_setting("locator", "").strip().upper()
+        remote_var = self.form_vars.get("gridsquare")
+        remote_locator = remote_var.get().strip().upper() if remote_var is not None else ""
+        try:
+            own_lat, own_lon = maidenhead_coordinates(own_locator)
+            remote_lat, remote_lon = maidenhead_coordinates(remote_locator)
+        except ValueError:
+            self.callbook_distance_label.configure(text="")
+            return
+        kilometres = distance_m(own_lat, own_lon, remote_lat, remote_lon) / 1000.0
+        bearing = initial_bearing_degrees(own_lat, own_lon, remote_lat, remote_lon)
+        directions_de = ("N", "NNO", "NO", "ONO", "O", "OSO", "SO", "SSO", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+        directions_en = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+        direction = (directions_en if self.language == "en" else directions_de)[int((bearing + 11.25) // 22.5) % 16]
+        distance_text = f"{kilometres:.1f}" if kilometres < 10 else f"{kilometres:,.0f}"
+        if self.language == "de":
+            distance_text = distance_text.replace(",", "_").replace(".", ",").replace("_", ".")
+            text = f"Entfernung: ca. {distance_text} km · Peilung {bearing:.0f}° ({direction})"
+        else:
+            text = f"Distance: approx. {distance_text} km · bearing {bearing:.0f}° ({direction})"
+        self.callbook_distance_label.configure(text=text)
 
     _vars: dict[str, tk.StringVar] = {}
 
@@ -1442,7 +1533,93 @@ class LoggerApp(tk.Tk):
             self.callbook_last_call = value
         self.current_country = self.country_db.lookup(value)
         self._update_country_summary()
+        self._update_qso_worked_status()
         self._schedule_callbook_lookup(value)
+
+    def _update_qso_worked_status(self):
+        """Show worked-before state for the active profile, band and mode."""
+        if not hasattr(self, "call_entry") or not hasattr(self, "qso_worked_badge"):
+            return
+        call = self.call_var.get().strip().upper()
+        if not call:
+            self.call_entry.configure(style="Call.TEntry")
+            self.qso_worked_badge.configure(text="", bg=CARD, fg=MUTED)
+            self._update_qso_worked_history("")
+            return
+
+        frequency_hz = 0
+        try:
+            frequency_hz = int(round(float(self.freq_var.get().strip().replace(",", ".")) * 1_000_000))
+        except (TypeError, ValueError):
+            pass
+        band = self.band_var.get().strip()
+        mode = normalize_worked_mode(self.mode_var.get(), frequency_hz, band)
+        exact_count = self.qso_worked_counts.get((call, band, mode), 0) if band and mode else 0
+        total_count = self.qso_worked_call_totals.get(call, 0)
+
+        if exact_count:
+            text = (
+                f"✓ WORKED · {exact_count}× · {band} {mode}"
+                if self.language == "en"
+                else f"✓ BEREITS GEARBEITET · {exact_count}× · {band} {mode}"
+            )
+            self.call_entry.configure(style="Worked.Call.TEntry")
+            self.qso_worked_badge.configure(text=text, bg=OK_BADGE_BG, fg=OK)
+        elif total_count:
+            detail = f"{band} {mode}".strip() or "dieser Auswahl"
+            text = (
+                f"Worked {total_count}× · not on {detail}"
+                if self.language == "en"
+                else f"Schon {total_count}× gearbeitet · nicht auf {detail}"
+            )
+            self.call_entry.configure(style="Call.TEntry")
+            self.qso_worked_badge.configure(text=text, bg=WARN_BADGE_BG, fg=WARN)
+        else:
+            self.call_entry.configure(style="Call.TEntry")
+            self.qso_worked_badge.configure(text="", bg=CARD, fg=MUTED)
+        self._update_qso_worked_history(call)
+
+    def _update_qso_worked_history(self, call: str):
+        """Show the most recent local QSOs for the callsign without growing the form indefinitely."""
+        if not hasattr(self, "qso_history_frame"):
+            return
+        history = self.qso_worked_history.get(call, []) if call else []
+        if not history:
+            self.qso_history_frame.grid_remove()
+            return
+
+        history_limit = 3 if self.winfo_height() < 700 else 5
+        shown = history[:history_limit]
+        title = (
+            f"Previous QSOs with {call} ({len(history)})"
+            if self.language == "en"
+            else f"Bisherige QSOs mit {call} ({len(history)})"
+        )
+        lines = []
+        for qso in shown:
+            raw_date = str(qso.get("qso_date") or "")
+            display_date = raw_date
+            if self.language != "en" and re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_date):
+                display_date = f"{raw_date[8:10]}.{raw_date[5:7]}.{raw_date[:4]}"
+            raw_time = re.sub(r"[^0-9]", "", str(qso.get("time_on") or ""))[:6]
+            if len(raw_time) >= 4:
+                display_time = f"{raw_time[:2]}:{raw_time[2:4]}" + (f":{raw_time[4:6]}" if len(raw_time) >= 6 else "")
+            else:
+                display_time = raw_time or "—"
+            lines.append(
+                f"{display_date or '—'} · {display_time} UTC · "
+                f"{qso.get('band') or '—'} · {qso.get('mode') or '—'}"
+            )
+        remaining = len(history) - len(shown)
+        if remaining:
+            lines.append(
+                f"… and {remaining} more in the local logbook"
+                if self.language == "en"
+                else f"… und {remaining} weitere im lokalen Logbuch"
+            )
+        self.qso_history_title.configure(text=title)
+        self.qso_history_details.configure(text="\n".join(lines))
+        self.qso_history_frame.grid()
 
     def _configured_callbook_source(self) -> str:
         source = self.db.get_setting("callbook_source", CALLBOOK_SOURCE_WAVELOG).strip().lower()
@@ -1494,32 +1671,9 @@ class LoggerApp(tk.Tk):
 
         def worker():
             try:
-                result = None
-                if not force:
-                    cached = self.db.get_callbook_cache(callsign, source)
-                    if cached:
-                        result = CallbookResult.from_json(cached)
-                        result.cached = True
-                if result is None:
-                    if source == CALLBOOK_SOURCE_QRZ:
-                        username = self.db.get_setting("qrz_username", "").strip()
-                        password = self.db.get_secret("qrz_password")
-                        credentials = (username, password)
-                        if self.qrz_client is None or self.qrz_client_credentials != credentials:
-                            self.qrz_client = QrzClient(username, password, timeout=8)
-                            self.qrz_client_credentials = credentials
-                        result = self.qrz_client.lookup(callsign)
-                    else:
-                        client = WavelogClient(
-                            self.db.get_setting("wavelog_url", ""),
-                            self.db.get_token(),
-                            timeout=8,
-                        )
-                        payload = client.lookup_callsign(callsign, band=band, mode=mode, include_callbook=True)
-                        result = normalize_wavelog_result(payload, callsign)
-                    if not any((result.name, result.qth, result.grid, result.country, result.image_url)):
-                        raise CallbookError("Keine Callbook-Daten gefunden")
-                    self.db.set_callbook_cache(callsign, source, result.to_json())
+                result = self._lookup_callbook_result(
+                    callsign, source, band=band, mode=mode, use_cache=not force,
+                )
                 if not self.closing:
                     self.after(0, lambda current=result: self._apply_callbook_result(callsign, generation, current))
             except Exception as exc:
@@ -1528,6 +1682,40 @@ class LoggerApp(tk.Tk):
                     self.after(0, lambda message=error_message: self._callbook_lookup_failed(callsign, generation, message))
 
         threading.Thread(target=worker, name="callbook-lookup", daemon=True).start()
+
+    def _lookup_callbook_result(
+        self, callsign: str, source: str, *, band: str = "", mode: str = "", use_cache: bool = True,
+        metadata_db: MetadataDB | None = None,
+    ) -> CallbookResult:
+        """Run one configured lookup; safe to call from a background thread."""
+        db = metadata_db or self.db
+        result = None
+        if use_cache:
+            cached = db.get_callbook_cache(callsign, source)
+            if cached:
+                result = CallbookResult.from_json(cached)
+                result.cached = True
+        if result is None:
+            if source == CALLBOOK_SOURCE_QRZ:
+                username = db.get_setting("qrz_username", "").strip()
+                password = db.get_secret("qrz_password")
+                credentials = (username, password)
+                if self.qrz_client is None or self.qrz_client_credentials != credentials:
+                    self.qrz_client = QrzClient(username, password, timeout=8)
+                    self.qrz_client_credentials = credentials
+                result = self.qrz_client.lookup(callsign)
+            elif source == CALLBOOK_SOURCE_WAVELOG:
+                client = WavelogClient(
+                    db.get_setting("wavelog_url", ""), db.get_token(), timeout=8,
+                )
+                payload = client.lookup_callsign(callsign, band=band, mode=mode, include_callbook=True)
+                result = normalize_wavelog_result(payload, callsign)
+            else:
+                raise CallbookError("Callbook-Abfrage ist deaktiviert")
+            if not any((result.name, result.qth, result.grid, result.country, result.image_url)):
+                raise CallbookError("Keine Callbook-Daten gefunden")
+            db.set_callbook_cache(callsign, source, result.to_json())
+        return result
 
     def _apply_callbook_result(self, callsign: str, generation: int, result: CallbookResult):
         if self.closing or generation != self.callbook_generation or self.call_var.get().strip().upper() != callsign:
@@ -1797,7 +1985,7 @@ class LoggerApp(tk.Tk):
             # already completed local ADI write.
             pass
 
-    def save_qso(self, new_after=False):
+    def save_qso(self):
         try:
             q = self._collect_qso()
             q = self.store.add(q)
@@ -1807,9 +1995,9 @@ class LoggerApp(tk.Tk):
             self.status_var.set(f"Gespeichert: {q['call']} · {q['band']} · {q['mode']} · {Path(q['_file']).name}")
             self.refresh_qsos()
             self._local_sync_change()
-            if new_after:
-                self.clear_qso_form(keep_freq=True)
-                self.call_entry.focus_set()
+            self.clear_qso_form()
+            self.wsjtx_live_form_call = ""
+            self.call_entry.focus_set()
         except Exception as e:
             messagebox.showerror("QSO konnte nicht gespeichert werden", str(e), parent=self)
 
@@ -1835,6 +2023,7 @@ class LoggerApp(tk.Tk):
         self.form_vars["tx_pwr"].set(self.db.get_setting("default_power", ""))
         if self.live_time_var.get():
             self._set_current_qso_time()
+        self._update_qso_worked_status()
 
     # ---------- Fast Log / DXpedition ----------
     def _build_fast_log_page(self):
@@ -4339,8 +4528,19 @@ class LoggerApp(tk.Tk):
     def _update_dx_cluster_worked_cache(self, qsos: list[dict]):
         calls: set[tuple[str, str, str]] = set()
         countries: set[tuple[str, str, str]] = set()
+        worked_counts: Counter[tuple[str, str, str]] = Counter()
+        call_totals: Counter[str] = Counter()
+        worked_history: dict[str, list[dict[str, str]]] = {}
         for qso in qsos:
             call = str(qso.get("call") or "").strip().upper()
+            if call:
+                call_totals[call] += 1
+                worked_history.setdefault(call, []).append({
+                    "qso_date": str(qso.get("qso_date") or ""),
+                    "time_on": str(qso.get("time_on") or ""),
+                    "band": str(qso.get("band") or ""),
+                    "mode": str(qso.get("mode") or ""),
+                })
             country = str(qso.get("country") or "").strip()
             if not country and call:
                 info = self.country_db.lookup(call)
@@ -4360,10 +4560,17 @@ class LoggerApp(tk.Tk):
                 continue
             if call:
                 calls.add((call, band, mode))
+                worked_counts[(call, band, mode)] += 1
             if country:
                 countries.add((country, band, mode))
         self.dx_cluster_worked_calls = calls
         self.dx_cluster_worked_countries = countries
+        self.qso_worked_counts = worked_counts
+        self.qso_worked_call_totals = call_totals
+        for history in worked_history.values():
+            history.sort(key=lambda item: (item["qso_date"], re.sub(r"[^0-9]", "", item["time_on"])), reverse=True)
+        self.qso_worked_history = worked_history
+        self._update_qso_worked_status()
         if hasattr(self, "dx_cluster_tree"):
             self._refresh_dx_cluster_spots()
 
@@ -4682,7 +4889,7 @@ class LoggerApp(tk.Tk):
         ttk.Label(
             left,
             text=(
-                "Empfängt geloggte QSOs aus WSJT-X oder anderen Programmen. "
+                "Empfängt den laufenden QSO-Status und geloggte QSOs aus WSJT-X oder anderen Programmen. "
                 "Die Einstellungen gehören zum aktiven Logger-Profil."
             ),
             style="Muted.Card.TLabel",
@@ -4717,7 +4924,7 @@ class LoggerApp(tk.Tk):
         self.udp_log_autostart_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             left,
-            text="UDP Logging beim App-Start automatisch starten",
+            text="UDP Logging beim App-Start und Profilwechsel automatisch starten",
             variable=self.udp_log_autostart_var,
         ).grid(row=8, column=0, sticky="w", pady=(0, 14))
 
@@ -4734,6 +4941,13 @@ class LoggerApp(tk.Tk):
             wraplength=470,
         )
         self.udp_log_status_label.grid(row=11, column=0, sticky="ew", pady=(6, 10))
+        self.udp_log_live_label = tk.Label(
+            left,
+            text="WSJT-X Live: kein aktives QSO.",
+            bg=SURFACE, fg=MUTED, font=("Segoe UI Semibold", 9),
+            justify="left", anchor="nw", wraplength=470, padx=9, pady=7,
+        )
+        self.udp_log_live_label.grid(row=12, column=0, sticky="ew", pady=(0, 10))
         self.udp_log_last_label = tk.Label(
             left,
             text="Noch kein QSO empfangen.",
@@ -4744,10 +4958,10 @@ class LoggerApp(tk.Tk):
             anchor="nw",
             wraplength=470,
         )
-        self.udp_log_last_label.grid(row=12, column=0, sticky="ew", pady=(0, 12))
+        self.udp_log_last_label.grid(row=13, column=0, sticky="ew", pady=(0, 12))
 
         buttons = ttk.Frame(left, style="Card.TFrame")
-        buttons.grid(row=13, column=0, sticky="ew")
+        buttons.grid(row=14, column=0, sticky="ew")
         ttk.Button(buttons, text="Einstellungen speichern", style="Secondary.TButton", command=self.save_udp_log_settings).pack(side="left")
         self.udp_log_start_button = ttk.Button(buttons, text="UDP starten", style="Primary.TButton", command=self.start_udp_log)
         self.udp_log_start_button.pack(side="left", padx=8)
@@ -4790,7 +5004,9 @@ class LoggerApp(tk.Tk):
             text=(
                 "Jedes empfangene QSO landet direkt in der ADI-Datei des aktiven Profils und "
                 "erscheint als LOCAL ONLY im Logbuch. Es wird später über den normalen Wavelog-Sync "
-                "übertragen. Mehrfach gesendete identische QSOs werden ignoriert.\n\n"
+                "übertragen. Fehlende Callbook-Felder werden über die konfigurierte Wavelog- oder "
+                "QRZ.com-Quelle ergänzt; vorhandene Senderdaten bleiben erhalten. Ohne Internet "
+                "wird unverändert lokal weitergeloggt. Mehrfach gesendete identische QSOs werden ignoriert.\n\n"
                 "Optional kann der UDP-Empfänger beim App-Start automatisch gestartet werden."
             ),
             bg=CARD, fg=TEXT, font=("Segoe UI", 10), justify="left", anchor="nw", wraplength=480,
@@ -4805,9 +5021,12 @@ class LoggerApp(tk.Tk):
         self.udp_log_port_var.set(str(config.port))
         self.udp_log_autostart_var.set(self.db.get_setting("udp_log_autostart", "0") == "1")
         self.udp_log_received = 0
+        self.wsjtx_live_form_call = ""
+        self.wsjtx_live_badge.configure(text="", bg=CARD, fg=ACCENT)
         self.udp_log_status_label.configure(
             text="UDP-Logging ist ausgeschaltet · zum Empfangen bitte UDP starten.", fg=MUTED,
         )
+        self.udp_log_live_label.configure(text="WSJT-X Live: kein aktives QSO.", fg=MUTED)
         self.udp_log_last_label.configure(text="Noch kein QSO empfangen.", fg=MUTED)
         self.udp_log_start_button.configure(state="normal")
         self.udp_log_stop_button.configure(state="disabled")
@@ -4848,6 +5067,7 @@ class LoggerApp(tk.Tk):
                 config,
                 lambda event: self._queue_udp_log_event(generation, event),
                 lambda message: self._queue_udp_log_error(generation, message),
+                lambda event: self._queue_udp_status_event(generation, event),
             )
         except Exception as exc:
             self.udp_log_status_label.configure(text="UDP konnte nicht gestartet werden: " + str(exc), fg=ERR)
@@ -4879,6 +5099,8 @@ class LoggerApp(tk.Tk):
         self.udp_log_receiver.stop()
         if update_ui and hasattr(self, "udp_log_status_label"):
             self.udp_log_status_label.configure(text="UDP-Logging ist ausgeschaltet.", fg=MUTED)
+            self.udp_log_live_label.configure(text="WSJT-X Live: kein aktives QSO.", fg=MUTED)
+            self.wsjtx_live_badge.configure(text="", bg=CARD, fg=ACCENT)
             self.udp_log_start_button.configure(state="normal")
             self.udp_log_stop_button.configure(state="disabled")
 
@@ -4890,11 +5112,72 @@ class LoggerApp(tk.Tk):
         if not self.closing:
             self.after(0, lambda: self._show_udp_log_error(generation, message))
 
+    def _queue_udp_status_event(self, generation: int, event: UdpStatusEvent):
+        if not self.closing:
+            self.after(0, lambda: self._accept_udp_status_event(generation, event))
+
     def _show_udp_log_error(self, generation: int, message: str):
         if generation != self.udp_log_generation or self.closing:
             return
         self.udp_log_status_label.configure(text="UDP-Datagramm konnte nicht gelesen werden: " + message, fg=WARN)
         self.status_var.set("UDP-Empfangsfehler")
+
+    def _accept_udp_status_event(self, generation: int, event: UdpStatusEvent):
+        """Mirror the selected WSJT-X partner into the normal form without logging it."""
+        if generation != self.udp_log_generation or self.closing or not self.udp_log_receiver.running:
+            return
+        status = event.status
+        call = status.dx_call.strip().upper()
+        if not lookup_candidate(call):
+            previous = self.wsjtx_live_form_call
+            self.wsjtx_live_form_call = ""
+            self.wsjtx_live_badge.configure(text="", bg=CARD, fg=ACCENT)
+            self.udp_log_live_label.configure(text="WSJT-X Live: kein aktives QSO.", fg=MUTED)
+            if previous and self.call_var.get().strip().upper() == previous:
+                self.clear_qso_form()
+            return
+
+        qso_frequency_hz = status.qso_frequency_hz
+        frequency = format_frequency_mhz(qso_frequency_hz)
+        mode = status.tx_mode or status.mode
+        band = band_from_mhz(qso_frequency_hz / 1_000_000) or ""
+        state = "TX" if status.transmitting else ("Dekodierung" if status.decoding else "RX")
+        self.wsjtx_live_badge.configure(text="● WSJT-X LIVE", bg=ACTIVE_BG, fg=ACCENT)
+        self.udp_log_live_label.configure(
+            text=(
+                f"WSJT-X Live: {call} · {status.dx_grid or 'Locator —'} · "
+                f"{band or 'Band —'} · {mode or 'Mode —'} · {state}"
+            ),
+            fg=ACCENT,
+        )
+
+        current_call = self.call_var.get().strip().upper()
+        if current_call and current_call not in {call, self.wsjtx_live_form_call}:
+            self.udp_log_live_label.configure(
+                text=self.udp_log_live_label.cget("text") + " · manuelle Formulareingabe bleibt unverändert",
+                fg=WARN,
+            )
+            return
+        if self.wsjtx_live_form_call and self.wsjtx_live_form_call != call and current_call == self.wsjtx_live_form_call:
+            self.clear_qso_form()
+
+        changed_call = self.wsjtx_live_form_call != call or current_call != call
+        self.wsjtx_live_form_call = call
+        self.call_var.set(call)
+        if frequency:
+            self.freq_var.set(frequency)
+        if band:
+            self.band_var.set(band)
+        if mode:
+            self.mode_var.set(mode)
+        if status.dx_grid:
+            self.form_vars["gridsquare"].set(status.dx_grid)
+        if status.report:
+            self.rst_sent_var.set(status.report)
+        if changed_call:
+            self._call_changed()
+        else:
+            self._update_qso_worked_status()
 
     def _prepare_external_qso(self, incoming: dict) -> dict:
         qso = dict(incoming)
@@ -4961,6 +5244,10 @@ class LoggerApp(tk.Tk):
             qso = self._prepare_external_qso(event.qso)
             duplicate = find_duplicate_qso(self.store.scan(), qso)
             if duplicate is not None:
+                if self.call_var.get().strip().upper() == qso["call"]:
+                    self.clear_qso_form()
+                    self.wsjtx_live_form_call = ""
+                    self.wsjtx_live_badge.configure(text="", bg=CARD, fg=ACCENT)
                 self.udp_log_last_label.configure(
                     text=f"Duplikat ignoriert: {qso['call']} · {qso['qso_date']} {qso['time_on']} · {event.source}",
                     fg=WARN,
@@ -4972,18 +5259,108 @@ class LoggerApp(tk.Tk):
             self._bind_active_xota_qso(saved)
             self._notify_qso_saved(saved)
             self.udp_log_received += 1
+            if self.call_var.get().strip().upper() == saved["call"]:
+                self.clear_qso_form()
+                self.wsjtx_live_form_call = ""
+                self.wsjtx_live_badge.configure(text="", bg=CARD, fg=ACCENT)
+            self.refresh_qsos()
             self.udp_log_last_label.configure(
                 text=(
                     f"Zuletzt gespeichert: {saved['call']} · {saved.get('band') or '—'} · "
-                    f"{saved['mode']} · {event.source}\nIn dieser Sitzung empfangen: {self.udp_log_received}"
+                    f"{saved['mode']} · {event.source}\n"
+                    f"Callbook-Ergänzung wird geprüft · in dieser Sitzung: {self.udp_log_received}"
                 ),
                 fg=OK,
             )
             self.status_var.set(f"UDP-QSO gespeichert: {saved['call']} · LOCAL ONLY")
-            self.refresh_qsos()
-            self._local_sync_change()
+            self._start_external_qso_enrichment(
+                self.active_profile_id, event, saved,
+            )
         except Exception as exc:
             self._show_udp_log_error(generation, str(exc))
+
+    def _start_external_qso_enrichment(self, profile_id: str, event: UdpLogEvent, saved: dict):
+        source = self._configured_callbook_source()
+        auto_lookup = self.db.get_setting("callbook_auto_lookup", "1") == "1"
+        needs_lookup = any(
+            not str(saved.get(key) or "").strip() for key in ("name", "gridsquare", "qth")
+        )
+        if source == CALLBOOK_SOURCE_DISABLED or not auto_lookup or not needs_lookup or not lookup_candidate(saved["call"]):
+            self._finish_external_qso_enrichment(profile_id, event, saved["local_id"], None, "")
+            return
+
+        callsign = saved["call"]
+        band = str(saved.get("band") or "")
+        mode = str(saved.get("mode") or "")
+        local_id = saved["local_id"]
+        metadata_db = self.db
+        pending_key = (profile_id, local_id)
+        self.external_enrichment_pending.add(pending_key)
+        if self.auto_sync_job is not None:
+            try:
+                self.after_cancel(self.auto_sync_job)
+            except Exception:
+                pass
+            self.auto_sync_job = None
+
+        def worker():
+            try:
+                result = self._lookup_callbook_result(
+                    callsign, source, band=band, mode=mode, use_cache=True,
+                    metadata_db=metadata_db,
+                )
+                if not self.closing:
+                    self.after(
+                        0, lambda current=result: self._finish_external_qso_enrichment(
+                            profile_id, event, local_id, current, "",
+                        ),
+                    )
+            except Exception as exc:
+                message = str(exc)
+                if not self.closing:
+                    self.after(
+                        0, lambda current_error=message: self._finish_external_qso_enrichment(
+                            profile_id, event, local_id, None, current_error,
+                        ),
+                    )
+
+        threading.Thread(target=worker, name="external-qso-callbook", daemon=True).start()
+
+    def _finish_external_qso_enrichment(
+        self, profile_id: str, event: UdpLogEvent, local_id: str,
+        result: CallbookResult | None, error: str,
+    ):
+        self.external_enrichment_pending.discard((profile_id, local_id))
+        if self.closing or profile_id != self.active_profile_id:
+            return
+        current = self.store.find(local_id)
+        if current is None:
+            return
+        filled: tuple[str, ...] = ()
+        if result is not None:
+            enriched, filled = enrich_qso_from_callbook(current, result)
+            if filled:
+                current = self.store.update(local_id, enriched)
+                self.db.ensure_local(local_id, qso_hash(current))
+        source_text = (result.source if result is not None else "").strip()
+        if filled:
+            enrichment = f"ergänzt über {source_text or 'Callbook'}: {', '.join(filled)}"
+        elif error:
+            enrichment = "ohne Callbook-Ergänzung"
+            write_startup_log(f"Externes QSO {current.get('call', '')}: Callbook nicht verfügbar: {error}")
+        else:
+            enrichment = "Callbook-Daten bereits vollständig oder Abfrage deaktiviert"
+        self.udp_log_last_label.configure(
+            text=(
+                f"Zuletzt gespeichert: {current['call']} · {current.get('band') or '—'} · "
+                f"{current['mode']} · {event.source}\n{enrichment} · "
+                f"in dieser Sitzung: {self.udp_log_received}"
+            ),
+            fg=OK,
+        )
+        self.status_var.set(f"UDP-QSO gespeichert: {current['call']} · {enrichment}")
+        self.refresh_qsos()
+        self._local_sync_change()
 
     # ---------- settings ----------
     def _build_settings_page(self):
@@ -5304,6 +5681,7 @@ class LoggerApp(tk.Tk):
         self._load_dx_cluster_settings_to_ui()
         self._load_dx_spotter_settings_to_ui()
         self._load_udp_log_settings_to_ui()
+        self._update_callbook_distance()
 
         # If Wavelog was configured before, profile labels are loaded only on explicit test.
         sid = self.db.get_setting("station_profile_id", "")
@@ -5385,6 +5763,7 @@ class LoggerApp(tk.Tk):
             self.xota_geocoder = ReverseGeocodeService(self.xota_repository, self.db.get_setting("xota_reverse_geocode_url", ""))
             self.form_vars["tx_pwr"].set(self.db.get_setting("default_power", ""))
             self._update_profile_summary()
+            self._update_callbook_distance()
             self._update_logfile_preview()
             self.dx_cluster_call_var.set(self._active_station_callsign())
             self.dx_spotter_call_var.set(self._active_station_callsign())

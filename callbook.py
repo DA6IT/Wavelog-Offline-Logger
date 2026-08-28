@@ -51,6 +51,24 @@ class CallbookResult:
         return cls(**{key: raw.get(key, "") for key in allowed})
 
 
+def enrich_qso_from_callbook(qso: dict[str, Any], result: CallbookResult) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Fill missing ADIF fields without replacing values supplied by a logger."""
+    enriched = dict(qso)
+    filled: list[str] = []
+    for target, value in (
+        ("name", result.name),
+        ("gridsquare", result.grid.upper()),
+        ("qth", result.qth),
+        ("country", result.country),
+        ("cqz", result.cq_zone),
+        ("ituz", result.itu_zone),
+    ):
+        if value and not str(enriched.get(target) or "").strip():
+            enriched[target] = value
+            filled.append(target)
+    return enriched, tuple(filled)
+
+
 def normalized_callsign(value: str) -> str:
     return re.sub(r"\s+", "", (value or "").upper())
 

@@ -15,6 +15,7 @@ from logger_core import adif_fields_to_qso, parse_adif
 WSJTX_MAGIC = 0xADBCCBDA
 WSJTX_MAX_SCHEMA = 3
 WSJTX_HEARTBEAT = 0
+WSJTX_STATUS = 1
 WSJTX_QSO_LOGGED = 5
 WSJTX_LOGGED_ADIF = 12
 
@@ -65,12 +66,43 @@ class DecodedDatagram:
     heartbeat_reply: bytes | None = None
     client_id: str = ""
     schema: int = 0
+    status: WsjtStatus | None = None
 
 
 @dataclass(frozen=True)
 class UdpLogEvent:
     source: str
     qso: dict[str, Any]
+    sender: tuple[str, int]
+
+
+@dataclass(frozen=True)
+class WsjtStatus:
+    client_id: str
+    dial_frequency_hz: int
+    mode: str
+    dx_call: str
+    report: str
+    tx_mode: str
+    tx_enabled: bool
+    transmitting: bool
+    decoding: bool
+    rx_df_hz: int
+    tx_df_hz: int
+    de_call: str
+    de_grid: str
+    dx_grid: str
+
+    @property
+    def qso_frequency_hz(self) -> int:
+        offset = self.tx_df_hz if 0 <= self.tx_df_hz <= 100_000 else 0
+        return self.dial_frequency_hz + offset
+
+
+@dataclass(frozen=True)
+class UdpStatusEvent:
+    source: str
+    status: WsjtStatus
     sender: tuple[str, int]
 
 
@@ -92,6 +124,9 @@ class _QtReader:
 
     def u8(self) -> int:
         return self._take(1)[0]
+
+    def boolean(self) -> bool:
+        return bool(self.u8())
 
     def u32(self) -> int:
         return struct.unpack(">I", self._take(4))[0]
@@ -212,6 +247,26 @@ def _qso_from_wsjt_qso_logged(reader: _QtReader) -> dict[str, Any]:
     return qso
 
 
+def _status_from_wsjt(reader: _QtReader, client_id: str) -> WsjtStatus:
+    """Decode the stable WSJT-X Status prefix shared by supported schemas."""
+    return WsjtStatus(
+        client_id=client_id,
+        dial_frequency_hz=reader.u64(),
+        mode=reader.text().strip().upper(),
+        dx_call=reader.text().strip().upper(),
+        report=reader.text().strip(),
+        tx_mode=reader.text().strip().upper(),
+        tx_enabled=reader.boolean(),
+        transmitting=reader.boolean(),
+        decoding=reader.boolean(),
+        rx_df_hz=reader.u32(),
+        tx_df_hz=reader.u32(),
+        de_call=reader.text().strip().upper(),
+        de_grid=reader.text().strip().upper(),
+        dx_grid=reader.text().strip().upper(),
+    )
+
+
 def _adif_qsos(text: str) -> tuple[dict[str, Any], ...]:
     fields = parse_adif(text)
     if not fields:
@@ -232,6 +287,11 @@ def decode_udp_datagram(data: bytes, *, app_version: str = "") -> DecodedDatagra
                 heartbeat_reply=build_heartbeat(client_id, schema, app_version),
                 client_id=client_id,
                 schema=schema,
+            )
+        if message_type == WSJTX_STATUS:
+            return DecodedDatagram(
+                source="WSJT-X", client_id=client_id, schema=schema,
+                status=_status_from_wsjt(reader, client_id),
             )
         if message_type == WSJTX_LOGGED_ADIF:
             qsos = _adif_qsos(reader.text())
@@ -295,6 +355,7 @@ class UdpLogReceiver:
         self._thread: threading.Thread | None = None
         self._on_qso: Callable[[UdpLogEvent], None] | None = None
         self._on_error: Callable[[str], None] | None = None
+        self._on_status: Callable[[UdpStatusEvent], None] | None = None
 
     @property
     def running(self) -> bool:
@@ -306,6 +367,7 @@ class UdpLogReceiver:
         config: UdpLogConfig,
         on_qso: Callable[[UdpLogEvent], None],
         on_error: Callable[[str], None] | None = None,
+        on_status: Callable[[UdpStatusEvent], None] | None = None,
     ) -> None:
         config.validate()
         with self._lock:
@@ -327,6 +389,7 @@ class UdpLogReceiver:
             self._socket = sock
             self._on_qso = on_qso
             self._on_error = on_error
+            self._on_status = on_status
             self._thread = threading.Thread(target=self._run, args=(sock,), name="udp-log-listener", daemon=True)
             self._thread.start()
 
@@ -337,6 +400,7 @@ class UdpLogReceiver:
                     return
                 on_qso = self._on_qso
                 on_error = self._on_error
+                on_status = self._on_status
             try:
                 data, sender = sock.recvfrom(65535)
             except socket.timeout:
@@ -347,6 +411,8 @@ class UdpLogReceiver:
                 decoded = decode_udp_datagram(data, app_version=self.app_version)
                 if decoded.heartbeat_reply is not None:
                     sock.sendto(decoded.heartbeat_reply, sender)
+                if decoded.status is not None and on_status:
+                    on_status(UdpStatusEvent(decoded.source, decoded.status, sender))
                 if on_qso:
                     for qso in decoded.qsos:
                         on_qso(UdpLogEvent(decoded.source, qso, sender))
@@ -364,6 +430,7 @@ class UdpLogReceiver:
             self._thread = None
             self._on_qso = None
             self._on_error = None
+            self._on_status = None
         if sock is not None:
             try:
                 sock.close()
