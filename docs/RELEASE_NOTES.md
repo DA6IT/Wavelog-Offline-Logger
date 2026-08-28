@@ -1,51 +1,50 @@
-# DA6IT.de Wavelog Offline Logger v0.17.1
+# DA6IT.de Wavelog Offline Logger v0.17.2
 
-v0.17.1 ist das Wartungsrelease für die neue Contest-Anbindung und die responsive Oberfläche. Es verbessert den Wavelog-Abgleich und verhindert abgeschnittene Felder oder Schaltflächen bei kleineren Fenstergrößen. xOTA, ADIF-Import/-Export und alle lokalen Daten aus v0.17.0 bleiben vollständig erhalten.
+v0.17.2 erweitert das normale QSO-Formular um eine Live-Anbindung an WSJT-X, lokale Worked-Informationen sowie Entfernung und Peilung zur Gegenstation. Extern empfangene QSOs werden weiterhin zuerst sicher lokal gespeichert und können anschließend automatisch mit Callbook-Daten ergänzt und zu Wavelog übertragen werden.
 
-## Zuverlässig skalierende Oberfläche
+## WSJT-X-Live-Vorschau
 
-- Alle Hauptseiten verkleinern jetzt nicht nur die Schrift, sondern auch Karten, Innenabstände, Aktionsleisten und Tabellenzeilen gemeinsam.
-- Die Einstellungen wechseln bei begrenzter Höhe automatisch in eine Kompaktansicht: Eingabefelder und Aktionen bleiben sichtbar, optionale Erklärungstexte werden vorübergehend ausgeblendet.
-- Contest-, QSO-Bearbeitungs-, Profil- und Sync-Dialoge passen sich der verfügbaren Bildschirmfläche an.
-- Der Release-Ablauf prüft alle zehn Hauptseiten und jeden Einstellungs-Tab automatisch bei 900×580, 1100×680, 1355×790 und 1420×820 Pixeln. Abgeschnittene sichtbare Schaltflächen stoppen die Veröffentlichung.
+- Der Logger verarbeitet die laufenden Statuspakete des nativen WSJT-X-UDP-Protokolls.
+- Sobald in WSJT-X eine Gegenstation gewählt ist, erscheinen Rufzeichen, Locator, Frequenz, Band, Mode und Report bereits während des QSOs im normalen QSO-Formular.
+- Der vorhandene Callbook-Lookup kann dadurch schon vor dem Loggen Name, QTH, Foto und weitere Angaben anzeigen.
+- Ein Live-Status speichert niemals selbstständig ein QSO. Erst das echte `QSO Logged`-Paket erzeugt den lokalen ADI-Eintrag.
+- Nach einem erfolgreich manuell oder extern geloggten QSO wird das Formular automatisch geleert.
+- Eine vorhandene manuelle Eingabe für ein anderes Rufzeichen wird nicht durch WSJT-X überschrieben.
 
-## Contest-Sessions mit Wavelog
+Für die Live-Vorschau müssen primärer WSJT-X-UDP-Server und Logger dieselbe Adresse und denselben Port verwenden. Der sekundäre, als veraltet markierte ADIF-Broadcast überträgt ausschließlich abgeschlossene QSOs und keine Live-Statuspakete.
 
-- Contest-Sessions werden für das gewählte Stationsprofil aus Wavelog geladen und lokal auswählbar gemacht.
-- Lokal angelegte Sessions werden mit ADIF-Contest-Name, UTC-Zeitraum, Exchange-Einstellungen und Kommentar zu Wavelog übertragen.
-- Die numerische Session-ID kommt automatisch von Wavelog; der Anwender muss keine freie ID suchen.
-- Bereits verknüpfte QSOs werden der exakten Session zugeordnet und bestimmen beim Start die nächste freie Seriennummer.
-- Neue Online-QSOs werden nach dem Upload automatisch mit der passenden Contest-Session verknüpft.
-- Fehlt die noch junge Contest-API oder ein benötigter Token-Scope, bleiben lokales Contest-Logging und der QSO-Sync einschließlich `CONTEST_ID` verwendbar; vorhandene Contest-QSOs werden als lokale Auswahl nach ADIF-Name und Jahr rekonstruiert.
-- Numerische IDs aus der Wavelog-Weboberfläche werden nicht mehr als ADIF-Contest-Name akzeptiert.
-- Das Contest-Formular nutzt ein kompaktes mehrspaltiges Layout.
+## Worked-Anzeige und lokale Historie
 
-## xOTA für portable Aktivierungen (seit v0.17.0)
+- Bereits auf demselben Band und Mode gearbeitete Rufzeichen werden im manuellen QSO-Formular grün markiert.
+- Frühere QSOs auf anderen Bändern oder Modes erscheinen als gelber Hinweis.
+- Unter dem Formular werden die letzten lokalen Verbindungen mit dem eingegebenen Rufzeichen einschließlich Datum, UTC-Zeit, Band und Mode angezeigt.
+- Die Prüfung erfolgt ausschließlich gegen das aktive lokale Profil und benötigt keine Internetverbindung.
 
-- POTA, SOTA, WWFF, IOTA, COTA und WCA können in einer gemeinsamen Aktivierung kombiniert werden.
-- Mehrere gleichzeitig gültige Referenzen lassen sich mit Strg/Shift gemeinsam auswählen und ohne Dubletten übernehmen.
-- GPS ist optional; Koordinaten bleiben editierbar und der Maidenhead-Locator wird offline berechnet.
-- Standort- und Referenzdienste ergänzen Daten nur bei bestehender Internetverbindung.
-- Der vollständige offizielle POTA-Katalog wird lokal zwischengespeichert.
-- Nahe POTA-Marker bis 10 km und deutlich gekennzeichnete Kandidaten bis 25 km berücksichtigen auch große Parks mit entferntem Mittelpunkt.
-- Ein ausgewählter POTA-Park kann zur bewussten Grenzprüfung auf pota-map.info geöffnet werden.
-- QSOs werden dauerhaft der Aktivierung zugeordnet. Eine passende Wavelog Station Location kann ausgewählt oder nach ausdrücklicher Bestätigung neu angelegt werden.
+## Entfernung und Peilung
 
-Referenzvorschläge sind kein automatischer Gültigkeitsnachweis. Der Benutzer prüft und bestätigt jede Referenz selbst.
+- Sobald im aktiven Profil ein eigener Maidenhead-Locator und für die Gegenstation ein Locator vorliegen, zeigt der Callbook-Bereich die ungefähre Entfernung in Kilometern an.
+- Zusätzlich werden Anfangspeilung in Grad und Himmelsrichtung ausgegeben.
+- Die Berechnung erfolgt offline anhand der Zellmittelpunkte der Maidenhead-Locatoren und funktioniert unabhängig von Wavelog oder QRZ.com.
 
-## Eine ADI-Datei je Profil (seit v0.17.0)
+## Callbook-Ergänzung externer QSOs
 
-- Pro Profil gibt es nun eine fortlaufende ADI-Datei statt täglicher Einzeldateien.
-- Bestehende Tagesdateien werden vor der Migration als ZIP gesichert, zusammengeführt und durch erneutes Einlesen verifiziert.
-- Erst nach erfolgreicher Prüfung werden die alten Quellen in ein Wiederherstellungsverzeichnis verschoben.
-- ADIF-Import prüft Pflichtfelder, schützt vor Dubletten und legt vor dem Schreiben eine Sicherung an.
-- ADIF-Export schreibt einen geprüften, portablen Datensatz aus dem lokalen Profil-Logbuch.
+- Über WSJT-X oder ADIF/UDP empfangene QSOs werden unmittelbar lokal gespeichert.
+- Fehlende Angaben wie Name, Locator, QTH, Land sowie CQ-/ITU-Zone können anschließend im Hintergrund über die konfigurierte Wavelog- oder QRZ.com-Quelle ergänzt werden.
+- Bereits vom sendenden Programm gelieferte Werte werden niemals überschrieben.
+- Ohne Internet oder bei einem Lookup-Fehler bleibt das sicher gespeicherte lokale QSO unverändert erhalten.
+- Ein aktivierter automatischer Wavelog-Push wartet auf die laufende Ergänzung, damit die vollständigen Daten übertragen werden.
 
-## Windows-Integration
+## UDP-Logging und Profile
 
-- Die UTC-Uhr besitzt eine feste Breite und springt beim Sekundenwechsel nicht mehr.
-- Das DA6IT.de-Funkmastlogo wird als Fenster-, Taskleisten-, Verknüpfungs- und EXE-Dateisymbol verwendet.
-- Die Windows-GPS-Anbindung verwendet die aktuelle WinRT-Geoposition-API und fällt kontrolliert auf manuelle Eingabe zurück.
+- Beim Profilwechsel beendet der Logger den Listener des alten Profils.
+- Für das neu gewählte Profil wird dessen eigene Host-/Port-Konfiguration automatisch gestartet, wenn UDP-Autostart aktiviert ist.
+- Die Einstellung heißt deshalb nun ausdrücklich **UDP Logging beim App-Start und Profilwechsel automatisch starten**.
+
+## Bedienung
+
+- Die redundante Schaltfläche **Speichern + Neu** im normalen QSO-Formular wurde entfernt.
+- **QSO speichern** speichert lokal, setzt anschließend alle QSO-Felder zurück und fokussiert erneut das Rufzeichenfeld.
+- Fast Log, Contest Logging, xOTA, ADIF-Import/-Export und der stationsbezogene Wavelog-Sync aus v0.17.1 bleiben erhalten.
 
 ## Plattformen und Downloads
 
@@ -61,7 +60,7 @@ Windows-Pakete sind derzeit nicht digital signiert. Die macOS-App ist technisch 
 
 ## Upgrade und Datensicherheit
 
-v0.17.1 kann direkt über v0.17.0 oder eine ältere Version installiert werden. Beim ersten Zugriff auf ein Profil aus v0.16.x kann die einmalige ADI-Zusammenführung je nach Loggröße etwas dauern. Die App erzeugt vor jeder Migration eine Sicherung und löscht keine Quelldatei ohne erfolgreiche Verifikation.
+v0.17.2 kann direkt über v0.17.1 oder eine ältere Version installiert werden. Vorhandene Profile, Einstellungen, ADI-Dateien, Sync-Metadaten und Callbook-Caches bleiben erhalten. Jedes neue QSO wird weiterhin zuerst lokal in der profilbezogenen ADI-Datei gespeichert.
 
 Vor einem Upgrade empfiehlt sich trotzdem eine zusätzliche Kopie des vollständigen Anwendungs- und gegebenenfalls externen ADI-Ordners.
 
@@ -71,7 +70,6 @@ Vor einem Upgrade empfiehlt sich trotzdem eine zusätzliche Kopie des vollständ
 - keine Apple-Notarisierung
 - eQSL.cc-Anbindung weiterhin **Coming soon**
 - vollständiges ZIP-Backup und Restore über die Oberfläche weiterhin geplant
-- POTA-Katalogkoordinaten sind Marker und keine exakten Parkgrenzen
-- Der Wavelog-Contest-Abgleich benötigt eine Wavelog-Version mit `/api/v2/contest` sowie `contest:read` und `contest:write`; ältere Instanzen arbeiten lokal weiter
+- Entfernung und Peilung sind wegen der Locator-Zellgröße Näherungswerte
 
-Eine vollständige Bedienungsanleitung steht im [Benutzerhandbuch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.17.1/docs/USER_GUIDE.md); typische Probleme behandelt die [Fehlerhilfe](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.17.1/docs/TROUBLESHOOTING.md).
+Eine vollständige Bedienungsanleitung steht im [Benutzerhandbuch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.17.2/docs/USER_GUIDE.md); typische Probleme behandelt die [Fehlerhilfe](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.17.2/docs/TROUBLESHOOTING.md).

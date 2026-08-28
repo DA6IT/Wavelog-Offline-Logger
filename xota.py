@@ -63,6 +63,47 @@ def maidenhead_locator(latitude: float, longitude: float, precision: int = 6) ->
     return "".join(out)
 
 
+def maidenhead_coordinates(locator: str) -> tuple[float, float]:
+    """Return the WGS84 centre of a 2/4/6/8/10 character Maidenhead grid."""
+    value = str(locator or "").strip().upper()
+    if len(value) not in (2, 4, 6, 8, 10):
+        raise ValueError("Locator-Länge muss 2, 4, 6, 8 oder 10 Zeichen betragen")
+    if not ("A" <= value[0] <= "R" and "A" <= value[1] <= "R"):
+        raise ValueError("Ungültiges Maidenhead-Feld")
+
+    longitude = -180.0 + (ord(value[0]) - 65) * 20.0
+    latitude = -90.0 + (ord(value[1]) - 65) * 10.0
+    longitude_size, latitude_size = 20.0, 10.0
+    if len(value) >= 4:
+        if not (value[2].isdigit() and value[3].isdigit()):
+            raise ValueError("Ungültiges Maidenhead-Großfeld")
+        longitude_size, latitude_size = 2.0, 1.0
+        longitude += int(value[2]) * longitude_size
+        latitude += int(value[3]) * latitude_size
+    if len(value) >= 6:
+        if not ("A" <= value[4] <= "X" and "A" <= value[5] <= "X"):
+            raise ValueError("Ungültiges Maidenhead-Unterfeld")
+        longitude_size /= 24.0
+        latitude_size /= 24.0
+        longitude += (ord(value[4]) - 65) * longitude_size
+        latitude += (ord(value[5]) - 65) * latitude_size
+    if len(value) >= 8:
+        if not (value[6].isdigit() and value[7].isdigit()):
+            raise ValueError("Ungültiges erweitertes Maidenhead-Feld")
+        longitude_size /= 10.0
+        latitude_size /= 10.0
+        longitude += int(value[6]) * longitude_size
+        latitude += int(value[7]) * latitude_size
+    if len(value) >= 10:
+        if not ("A" <= value[8] <= "X" and "A" <= value[9] <= "X"):
+            raise ValueError("Ungültiges erweitertes Maidenhead-Unterfeld")
+        longitude_size /= 24.0
+        latitude_size /= 24.0
+        longitude += (ord(value[8]) - 65) * longitude_size
+        latitude += (ord(value[9]) - 65) * latitude_size
+    return latitude + latitude_size / 2.0, longitude + longitude_size / 2.0
+
+
 def distance_m(latitude_a: float, longitude_a: float, latitude_b: float, longitude_b: float) -> float:
     """Great-circle distance using the WGS84 mean earth radius."""
     lat1, lat2 = math.radians(float(latitude_a)), math.radians(float(latitude_b))
@@ -70,6 +111,17 @@ def distance_m(latitude_a: float, longitude_a: float, latitude_b: float, longitu
     dlon = math.radians(float(longitude_b) - float(longitude_a))
     value = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
     return 6_371_008.8 * 2 * math.atan2(math.sqrt(value), math.sqrt(max(0.0, 1 - value)))
+
+
+def initial_bearing_degrees(
+    latitude_a: float, longitude_a: float, latitude_b: float, longitude_b: float,
+) -> float:
+    """Return the initial great-circle bearing from point A to point B."""
+    lat1, lat2 = math.radians(float(latitude_a)), math.radians(float(latitude_b))
+    dlon = math.radians(float(longitude_b) - float(longitude_a))
+    y = math.sin(dlon) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
+    return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
 
 
 def _json_list(value: Any) -> list[str]:

@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.17.1"
+	appVersion   = "0.17.2"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -449,7 +449,7 @@ func main() {
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
 	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v0171")
+	appDir := filepath.Join(base, "app-v0172")
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)

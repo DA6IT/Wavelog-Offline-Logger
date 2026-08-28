@@ -4,6 +4,23 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-08-28
+
+### Added
+
+- Worked-Anzeige im normalen QSO-Formular: Bereits auf demselben Band und Mode gearbeitete Rufzeichen werden grün markiert; frühere QSOs auf anderen Bändern oder Modes erscheinen als gelber Hinweis. Eine kompakte Historie zeigt zusätzlich die fünf neuesten lokalen QSOs mit Datum, UTC-Zeit, Band und Mode
+- Extern über WSJT-X oder ADIF/UDP empfangene QSOs werden im Hintergrund über die konfigurierte Wavelog- oder QRZ.com-Callbook-Quelle ergänzt; vorhandene Senderdaten bleiben unverändert und Offline-Fehler blockieren das lokale Speichern nicht
+- WSJT-X-Live-Vorschau: Statuspakete füllen während eines laufenden QSOs das normale Formular mit Rufzeichen, Locator, Frequenz, Band, Mode und Report; der vorhandene Callbook-Lookup zeigt schon vor dem Loggen Name, QTH, Foto und Worked-Historie. Gespeichert wird ausschließlich beim echten `QSO Logged`-Paket
+- Offline berechnete Entfernung und Peilung zur Gegenstation im Callbook-Bereich, sobald eigener und fremder Maidenhead-Locator vorliegen
+
+### Changed
+
+- Nach jedem erfolgreichen manuellen oder externen QSO-Log wird das normale Formular zurückgesetzt; die bisher redundante Schaltfläche `Speichern + Neu` entfällt
+
+### Fixed
+
+- Beim Profilwechsel wird der UDP-Listener des vorherigen Profils beendet und für das neue Profil mit dessen eigener Host-/Port-Konfiguration automatisch neu gestartet, sofern dort UDP-Autostart aktiviert ist
+
 ## [0.17.1] - 2026-08-22
 
 ### Added

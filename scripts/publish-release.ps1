@@ -163,7 +163,7 @@ try {
     }
     Invoke-Checked $python @("selftest.py")
     Invoke-Checked $python @(
-        "-m", "py_compile", "app.py", "logger_core.py", "callbook.py",
+        "-m", "py_compile", "app.py", "logger_core.py", "callbook.py", "external_logging.py",
         "notifications.py", "ui_preferences.py", "update_check.py",
         "xota.py", "scripts\capture-doc-screenshots.py", "scripts\set-windows-icon.py"
     )
@@ -229,10 +229,12 @@ try {
 
     Write-Host "6/10 Gepruefte Dateien committen und Branch pushen ..."
     $releaseFiles = @(
+        ".gitignore",
         ".gitattributes",
         "app.py",
         "bootstrap_windows.go",
         "callbook.py",
+        "external_logging.py",
         "logger_core.py",
         "notifications.py",
         "selftest.py",

@@ -9,7 +9,8 @@ from logger_core import (
 )
 from xota import (
     GPSService, ActivationReferenceService, XotaRepository, distance_m,
-    maidenhead_locator, merge_candidate_references, parse_reference_csv, station_match_score,
+    initial_bearing_degrees, maidenhead_coordinates, maidenhead_locator,
+    merge_candidate_references, parse_reference_csv, station_match_score,
 )
 
 class FakeClient:
@@ -830,7 +831,7 @@ else:
 print("FAST LOG SELFTEST OK")
 
 from external_logging import (
-    WSJTX_HEARTBEAT, WSJTX_LOGGED_ADIF, WSJTX_MAGIC, WSJTX_QSO_LOGGED,
+    WSJTX_HEARTBEAT, WSJTX_LOGGED_ADIF, WSJTX_MAGIC, WSJTX_QSO_LOGGED, WSJTX_STATUS,
     UdpLogConfig, build_heartbeat, decode_udp_datagram, find_duplicate_qso,
     qso_identity,
 )
@@ -872,6 +873,17 @@ heartbeat = decode_udp_datagram(
 assert heartbeat.heartbeat_reply
 assert struct.unpack(">III", heartbeat.heartbeat_reply[:12]) == (WSJTX_MAGIC, 3, WSJTX_HEARTBEAT)
 assert heartbeat.heartbeat_reply == build_heartbeat("WSJT-X", 3, "0.13-test")
+
+status_packet = b"".join((
+    wsjtx_header(WSJTX_STATUS),
+    struct.pack(">Q", 14_074_000), qt_bytes("FT8"), qt_bytes("DL1ABC"),
+    qt_bytes("-10"), qt_bytes("FT8"), struct.pack(">BBBII", 1, 0, 1, 1200, 1750),
+    qt_bytes("DA6IT"), qt_bytes("JO31EJ"), qt_bytes("JO30AA"),
+))
+live_status = decode_udp_datagram(status_packet).status
+assert live_status is not None and live_status.dx_call == "DL1ABC"
+assert live_status.dx_grid == "JO30AA" and live_status.mode == "FT8"
+assert live_status.qso_frequency_hz == 14_075_750 and live_status.decoding
 
 qso_logged_packet = b"".join((
     wsjtx_header(WSJTX_QSO_LOGGED),
@@ -1128,7 +1140,7 @@ print("DX CLUSTER SELFTEST OK")
 
 # Callbook normalization, QRZ session handling and the offline cache must work
 # without performing a real network request.
-from callbook import CallbookResult, QrzClient, normalize_wavelog_result, parse_qrz_xml
+from callbook import CallbookResult, QrzClient, enrich_qso_from_callbook, normalize_wavelog_result, parse_qrz_xml
 
 qrz_login = b'''<?xml version="1.0"?><QRZDatabase xmlns="http://www.qrz.com"><Session><Key>abc123</Key></Session></QRZDatabase>'''
 qrz_lookup = b'''<?xml version="1.0"?><QRZDatabase xmlns="http://www.qrz.com"><Callsign><call>DL1ABC</call><fname>Ada</fname><addr2>Bonn</addr2><grid>JO30AA12</grid><land>Germany</land><image>https://files.qrz.com/test.jpg</image><cqzone>14</cqzone><ituzone>28</ituzone></Callsign><Session><Key>abc123</Key></Session></QRZDatabase>'''
@@ -1161,6 +1173,18 @@ wavelog_result = normalize_wavelog_result({"data": {
 assert wavelog_result.name == "Jean" and wavelog_result.grid == "JO20"
 assert wavelog_result.source == "Wavelog / QRZ"
 
+external_qso, filled_fields = enrich_qso_from_callbook(
+    {"call": "ON4XYZ", "name": "Vom Sender", "gridsquare": "", "qth": ""},
+    CallbookResult(
+        callsign="ON4XYZ", name="Nicht überschreiben", grid="JO20AB", qth="Brussels",
+        country="Belgium", cq_zone="14", itu_zone="27", source="QRZ.com",
+    ),
+)
+assert external_qso["name"] == "Vom Sender", "external values must never be overwritten"
+assert external_qso["gridsquare"] == "JO20AB" and external_qso["qth"] == "Brussels"
+assert external_qso["country"] == "Belgium" and external_qso["cqz"] == "14" and external_qso["ituz"] == "27"
+assert "name" not in filled_fields and set(filled_fields) == {"gridsquare", "qth", "country", "cqz", "ituz"}
+
 with TemporaryDirectory() as d:
     cache_db = MetadataDB(Path(d) / "meta.db")
     cached = CallbookResult(callsign="DL1ABC", name="Ada", source="QRZ.com")
@@ -1175,6 +1199,10 @@ print("CALLBOOK SELFTEST OK")
 # station matching must all work without contacting an external service.
 assert maidenhead_locator(51.40831, 6.33721) == "JO31EJ"
 assert 0 < distance_m(51.40831, 6.33721, 51.409, 6.338) < 200
+locator_lat, locator_lon = maidenhead_coordinates("JO31EJ")
+assert 51.37 < locator_lat < 51.42 and 6.33 < locator_lon < 6.42
+assert maidenhead_locator(locator_lat, locator_lon) == "JO31EJ"
+assert 85 < initial_bearing_degrees(0, 0, 0, 1) < 95
 old_gps_override = os.environ.get("WAVELOG_LOGGER_GPS")
 try:
     os.environ["WAVELOG_LOGGER_GPS"] = "51.40831,6.33721,8"
