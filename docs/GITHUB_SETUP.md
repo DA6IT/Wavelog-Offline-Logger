@@ -49,7 +49,7 @@ Nach erfolgreichem Praxistest die in `RELEASING.md` genannten Versionsstellen au
 
 ## Noch nicht automatisiert
 
-- Windows-Code-Signierung
+- Windows-Code-Signierung bis zur SignPath-Annahme; Vorbereitung siehe `CODE_SIGNING_POLICY.md` und `docs/SIGNPATH_SETUP.md`
 - Apple-Signierung und Notarisierung
 - Veröffentlichung der vorbereiteten Arch-`PKGBUILD`-Datei im AUR
 

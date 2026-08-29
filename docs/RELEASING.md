@@ -64,6 +64,12 @@ Der Workflow `.github/workflows/release.yml` reagiert auf Tags im Format `v*` un
 
 Tags mit Bindestrich wie `v0.17.0-rc1` werden als Vorabversion veröffentlicht.
 
+## Windows-Code-Signierung
+
+v0.18.0 wird noch unsigniert veröffentlicht und dient anschließend als bestehendes, dokumentiertes Release für die SignPath-Bewerbung. Die öffentlichen Voraussetzungen und Rollen stehen in `CODE_SIGNING_POLICY.md`, der Datenschutz in `PRIVACY.md`; die konkrete Maintainer-Checkliste befindet sich in `docs/SIGNPATH_SETUP.md`.
+
+Erst nach Annahme des Projekts werden die echten SignPath-Kennungen und Secrets in GitHub eingerichtet und der Release-Workflow erweitert. Bis dahin darf kein Workflow mit geratenen Platzhaltern aktiviert werden. Nach der Integration muss die von SignPath zurückgegebene EXE vor Veröffentlichung mit `Get-AuthenticodeSignature` geprüft werden; die SHA-256-Datei wird erst für das endgültige signierte Artefakt erzeugt.
+
 ## Manuelle Freigabeprüfung
 
 - frische Windows-Benutzerumgebung und bestehende Installation
@@ -77,4 +83,4 @@ Tags mit Bindestrich wie `v0.17.0-rc1` werden als Vorabversion veröffentlicht.
 - macOS Apple Silicon und Intel: Entpacken, Erststart per Rechtsklick **Öffnen**, lokales QSO und CAT
 - Linux x64 und ARM64: DEB und AppImage starten, lokales QSO, QRZ-Foto, Benachrichtigung und CAT
 
-Die macOS-Pakete sind ad-hoc signiert, aber ohne Apple-Developer-Zertifikat nicht notarisiert. Vor einer stabilen Freigabe sollten die erzeugten CI-Artefakte zusätzlich praktisch auf den verfügbaren Zielsystemen getestet werden.
+Die Windows-Pakete bleiben bis zur SignPath-Annahme unsigniert. Die macOS-Pakete sind ad-hoc signiert, aber ohne Apple-Developer-Zertifikat nicht notarisiert. Vor einer stabilen Freigabe sollten die erzeugten CI-Artefakte zusätzlich praktisch auf den verfügbaren Zielsystemen getestet werden.

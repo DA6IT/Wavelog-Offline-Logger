@@ -23,6 +23,9 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - Telnet-DX-Cluster, Filter, Worked-Markierung und Spotversand
 - WSJT-X- und ADIF-Empfang über UDP
 - deutsche und englische Oberfläche, Light- und Dark-Theme
+- verifizierter In-App-Updater; unter Windows wird die bestätigte neue Version automatisch installiert
+- vollständiges ZIP-Backup und Restore von Profilen, Einstellungen, ADI-Logbüchern und Metadaten
+- einmalige „Was ist neu?“-Übersicht nach dem ersten Start einer neuen Version
 - responsive Oberfläche ohne Scrollleisten; Felder, Aktionen und Abstände passen sich gemeinsam an und werden vor jedem Release in mehreren Fenstergrößen geprüft
 - Builds für Windows x64, macOS Apple Silicon/Intel und Linux x64/ARM64
 
@@ -66,6 +69,14 @@ Der Logger ersetzt Wavelog nicht. Er ergänzt es für portable Einsätze, DXpedi
 - Änderungen, Downloads, Löschungen und Konflikte behandelt nur der vollständige Sync.
 - Profil-Löschung wirkt ausschließlich lokal und löscht keine Wavelog-Daten.
 - eQSL-Felder sind vorbereitet, aber weiterhin **Coming soon** und noch ohne Verbindung.
+- Es gibt keine Telemetrie, Nutzerzählung, Werbung oder projektseitige Erfassung von Programmstarts.
+- [Datenschutzerklärung](PRIVACY.md) und [Sicherheitsmeldungen](SECURITY.md) beschreiben lokale Daten und optionale Netzwerkdienste im Detail.
+
+## Code signing policy
+
+**[Free code signing provided by SignPath.io, certificate by SignPath Foundation](CODE_SIGNING_POLICY.md)**
+
+Die Aufnahme bei SignPath wird nach Veröffentlichung von v0.18.0 beantragt. Dieses Release bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
 
 ## Dokumentation
 
@@ -75,6 +86,9 @@ Der Logger ersetzt Wavelog nicht. Er ergänzt es für portable Einsätze, DXpedi
 - [Release-Hinweise](docs/RELEASE_NOTES.md)
 - [Architektur](docs/ARCHITECTURE.md)
 - [Mitwirken](CONTRIBUTING.md)
+- [Datenschutzerklärung](PRIVACY.md)
+- [Code-Signing-Richtlinie](CODE_SIGNING_POLICY.md)
+- [Sicherheitsrichtlinie](SECURITY.md)
 
 ## Projekt unterstützen
 

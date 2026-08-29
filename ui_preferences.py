@@ -13,6 +13,7 @@ class UiPreferences:
     language: str = "de"
     theme: str = "light"
     qso_notifications: bool = True
+    last_whats_new_version: str = ""
 
     def normalized(self) -> "UiPreferences":
         language = self.language if self.language in {"de", "en"} else "de"
@@ -21,6 +22,7 @@ class UiPreferences:
             language=language,
             theme=theme,
             qso_notifications=bool(self.qso_notifications),
+            last_whats_new_version=str(self.last_whats_new_version or "").strip(),
         )
 
 
@@ -56,6 +58,7 @@ def load_ui_preferences(data_dir: Path) -> UiPreferences:
             language=str(payload.get("language", "de")),
             theme=str(payload.get("theme", "light")),
             qso_notifications=bool(payload.get("qso_notifications", True)),
+            last_whats_new_version=str(payload.get("last_whats_new_version", "")),
         ).normalized()
     except (OSError, ValueError, TypeError):
         return UiPreferences()
@@ -72,6 +75,7 @@ def save_ui_preferences(data_dir: Path, preferences: UiPreferences) -> None:
             "language": normalized.language,
             "theme": normalized.theme,
             "qso_notifications": normalized.qso_notifications,
+            "last_whats_new_version": normalized.last_whats_new_version,
         }, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -123,6 +127,10 @@ ENGLISH = {
     "DXSpider-Host zum Spotten": "DXSpider host for spotting", "Telnet-Port": "Telnet port",
     "Login-Rufzeichen aus Logbuch": "Login callsign from logbook",
     "Einstellungen speichern": "Save settings", "Daten & Backup": "Data & backup",
+    "Was ist neu?": "What's new?", "Backup erstellen": "Create backup",
+    "Backup wiederherstellen": "Restore backup", "Noch kein Backup in dieser Sitzung erstellt.": "No backup created in this session yet.",
+    "Vollständiges Changelog": "Full changelog", "Loslegen": "Get started",
+    "DX-Spot senden": "Send DX spot", "Letztes QSO spotten": "Spot last QSO",
     "CAT-Einstellungen speichern": "Save CAT settings", "CAT starten": "Start CAT", "CAT stoppen": "Stop CAT",
     "Verbindung testen": "Test connection", "Funkgerät": "Radio", "Hersteller / Modell": "Manufacturer / model",
     "Geräte-Port": "Device port", "Baudrate": "Baud rate", "Datenbits": "Data bits",
@@ -256,6 +264,9 @@ ENGLISH = {
 
 
 PHRASES = (
+    ("Letztes QSO spotten ·", "Spot last QSO ·"),
+    ("Ein ZIP sichert alle Logger-Profile, Einstellungen, Sync-Metadaten und ADI-Logbücher.", "A ZIP file backs up all logger profiles, settings, sync metadata and ADI logbooks."),
+    ("Gespeicherte Zugangsdaten sind ebenfalls enthalten – das Backup bitte geschützt aufbewahren.", "Saved credentials are included as well – keep the backup protected."),
     ("Schnell, lokal und unabhängig von einer Internetverbindung.", "Fast, local and independent of an internet connection."),
     ("Neues QSO erfassen und sicher lokal speichern.", "Log a new QSO and store it safely on this computer."),
     ("Pileups zügig abarbeiten: Rufzeichen und Enter.", "Work pileups quickly: callsign and Enter."),

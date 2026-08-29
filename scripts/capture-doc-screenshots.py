@@ -78,6 +78,10 @@ def main() -> int:
     LoggerApp._start_wavelog_monitor = lambda self: None
     LoggerApp._autostart_udp_log = lambda self: None
     LoggerApp._load_cat_runtime_info = lambda self: None
+    # The one-time release dialog is tested separately.  During the responsive
+    # page sweep it would otherwise open on its timer and its buttons would be
+    # mistaken for clipped controls belonging to the current main page.
+    LoggerApp._show_whats_new_if_needed = lambda self: None
 
     created: list[Path] = []
     root: LoggerApp | None = None

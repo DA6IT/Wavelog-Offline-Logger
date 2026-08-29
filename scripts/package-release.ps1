@@ -45,10 +45,14 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $stage
     Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $stage
     Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'PRIVACY.md') -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'CODE_SIGNING_POLICY.md') -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'SECURITY.md') -Destination $stage
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\USER_GUIDE.md') -Destination (Join-Path $stage 'docs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\SCREENSHOTS.md') -Destination (Join-Path $stage 'docs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\RELEASE_NOTES.md') -Destination (Join-Path $stage 'docs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\TROUBLESHOOTING.md') -Destination (Join-Path $stage 'docs')
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\SIGNPATH_SETUP.md') -Destination (Join-Path $stage 'docs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\screenshots') -Destination (Join-Path $stage 'docs') -Recurse
 
     if (Test-Path -LiteralPath $zipPath) {

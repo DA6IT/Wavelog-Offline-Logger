@@ -24,7 +24,7 @@ Bei aktiver Verbindung zeigt der Status die Zahl der in dieser Sitzung empfangen
 
 ## Ein eigener DX-Spot wird nicht gesendet
 
-Der Button **DX-Spot senden** funktioniert erst nach einer aktiven Telnet-Anmeldung. Rufzeichen und Frequenz müssen im normalen QSO-Formular stehen. Jeder Spot wird öffentlich verbreitet und muss deshalb nach Eingabe des optionalen Kommentars ausdrücklich bestätigt werden. Ob ein Cluster einen Befehl anschließend fachlich akzeptiert, hängt von dessen Regeln und dem verwendeten Login ab.
+Der Button **DX-Spot senden** verwendet Rufzeichen und Frequenz aus dem normalen QSO-Formular. Ist das Formular nach einem gespeicherten manuellen oder WSJT-X-QSO bereits geleert, bietet der Button stattdessen ausdrücklich das zuletzt geloggte QSO an. Jeder Spot wird öffentlich verbreitet und muss deshalb nach Eingabe des optionalen Kommentars ausdrücklich bestätigt werden. Die App baut die konfigurierte Telnet-Verbindung bei Bedarf auf; ob der Cluster den Befehl fachlich akzeptiert, hängt von dessen Regeln und dem verwendeten Login ab.
 
 ## UDP Logging meldet „Port bereits belegt“
 
@@ -35,6 +35,8 @@ Wenn JTAlert oder GridTracker bereits den primären WSJT-X-Port belegt, kann WSJ
 ## Kein Update-Hinweis beim Programmstart
 
 Ohne Internetverbindung oder wenn GitHub nicht erreichbar ist, bleibt die Update-Prüfung absichtlich still. Stabile Versionen weisen außerdem nicht auf Vorabversionen hin. Releases können jederzeit manuell unter https://github.com/DA6IT/Wavelog-Offline-Logger/releases geprüft werden.
+
+Scheitert der automatische Download oder stimmt die SHA-256-Prüfsumme nicht, bleibt die installierte Programmdatei unverändert. Unter Windows muss die gestartete EXE an ihrem Speicherort überschreibbar sein. Bei einer portable gestarteten Datei in einem geschützten Ordner die EXE zuerst in einen eigenen beschreibbaren Ordner verschieben.
 
 ## Wavelog-Verbindung schlägt fehl
 

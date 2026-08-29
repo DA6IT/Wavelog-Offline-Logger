@@ -408,6 +408,43 @@ with TemporaryDirectory() as d:
 
 print("PROFILE SELFTEST OK")
 
+# A portable backup contains all profiles, settings and ADI files. Restore
+# always targets safe profile-owned log directories and preserves the QSO.
+from data_backup import create_backup, inspect_backup, restore_backup
+from whats_new import notes_for_version
+with TemporaryDirectory() as d:
+    root = Path(d)
+    source_data = root / "source-data"
+    source_logs = root / "source-logs"
+    pm = ProfileManager(source_data, log_root=source_logs)
+    profile = pm.active_profile()
+    db = MetadataDB(pm.metadata_path(profile["id"]))
+    db.set_setting("operator_call", "DA6IT")
+    db.set_setting("station_call", "DA6IT")
+    log_dir = Path(db.get_setting("log_dir"))
+    db.close()
+    source_store = LogStore(log_dir)
+    source_store.add(sample(call="DL1BACKUP"))
+    backup_path = root / "logger-backup.zip"
+    created = create_backup(source_data, backup_path, app_version="0.18.0")
+    assert created["profiles"] == 1 and created["adi_files"] == 1
+    manifest = inspect_backup(backup_path)
+    assert manifest["active_profile_id"] == profile["id"]
+
+    restored_data = root / "restored-data"
+    restored_logs = root / "restored-logs"
+    restored = restore_backup(backup_path, restored_data, log_root=restored_logs)
+    assert restored["profiles"] == 1
+    restored_pm = ProfileManager(restored_data, log_root=restored_logs)
+    restored_db = MetadataDB(restored_pm.metadata_path(restored_pm.active_id))
+    restored_log_dir = Path(restored_db.get_setting("log_dir"))
+    restored_db.close()
+    restored_qsos = LogStore(restored_log_dir).scan()
+    assert len(restored_qsos) == 1 and restored_qsos[0]["call"] == "DL1BACKUP"
+
+assert notes_for_version("0.18.0", "de") and notes_for_version("0.18.0", "en")
+print("BACKUP AND WHAT'S NEW SELFTEST OK")
+
 # Legacy v0.9 migration: copy single-profile metadata without touching rollback file.
 with TemporaryDirectory() as d:
     root = Path(d)
@@ -734,8 +771,12 @@ from ui_preferences import UiPreferences, load_ui_preferences, save_ui_preferenc
 with TemporaryDirectory() as preferences_dir:
     preferences_root = Path(preferences_dir)
     assert load_ui_preferences(preferences_root) == UiPreferences()
-    save_ui_preferences(preferences_root, UiPreferences(language="en", theme="dark", qso_notifications=False))
-    assert load_ui_preferences(preferences_root) == UiPreferences(language="en", theme="dark", qso_notifications=False)
+    save_ui_preferences(preferences_root, UiPreferences(
+        language="en", theme="dark", qso_notifications=False, last_whats_new_version="0.18.0",
+    ))
+    assert load_ui_preferences(preferences_root) == UiPreferences(
+        language="en", theme="dark", qso_notifications=False, last_whats_new_version="0.18.0",
+    )
     (preferences_root / "ui_preferences.json").write_text("not json", encoding="utf-8")
     assert load_ui_preferences(preferences_root) == UiPreferences()
 assert translate_text("QSO speichern", "en") == "Save QSO"
@@ -753,7 +794,10 @@ print("NOTIFICATION SELFTEST OK")
 # when the computer is offline or GitHub returns unusable data.
 import json
 import urllib.error
-from update_check import find_newer_release, is_prerelease, version_key
+from update_check import (
+    ReleaseAsset, ReleaseInfo, download_verified_asset, find_newer_release,
+    is_prerelease, select_update_asset, version_key,
+)
 
 assert version_key("v0.12.0-rc2") > version_key("0.12.0-rc1")
 assert version_key("0.12.0") > version_key("0.12.0-rc9")
@@ -791,6 +835,60 @@ def offline(*args, **kwargs):
 
 assert find_newer_release("0.12.0-rc1", opener=offline) is None
 assert find_newer_release("not-a-version", opener=offline) is None
+
+payload = b"verified Windows update payload"
+import hashlib
+digest = hashlib.sha256(payload).hexdigest()
+asset = ReleaseAsset("DA6IT.de-Wavelog-Offline-Logger-v9.9.9-windows-x64.exe", "https://example.invalid/app.exe", len(payload))
+checksums = ReleaseAsset("SHA256SUMS.txt", "https://example.invalid/SHA256SUMS.txt")
+release_info = ReleaseInfo("9.9.9", "Test", "https://example.invalid/release", False, (asset, checksums))
+assert select_update_asset(release_info, system="win32", machine="AMD64") == asset
+
+class DownloadResponse:
+    def __init__(self, body):
+        self.body = body
+        self.offset = 0
+        self.headers = {"Content-Length": str(len(body))}
+    def __enter__(self): return self
+    def __exit__(self, *_args): return False
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = len(self.body) - self.offset
+        chunk = self.body[self.offset:self.offset + size]
+        self.offset += len(chunk)
+        return chunk
+
+def fake_download_open(request, timeout=0):
+    if request.full_url.endswith("SHA256SUMS.txt"):
+        return DownloadResponse(f"{digest}  {asset.name}\n".encode("ascii"))
+    return DownloadResponse(payload)
+
+with TemporaryDirectory() as update_dir:
+    downloaded, actual_digest = download_verified_asset(
+        release_info, asset, Path(update_dir), opener=fake_download_open,
+    )
+    assert downloaded.read_bytes() == payload and actual_digest == digest
+
+platform_checksum = ReleaseAsset(asset.name + ".sha256", "https://example.invalid/app.exe.sha256")
+release_with_both_checksums = ReleaseInfo(
+    "9.9.9", "Test", "https://example.invalid/release", False,
+    (asset, checksums, platform_checksum),
+)
+requested_checksum_urls = []
+def fake_platform_checksum_open(request, timeout=0):
+    requested_checksum_urls.append(request.full_url)
+    if request.full_url.endswith(".sha256"):
+        return DownloadResponse(f"{digest}  {asset.name}\n".encode("ascii"))
+    if request.full_url.endswith("SHA256SUMS.txt"):
+        raise AssertionError("The package-specific checksum must take precedence")
+    return DownloadResponse(payload)
+
+with TemporaryDirectory() as update_dir:
+    downloaded, actual_digest = download_verified_asset(
+        release_with_both_checksums, asset, Path(update_dir), opener=fake_platform_checksum_open,
+    )
+    assert downloaded.read_bytes() == payload and actual_digest == digest
+    assert requested_checksum_urls[0].endswith(".sha256")
 
 print("UPDATE CHECK SELFTEST OK")
 

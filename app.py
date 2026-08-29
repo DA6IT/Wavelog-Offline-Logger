@@ -5,6 +5,7 @@ import base64
 import io
 import os
 import re
+import subprocess
 import sys
 import json
 import threading
@@ -44,7 +45,11 @@ from dx_cluster import (
     spot_comment_with_mode, spot_sort_value, spotter_region_for_continent,
     worked_flags,
 )
-from update_check import ReleaseInfo, find_newer_release
+from update_check import (
+    ReleaseInfo, download_verified_asset, find_newer_release, select_update_asset,
+)
+from data_backup import BackupError, create_backup, inspect_backup, restore_backup
+from whats_new import notes_for_version
 from callbook import (
     CALLBOOK_SOURCE_DISABLED, CALLBOOK_SOURCE_QRZ, CALLBOOK_SOURCE_WAVELOG,
     CallbookError, CallbookResult, QrzClient, lookup_candidate,
@@ -351,6 +356,9 @@ class LoggerApp(tk.Tk):
         self.qrz_client_credentials: tuple[str, str] | None = None
         self.callbook_autofill: dict[str, str] = {}
         self.callbook_last_call = ""
+        self.last_spottable_qso: dict | None = None
+        self.update_busy = False
+        self.update_progress_dialog: tk.Toplevel | None = None
 
         self.country_db = CountryDB(Path(__file__).resolve().parent / "cty.dat")
         self.current_country = None
@@ -382,11 +390,13 @@ class LoggerApp(tk.Tk):
         self._show_page("log")
         self._tick_clock()
         self.refresh_qsos()
+        self._load_last_spottable_qso()
         self.after(90, self._present_main_window)
         self.after(350, self._show_adif_migration_report)
         self.after(600, self._autostart_udp_log)
-        self.after(1500, self._start_update_check)
-        self.after(2200, self._start_wavelog_monitor)
+        self.after(950, self._show_whats_new_if_needed)
+        self.after(1800, self._start_update_check)
+        self.after(2500, self._start_wavelog_monitor)
         write_startup_log(f"{APP_NAME} {VERSION} gestartet")
 
     def _tr(self, value: object) -> str:
@@ -664,6 +674,56 @@ class LoggerApp(tk.Tk):
         self._localize_widget_tree(self)
         self.after(700, self._localization_tick)
 
+    def _show_whats_new_if_needed(self):
+        if self.closing or self.ui_preferences.last_whats_new_version == VERSION:
+            return
+        if notes_for_version(VERSION, self.language):
+            self._show_whats_new(mark_seen=True)
+
+    def _show_whats_new(self, *, mark_seen: bool = False):
+        notes = notes_for_version(VERSION, self.language)
+        if not notes:
+            messagebox.showinfo("Was ist neu?", "Für diese Version liegen keine Versionshinweise vor.", parent=self)
+            return
+        if mark_seen:
+            self.ui_preferences = UiPreferences(
+                language=self.ui_preferences.language,
+                theme=self.ui_preferences.theme,
+                qso_notifications=self.ui_preferences.qso_notifications,
+                last_whats_new_version=VERSION,
+            )
+            save_ui_preferences(self.data_dir, self.ui_preferences)
+        dialog = tk.Toplevel(self)
+        dialog.title(f"Neu in Version {VERSION}")
+        dialog.transient(self)
+        dialog.configure(bg=BG)
+        dialog.resizable(True, True)
+        dialog.minsize(480, 330)
+        body = ttk.Frame(dialog, padding=24)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=f"Neu in Version {VERSION}", style="PageTitle.TLabel").pack(anchor="w")
+        ttk.Label(
+            body, text="Die wichtigsten Neuerungen auf einen Blick:",
+            style="Muted.TLabel",
+        ).pack(anchor="w", pady=(4, 16))
+        for note in notes:
+            ttk.Label(body, text="• " + note, wraplength=560, justify="left").pack(anchor="w", fill="x", pady=4)
+        actions = ttk.Frame(body)
+        actions.pack(side="bottom", fill="x", pady=(22, 0))
+        ttk.Button(
+            actions, text="Vollständiges Changelog",
+            command=lambda: webbrowser.open(f"https://github.com/DA6IT/Wavelog-Offline-Logger/releases/tag/v{VERSION}"),
+        ).pack(side="left")
+        ttk.Button(actions, text="Loslegen", style="Primary.TButton", command=dialog.destroy).pack(side="right")
+        dialog.update_idletasks()
+        width = min(660, max(480, self.winfo_screenwidth() - 100))
+        height = min(430, max(330, self.winfo_screenheight() - 120))
+        x = max(0, self.winfo_rootx() + (self.winfo_width() - width) // 2)
+        y = max(0, self.winfo_rooty() + (self.winfo_height() - height) // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.grab_set()
+        dialog.focus_force()
+
     def _start_update_check(self):
         """Look for a newer release without ever blocking or disturbing startup."""
         def worker():
@@ -677,17 +737,147 @@ class LoggerApp(tk.Tk):
         if self.closing:
             return
         kind = "Release Candidate" if release.prerelease else "Version"
-        open_page = messagebox.askyesno(
+        install = messagebox.askyesno(
             "Update verfügbar",
             f"Eine neue {kind} ist verfügbar: v{release.version}\n\n"
-            "Möchtest du die GitHub-Downloadseite jetzt öffnen?",
+            "Möchtest du das passende Paket automatisch herunterladen, sicher prüfen "
+            "und installieren?\n\nUnter Windows wird die App anschließend neu gestartet.",
             parent=self,
         )
-        if open_page:
-            try:
+        if install:
+            self._start_update_download(release)
+
+    def _start_update_download(self, release: ReleaseInfo):
+        if self.update_busy or self.closing:
+            return
+        asset = select_update_asset(release)
+        if asset is None:
+            if messagebox.askyesno(
+                "Kein automatisches Paket gefunden",
+                "Für dieses System wurde kein passendes Update-Paket gefunden. "
+                "Möchtest du die Downloadseite öffnen?",
+                parent=self,
+            ):
                 webbrowser.open(release.url)
-            except Exception:
+            return
+        self.update_busy = True
+        dialog = tk.Toplevel(self)
+        self.update_progress_dialog = dialog
+        dialog.title("Update wird vorbereitet")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        dialog.protocol("WM_DELETE_WINDOW", lambda: None)
+        frame = ttk.Frame(dialog, padding=22)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=f"Version {release.version} wird heruntergeladen …", style="CardTitle.TLabel").pack(anchor="w")
+        status = ttk.Label(frame, text="Prüfsumme wird geladen …", style="Muted.TLabel")
+        status.pack(anchor="w", pady=(8, 12))
+        progress = ttk.Progressbar(frame, length=420, mode="indeterminate")
+        progress.pack(fill="x")
+        progress.start(12)
+        dialog.update_idletasks()
+        dialog.geometry(f"470x145+{max(0, self.winfo_rootx()+80)}+{max(0, self.winfo_rooty()+80)}")
+        dialog.grab_set()
+
+        def on_progress(received: int, total: int):
+            if not self.closing:
+                self.after(0, lambda: self._update_download_progress(progress, status, received, total))
+
+        def worker():
+            try:
+                package, checksum = download_verified_asset(
+                    release, asset, self.data_dir / "updates", progress=on_progress,
+                )
+                if not self.closing:
+                    self.after(0, lambda: self._update_download_finished(release, package, checksum))
+            except Exception as exc:
+                message = str(exc)
+                if not self.closing:
+                    self.after(0, lambda: self._update_download_failed(message))
+
+        threading.Thread(target=worker, name="verified-update-download", daemon=True).start()
+
+    def _update_download_progress(self, progress: ttk.Progressbar, status: ttk.Label, received: int, total: int):
+        if total > 0:
+            progress.stop()
+            progress.configure(mode="determinate", maximum=total, value=received)
+            status.configure(text=f"{received / 1024 / 1024:.1f} von {total / 1024 / 1024:.1f} MiB geladen …")
+        else:
+            status.configure(text=f"{received / 1024 / 1024:.1f} MiB geladen …")
+
+    def _close_update_progress(self):
+        dialog = self.update_progress_dialog
+        self.update_progress_dialog = None
+        self.update_busy = False
+        if dialog is not None:
+            try:
+                dialog.grab_release()
+                dialog.destroy()
+            except tk.TclError:
                 pass
+
+    def _update_download_failed(self, message: str):
+        self._close_update_progress()
+        messagebox.showerror(
+            "Update fehlgeschlagen",
+            "Das Update wurde nicht installiert. Die vorhandene Version bleibt unverändert.\n\n" + message,
+            parent=self,
+        )
+
+    def _update_download_finished(self, release: ReleaseInfo, package: Path, checksum: str):
+        self._close_update_progress()
+        launcher = Path(os.environ.get("WAVELOG_LAUNCHER_PATH", "")).expanduser()
+        launcher_pid = os.environ.get("WAVELOG_LAUNCHER_PID", "").strip()
+        if os.name == "nt" and launcher_pid.isdigit() and launcher.is_file() and package.suffix.lower() == ".exe":
+            try:
+                self._schedule_windows_update(package, launcher, int(launcher_pid))
+            except Exception as exc:
+                messagebox.showerror("Update fehlgeschlagen", str(exc), parent=self)
+                return
+            messagebox.showinfo(
+                "Update geprüft",
+                f"Version {release.version} wurde vollständig heruntergeladen und per SHA-256 geprüft.\n\n"
+                "Die App wird jetzt geschlossen, aktualisiert und automatisch neu gestartet.",
+                parent=self,
+            )
+            self.close_requested = True
+            self._begin_close_sequence()
+            return
+        messagebox.showinfo(
+            "Update heruntergeladen",
+            f"Das Paket wurde per SHA-256 geprüft und gespeichert:\n\n{package}\n\n"
+            "Auf diesem System muss das Paket anschließend einmal manuell installiert werden.",
+            parent=self,
+        )
+
+    def _schedule_windows_update(self, package: Path, launcher: Path, launcher_pid: int):
+        updates_dir = self.data_dir / "updates"
+        updates_dir.mkdir(parents=True, exist_ok=True)
+        helper = updates_dir / "apply-update.ps1"
+        helper.write_text(
+            "param([int]$ProcessId,[string]$Target,[string]$Package)\n"
+            "$ErrorActionPreference = 'Stop'\n"
+            "$backup = $Target + '.previous'\n"
+            "try { Wait-Process -Id $ProcessId -Timeout 120 -ErrorAction SilentlyContinue } catch {}\n"
+            "for ($i=0; $i -lt 60; $i++) {\n"
+            "  try { if (Test-Path -LiteralPath $Target) { Copy-Item -LiteralPath $Target -Destination $backup -Force }; "
+            "Copy-Item -LiteralPath $Package -Destination $Target -Force; Start-Process -FilePath $Target; exit 0 }\n"
+            "  catch { Start-Sleep -Milliseconds 500 }\n"
+            "}\n"
+            "if (Test-Path -LiteralPath $backup) { Copy-Item -LiteralPath $backup -Destination $Target -Force }\n"
+            "exit 1\n",
+            encoding="utf-8-sig",
+        )
+        flags = 0x00000008 | 0x00000200 | 0x01000000  # detached, new group, break away from launcher job
+        subprocess.Popen(
+            [
+                "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+                "-File", str(helper), "-ProcessId", str(launcher_pid), "-Target", str(launcher),
+                "-Package", str(package),
+            ],
+            close_fds=True,
+            creationflags=flags,
+        )
 
     # ---------- Wavelog online mode ----------
     def _wavelog_online_settings(self) -> WavelogOnlineSettings:
@@ -1192,6 +1382,7 @@ class LoggerApp(tk.Tk):
             self.refresh_contest_page()
             self.refresh_xota_page()
             self.refresh_qsos()
+            self._load_last_spottable_qso()
             self.refresh_stats()
             self._refresh_profile_selector()
             self._reset_wavelog_monitor(delay_ms=500)
@@ -1373,7 +1564,12 @@ class LoggerApp(tk.Tk):
         btns.grid(row=12, column=0, columnspan=4, sticky="ew", pady=(16, 0))
         ttk.Button(btns, text="QSO speichern", style="Primary.TButton", command=self.save_qso).pack(side="left")
         ttk.Button(btns, text="Felder leeren", style="Secondary.TButton", command=self.clear_qso_form).pack(side="left", padx=8)
-        ttk.Button(btns, text="DX-Spot senden", style="Secondary.TButton", command=self.send_current_dx_spot).pack(side="right")
+        self.dx_spot_button = ttk.Button(
+            btns, text="DX-Spot senden", style="Secondary.TButton", command=self.send_current_dx_spot,
+        )
+        self.dx_spot_button.pack(side="right")
+        self.call_var.trace_add("write", lambda *_args: self._update_dx_spot_button())
+        self.freq_var.trace_add("write", lambda *_args: self._update_dx_spot_button())
         self.tune_button = ttk.Button(
             btns, text="TUNE (ATU)", style="Secondary.TButton",
             command=self.start_tuner_from_qso, state="disabled",
@@ -1992,6 +2188,7 @@ class LoggerApp(tk.Tk):
             self.db.ensure_local(q["local_id"], qso_hash(q))
             self._bind_active_xota_qso(q)
             self._notify_qso_saved(q)
+            self._remember_last_spottable_qso(q)
             self.status_var.set(f"Gespeichert: {q['call']} · {q['band']} · {q['mode']} · {Path(q['_file']).name}")
             self.refresh_qsos()
             self._local_sync_change()
@@ -2024,6 +2221,61 @@ class LoggerApp(tk.Tk):
         if self.live_time_var.get():
             self._set_current_qso_time()
         self._update_qso_worked_status()
+        self._update_dx_spot_button()
+
+    def _remember_last_spottable_qso(self, qso: dict | None):
+        if not qso:
+            return
+        call = str(qso.get("call") or "").strip().upper()
+        frequency = str(qso.get("freq") or qso.get("frequency") or "").strip().replace(",", ".")
+        try:
+            if not call or float(frequency) <= 0:
+                return
+        except ValueError:
+            return
+        self.last_spottable_qso = {
+            "call": call,
+            "freq": frequency,
+            "mode": str(qso.get("mode") or "").strip().upper(),
+            "comment": str(qso.get("comment") or "").strip(),
+            "qso_date": str(qso.get("qso_date") or ""),
+            "time_on": str(qso.get("time_on") or ""),
+            "local_id": str(qso.get("local_id") or ""),
+        }
+        self._update_dx_spot_button()
+
+    def _load_last_spottable_qso(self):
+        try:
+            qsos = self.store.scan()
+            candidates = [q for q in qsos if q.get("call") and (q.get("freq") or q.get("frequency"))]
+            latest = max(
+                candidates,
+                key=lambda q: (
+                    str(q.get("qso_date") or ""), str(q.get("time_on") or ""),
+                    str(q.get("local_id") or ""),
+                ),
+                default=None,
+            )
+            self.last_spottable_qso = None
+            self._remember_last_spottable_qso(latest)
+        except Exception:
+            self.last_spottable_qso = None
+            self._update_dx_spot_button()
+
+    def _update_dx_spot_button(self):
+        if not hasattr(self, "dx_spot_button"):
+            return
+        current = bool(self.call_var.get().strip() or self.freq_var.get().strip())
+        if current:
+            text = "DX-Spot senden"
+            state = "normal"
+        elif self.last_spottable_qso:
+            text = f"Letztes QSO spotten · {self.last_spottable_qso['call']}"
+            state = "normal"
+        else:
+            text = "DX-Spot senden"
+            state = "disabled"
+        self.dx_spot_button.configure(text=self._tr(text), state=state)
 
     # ---------- Fast Log / DXpedition ----------
     def _build_fast_log_page(self):
@@ -4776,11 +5028,22 @@ class LoggerApp(tk.Tk):
         self.status_var.set(f"CAT abgestimmt: {spot.call} · {spot.frequency_mhz} MHz{mode}")
 
     def send_current_dx_spot(self):
+        current_call = self.call_var.get().strip().upper()
+        current_frequency = self.freq_var.get().strip().replace(",", ".")
+        if not current_call and not current_frequency and self.last_spottable_qso:
+            candidate = self.last_spottable_qso
+        else:
+            candidate = {
+                "call": current_call,
+                "freq": current_frequency,
+                "mode": self.mode_var.get().strip().upper(),
+                "comment": self.form_vars["comment"].get().strip(),
+            }
         try:
-            call = self.call_var.get().strip().upper()
+            call = str(candidate.get("call") or "").strip().upper()
             if not call:
                 raise ValueError
-            frequency_hz = int(round(float(self.freq_var.get().strip().replace(",", ".")) * 1_000_000))
+            frequency_hz = int(round(float(str(candidate.get("freq") or "").replace(",", ".")) * 1_000_000))
             if frequency_hz <= 0:
                 raise ValueError
         except ValueError:
@@ -4805,12 +5068,12 @@ class LoggerApp(tk.Tk):
         comment = simpledialog.askstring(
             "DX-Spot senden",
             "Optionaler Kommentar für den öffentlichen DX-Spot:",
-            initialvalue=self.form_vars["comment"].get().strip(),
+            initialvalue=str(candidate.get("comment") or "").strip(),
             parent=self,
         )
         if comment is None:
             return
-        mode = self.mode_var.get().strip().upper()
+        mode = str(candidate.get("mode") or "").strip().upper()
         transmitted_comment = spot_comment_with_mode(comment, mode)
         frequency_mhz = f"{frequency_hz / 1_000_000:.6f}".rstrip("0").rstrip(".")
         if not messagebox.askyesno(
@@ -5258,6 +5521,7 @@ class LoggerApp(tk.Tk):
             self.db.ensure_local(saved["local_id"], qso_hash(saved))
             self._bind_active_xota_qso(saved)
             self._notify_qso_saved(saved)
+            self._remember_last_spottable_qso(saved)
             self.udp_log_received += 1
             if self.call_var.get().strip().upper() == saved["call"]:
                 self.clear_qso_form()
@@ -5342,6 +5606,8 @@ class LoggerApp(tk.Tk):
             if filled:
                 current = self.store.update(local_id, enriched)
                 self.db.ensure_local(local_id, qso_hash(current))
+        if self.last_spottable_qso and self.last_spottable_qso.get("local_id") == local_id:
+            self._remember_last_spottable_qso(current)
         source_text = (result.source if result is not None else "").strip()
         if filled:
             enrichment = f"ergänzt über {source_text or 'Callbook'}: {', '.join(filled)}"
@@ -5361,6 +5627,124 @@ class LoggerApp(tk.Tk):
         self.status_var.set(f"UDP-QSO gespeichert: {current['call']} · {enrichment}")
         self.refresh_qsos()
         self._local_sync_change()
+
+    def create_data_backup(self):
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        destination = filedialog.asksaveasfilename(
+            parent=self,
+            title="Logger-Backup speichern",
+            defaultextension=".zip",
+            initialfile=f"Wavelog-Offline-Logger-Backup_{stamp}.zip",
+            filetypes=(("ZIP-Backup", "*.zip"), ("Alle Dateien", "*.*")),
+        )
+        if not destination:
+            return
+        self.backup_status_label.configure(text="Backup wird erstellt …", foreground=MUTED)
+        self.update_idletasks()
+        try:
+            result = create_backup(self.data_dir, Path(destination), app_version=VERSION)
+        except Exception as exc:
+            self.backup_status_label.configure(text="Backup fehlgeschlagen", foreground=ERR)
+            messagebox.showerror("Backup fehlgeschlagen", str(exc), parent=self)
+            return
+        self.backup_status_label.configure(
+            text=f"Backup erstellt · {result['profiles']} Profil(e) · {result['adi_files']} ADI-Datei(en)",
+            foreground=OK,
+        )
+        messagebox.showinfo(
+            "Backup erstellt",
+            f"Profile, Einstellungen und ADI-Logbücher wurden gesichert:\n\n{result['path']}\n\n"
+            "Hinweis: Das ZIP enthält auch gespeicherte Zugangsdaten und sollte geschützt aufbewahrt werden.",
+            parent=self,
+        )
+
+    def restore_data_backup(self):
+        source = filedialog.askopenfilename(
+            parent=self,
+            title="Logger-Backup auswählen",
+            filetypes=(("ZIP-Backup", "*.zip"), ("Alle Dateien", "*.*")),
+        )
+        if not source:
+            return
+        try:
+            manifest = inspect_backup(Path(source))
+        except Exception as exc:
+            messagebox.showerror("Backup ungültig", str(exc), parent=self)
+            return
+        profile_count = len(manifest.get("profiles") or [])
+        created = str(manifest.get("created_utc") or "—").replace("T", " ")
+        if not messagebox.askyesno(
+            "Backup wiederherstellen",
+            f"Backup vom {created}\nVersion: {manifest.get('app_version') or '—'}\n"
+            f"Profile: {profile_count}\n\n"
+            "Die aktuellen Profile, Einstellungen und ADI-Logbücher werden ersetzt. "
+            "Vorher wird automatisch ein Sicherheitsbackup des jetzigen Stands erstellt.\n\nFortfahren?",
+            icon="warning",
+            parent=self,
+        ):
+            return
+        recovery_dir = self.data_dir / "backups"
+        recovery = recovery_dir / f"Vor-Wiederherstellung_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.zip"
+        progress = tk.Toplevel(self)
+        progress.title("Backup wird wiederhergestellt")
+        progress.transient(self)
+        progress.resizable(False, False)
+        progress.protocol("WM_DELETE_WINDOW", lambda: None)
+        frame = ttk.Frame(progress, padding=22)
+        frame.pack(fill="both", expand=True)
+        progress_label = ttk.Label(frame, text="Sicherheitsbackup wird erstellt …")
+        progress_label.pack(anchor="w", pady=(0, 10))
+        bar = ttk.Progressbar(frame, mode="indeterminate", length=390)
+        bar.pack(fill="x")
+        bar.start(12)
+        progress.geometry(f"440x120+{max(0, self.winfo_rootx()+100)}+{max(0, self.winfo_rooty()+100)}")
+        progress.grab_set()
+        progress.update()
+        storage_closed = False
+        try:
+            create_backup(self.data_dir, recovery, app_version=VERSION)
+            progress_label.configure(text="Daten werden sicher wiederhergestellt …")
+            progress.update()
+            self.wavelog_check_generation += 1
+            self._stop_cat_runtime(update_ui=False)
+            self._stop_dx_cluster_runtime(update_ui=False)
+            self._stop_dx_spotter_runtime(update_ui=False)
+            self._stop_udp_log_runtime(update_ui=False)
+            self.db.close()
+            storage_closed = True
+            result = restore_backup(Path(source), self.data_dir)
+        except Exception as exc:
+            try:
+                progress.grab_release()
+                progress.destroy()
+            except tk.TclError:
+                pass
+            messagebox.showerror(
+                "Wiederherstellung fehlgeschlagen",
+                f"Das Backup konnte nicht vollständig wiederhergestellt werden.\n\n{exc}\n\n"
+                f"Sicherheitsbackup des vorherigen Stands:\n{recovery}",
+                parent=self,
+            )
+            if storage_closed:
+                self.shutdown_started = True
+                self.closing = True
+                self.destroy()
+            return
+        try:
+            progress.grab_release()
+            progress.destroy()
+        except tk.TclError:
+            pass
+        messagebox.showinfo(
+            "Backup wiederhergestellt",
+            f"{result['profiles']} Profil(e) wurden wiederhergestellt.\n\n"
+            f"Sicherheitsbackup des vorherigen Stands:\n{recovery}\n\n"
+            "Die App wird jetzt geschlossen. Bitte anschließend neu starten.",
+            parent=self,
+        )
+        self.shutdown_started = True
+        self.closing = True
+        self.destroy()
 
     # ---------- settings ----------
     def _build_settings_page(self):
@@ -5409,14 +5793,30 @@ class LoggerApp(tk.Tk):
             text="Systemhinweis nach gespeichertem QSO",
             variable=self.set_qso_notifications,
         ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ttk.Button(
+            general_left, text="Was ist neu?", command=lambda: self._show_whats_new(mark_seen=False),
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(14, 0))
 
         general_right = self._card(general_tab, row=0, column=1, sticky="nsew", padx=(8, 0))
         ttk.Label(general_right, text="Daten & Backup", style="CardTitle.TLabel").pack(anchor="w")
         ttk.Label(
             general_right,
-            text="Backup und Wiederherstellung der Profile, Einstellungen und ADI-Logbücher werden hier ergänzt.",
+            text=(
+                "Ein ZIP sichert alle Logger-Profile, Einstellungen, Sync-Metadaten und ADI-Logbücher. "
+                "Gespeicherte Zugangsdaten sind ebenfalls enthalten – das Backup bitte geschützt aufbewahren."
+            ),
             style="Muted.Card.TLabel", wraplength=450,
-        ).pack(anchor="w", pady=(4, 0))
+        ).pack(anchor="w", pady=(4, 16))
+        backup_actions = ttk.Frame(general_right, style="Card.TFrame")
+        backup_actions.pack(anchor="w", fill="x")
+        ttk.Button(
+            backup_actions, text="Backup erstellen", style="Primary.TButton", command=self.create_data_backup,
+        ).pack(side="left")
+        ttk.Button(
+            backup_actions, text="Backup wiederherstellen", command=self.restore_data_backup,
+        ).pack(side="left", padx=(8, 0))
+        self.backup_status_label = ttk.Label(general_right, text="Noch kein Backup in dieser Sitzung erstellt.", style="Muted.Card.TLabel")
+        self.backup_status_label.pack(anchor="w", pady=(14, 0))
 
         left = self._card(station_tab, row=0, column=0, sticky="nsew", padx=(0, 8))
         left.columnconfigure(1, weight=1)
@@ -5740,6 +6140,7 @@ class LoggerApp(tk.Tk):
                 language="en" if self.set_ui_language.get() == "English" else "de",
                 theme="dark" if self.set_ui_theme.get() == "Dunkel / Dark" else "light",
                 qso_notifications=self.set_qso_notifications.get(),
+                last_whats_new_version=self.ui_preferences.last_whats_new_version,
             )
             restart_required = (
                 new_ui_preferences.language != self.ui_preferences.language
@@ -5748,7 +6149,6 @@ class LoggerApp(tk.Tk):
             save_ui_preferences(self.data_dir, new_ui_preferences)
             # Notification changes take effect immediately. Language and theme
             # still use the existing controlled restart path.
-            self.ui_preferences = new_ui_preferences
             self.ui_preferences = new_ui_preferences
             self._store_dx_spotter_config(spotter_config)
             selected = self.station_by_label.get(self.set_station_profile.get())
