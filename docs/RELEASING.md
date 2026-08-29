@@ -66,7 +66,7 @@ Tags mit Bindestrich wie `v0.17.0-rc1` werden als Vorabversion veröffentlicht.
 
 ## Windows-Code-Signierung
 
-v0.18.0 wird noch unsigniert veröffentlicht und dient anschließend als bestehendes, dokumentiertes Release für die SignPath-Bewerbung. Die öffentlichen Voraussetzungen und Rollen stehen in `CODE_SIGNING_POLICY.md`, der Datenschutz in `PRIVACY.md`; die konkrete Maintainer-Checkliste befindet sich in `docs/SIGNPATH_SETUP.md`.
+v0.18.1 wird noch unsigniert veröffentlicht und dient anschließend als bestehendes, dokumentiertes Referenzrelease für die SignPath-Bewerbung. Es enthält bereits die später einzuschränkenden Windows-`VERSIONINFO`-Werte. Die öffentlichen Voraussetzungen und Rollen stehen in `CODE_SIGNING_POLICY.md`, der Datenschutz in `PRIVACY.md`; die konkrete Maintainer-Checkliste befindet sich in `docs/SIGNPATH_SETUP.md`.
 
 Erst nach Annahme des Projekts werden die echten SignPath-Kennungen und Secrets in GitHub eingerichtet und der Release-Workflow erweitert. Bis dahin darf kein Workflow mit geratenen Platzhaltern aktiviert werden. Nach der Integration muss die von SignPath zurückgegebene EXE vor Veröffentlichung mit `Get-AuthenticodeSignature` geprüft werden; die SHA-256-Datei wird erst für das endgültige signierte Artefakt erzeugt.
 
@@ -80,6 +80,7 @@ Erst nach Annahme des Projekts werden die echten SignPath-Kennungen und Secrets 
 - TLS-Verbindung zu Wavelog und QRZ
 - QSO-Benachrichtigung, UDP, CAT und DX-Cluster
 - Prüfsummen aus dem Release
+- Windows-Dateieigenschaften: Product Name, Product/File Version, Beschreibung und Originaldateiname
 - macOS Apple Silicon und Intel: Entpacken, Erststart per Rechtsklick **Öffnen**, lokales QSO und CAT
 - Linux x64 und ARM64: DEB und AppImage starten, lokales QSO, QRZ-Foto, Benachrichtigung und CAT
 

@@ -4,12 +4,13 @@ The DA6IT.de Wavelog Offline Logger is preparing to use SignPath for future Wind
 
 **Free code signing provided by SignPath.io, certificate by SignPath Foundation**
 
-Version 0.18.0 is intentionally released before the SignPath application and therefore remains unsigned. The statement above documents the policy that will apply after the project has been accepted; it does not claim that an unsigned artifact already has a signature. Release notes always state the actual signing status.
+Version 0.18.1 is intentionally released before the SignPath application and therefore remains unsigned. It contains the same Windows file metadata and release format intended for later signing. The statement above documents the policy that will apply after the project has been accepted; it does not claim that an unsigned artifact already has a signature. Release notes always state the actual signing status.
 
 ## Project roles
 
-- Committer and reviewer: [DA6IT](https://github.com/DA6IT)
-- Signing approver: [DA6IT](https://github.com/DA6IT)
+- Authors / Committers: [DA6IT](https://github.com/DA6IT)
+- Reviewers: [DA6IT](https://github.com/DA6IT)
+- Approvers: [DA6IT](https://github.com/DA6IT)
 
 Changes from contributors without commit access require review by the maintainer. Every SignPath signing request will require manual approval by the signing approver. Maintainers and approvers must use multi-factor authentication for GitHub and SignPath.
 
@@ -38,4 +39,3 @@ The expected signer after acceptance is **SignPath Foundation** and the status m
 ## Privacy and incident handling
 
 The application's network behavior and external services are documented in the [privacy policy](PRIVACY.md). Security reports and suspected abuse of signed binaries are handled according to [SECURITY.md](SECURITY.md). The project will cooperate with SignPath Foundation when investigating a suspected policy violation and will stop distributing affected artifacts when necessary.
-

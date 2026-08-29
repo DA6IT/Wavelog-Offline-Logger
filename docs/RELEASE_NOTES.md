@@ -1,44 +1,45 @@
-# DA6IT.de Wavelog Offline Logger v0.18.0
+# DA6IT.de Wavelog Offline Logger v0.18.1
 
-v0.18.0 macht Aktualisierung und Datensicherung deutlich komfortabler. Der Logger kann ein bestätigtes Update selbst laden und prüfen, vollständige lokale Daten als ZIP sichern und wiederherstellen und zeigt die wichtigsten Änderungen nach dem ersten Start einmalig an.
+v0.18.1 ist ein kleines, weiterhin unsigniertes SignPath-Readiness-Release. Die Windows-Datei besitzt erstmals vollständige, automatisch geprüfte Versions- und Produktmetadaten. Außerdem sind Deinstallation, Rollen und die verwendete Python-Laufzeit öffentlich vollständig dokumentiert. Die Funktionen aus v0.18.0 bleiben unverändert enthalten.
 
-## Backup und Restore
+## Windows-Dateimetadaten
 
-- Unter **Einstellungen → Daten & Verbindungen** lässt sich eine vollständige ZIP-Sicherung erstellen.
-- Enthalten sind alle Logger-Profile, Einstellungen, ADI-Logbücher, Metadatenbanken, Callbook-Caches sowie Contest- und xOTA-Zuordnungen.
-- SQLite-Dateien werden als konsistente Snapshots gesichert.
-- Vor einem Restore prüft die App Format, Pfade, Dateianzahl und entpackte Gesamtgröße des Archivs.
-- Direkt vor jeder Wiederherstellung wird automatisch ein zusätzliches Sicherheitsbackup des aktuellen Stands erzeugt.
-- Ein fehlgeschlagener Austausch kann zurückgerollt werden. Nach erfolgreichem Restore wird die App kontrolliert neu gestartet beziehungsweise beendet und kann mit den wiederhergestellten Daten geöffnet werden.
+Die Windows-EXE enthält jetzt eine native `VERSIONINFO`-Ressource:
 
-Backups können Zugangsdaten und API-Tokens enthalten. Sie sollten deshalb wie das Originalprofil geschützt und nicht öffentlich weitergegeben werden.
+- `ProductName`: `DA6IT.de Wavelog Offline Logger`
+- `ProductVersion`: `0.18.1`
+- `FileVersion`: `0.18.1`
+- `FileDescription`: `DA6IT.de Wavelog Offline Logger`
+- `OriginalFilename`: `DA6IT.de-Wavelog-Offline-Logger-v0.18.1-windows-x64.exe`
+- numerische Dateiversion: `0.18.1.0`
 
-## Automatische, geprüfte Updates
+Der Windows-Build liest diese Werte nach dem Einbetten direkt aus der fertigen EXE und bricht bei einer Abweichung ab. Damit entspricht das veröffentlichte, noch unsignierte Artefakt bereits dem Dateiformat, das nach einer SignPath-Annahme signiert werden soll.
 
-- Der bekannte Update-Hinweis bietet nun an, die passende Plattformdatei direkt herunterzuladen.
-- Downloads erfolgen ausschließlich über HTTPS und werden zwingend gegen die im GitHub-Release veröffentlichte SHA-256-Prüfsumme geprüft.
-- Unter Windows beendet ein separater Helfer die laufende Anwendung, ersetzt die bisherige EXE und startet die neue Version.
-- macOS und Linux laden das passende Paket verifiziert herunter und öffnen anschließend den Speicherort für die plattformübliche Installation.
-- Ohne passende Prüfsumme oder bei einer Abweichung wird das Paket nicht installiert.
+## Deinstallation und Daten
 
-## Was ist neu?
+README und Benutzerhandbuch erklären die Deinstallation getrennt für Windows, macOS, Debian/Ubuntu, Arch Linux und AppImage. Programmdateien, lokale App-Daten und ADI-Logbücher sind bewusst getrennt:
 
-Nach dem ersten Start von v0.18.0 erscheint einmalig eine kurze Übersicht der wichtigsten Änderungen in der gewählten Sprache. Sie kann später über **Hilfe → Was ist neu?** erneut geöffnet werden. Die App speichert lediglich lokal, welche Versionsübersicht bereits bestätigt wurde; daraus entsteht keine Telemetrie.
+- Das Entfernen des Programms löscht keine ADI-Logbücher.
+- Profile, Einstellungen, Tokens und Sync-Metadaten verbleiben standardmäßig im plattformspezifischen App-Datenordner.
+- ADI-Dateien liegen standardmäßig unter `Dokumente/DA6IT.de Wavelog Logger/Profiles/…/Logs` oder an einem selbst gewählten Ort.
+- Vor vollständiger Datenlöschung sollte das integrierte ZIP-Backup verwendet werden.
 
-## DX-Spot nach dem Loggen
+## SignPath-Vorbereitung
 
-Nach einem erfolgreichen manuellen oder externen QSO wird das Formular weiterhin automatisch geleert. Rufzeichen, Frequenz, Band, Mode und Kommentar des zuletzt geloggten QSOs bleiben jedoch intern als Spot-Kandidat erhalten. **DX-Spot senden** verwendet nach einer klaren Bestätigung diese letzten Daten, solange noch kein neues QSO vorbereitet wurde.
+- Die Code-Signing-Richtlinie nennt nun ausdrücklich **Authors / Committers**, **Reviewers** und **Approvers**.
+- CPython 3.12.10 und die Python Software Foundation License sind in `THIRD_PARTY_NOTICES.md` dokumentiert.
+- Datenschutz, Sicherheitsmeldungen, Buildherkunft und der spätere manuelle Freigabeprozess bleiben öffentlich dokumentiert.
+- Der SignPath-Workflow selbst wird erst nach Annahme des Projekts und Erhalt der echten Projektkennungen eingerichtet.
 
-## Bestehende Funktionen
+## Enthaltene Funktionen aus v0.18.0
 
-Die Funktionen aus v0.17.2 bleiben vollständig enthalten:
-
-- WSJT-X-Live-Vorschau und profilbezogener UDP-Empfang
-- Worked-Historie im QSO-Formular
-- Entfernung und Peilung aus Maidenhead-Locatoren
-- Callbook-Anreicherung über Wavelog oder QRZ.com
-- Contest-, xOTA-, ADIF-Import/-Export-, CAT-, DX-Cluster- und Wavelog-Sync-Funktionen
-- getrennte Stationsprofile, Deutsch/Englisch und Light/Dark
+- automatischer, per SHA-256 verifizierter In-App-Updater
+- vollständiges ZIP-Backup und Restore aller Profile, Einstellungen, ADI-Dateien und Metadaten
+- einmalige „Was ist neu?“-Übersicht
+- DX-Spot des zuletzt geloggten QSOs auch nach dem automatischen Leeren des Formulars
+- WSJT-X-Live-Vorschau, Worked-Historie, Entfernung und Peilung
+- Wavelog-/QRZ-Callbook, profilbezogener Sync, Contest und xOTA
+- Windows-, macOS- und Linux-Pakete
 
 ## Plattformen und Downloads
 
@@ -50,17 +51,10 @@ Der GitHub-Release baut und veröffentlicht automatisch:
 - Linux x64 und ARM64: DEB, AppImage und Arch-Paket
 - SHA-256-Prüfsummen für alle Pakete
 
-## Upgrade und Datensicherheit
-
-v0.18.0 kann direkt über v0.17.2 oder eine ältere Version installiert werden. Vorhandene Profile, Einstellungen, ADI-Dateien, Sync-Metadaten und Callbook-Caches bleiben erhalten. Jedes neue QSO wird weiterhin zuerst lokal in der profilbezogenen ADI-Datei gespeichert.
-
-Vor dem Upgrade empfiehlt sich erstmals die neue ZIP-Sicherung. Bei einem Upgrade von einer älteren Version kann alternativ weiterhin der vollständige Anwendungs- und externe ADI-Ordner manuell kopiert werden.
-
 ## Code signing policy und bekannte Einschränkungen
 
-- v0.18.0 wird bewusst noch **ohne Windows-Code-Signatur** veröffentlicht. Erst danach wird die kostenlose Aufnahme bei SignPath Foundation beantragt. **[Free code signing provided by SignPath.io, certificate by SignPath Foundation](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.0/CODE_SIGNING_POLICY.md)** beschreibt den geplanten kontrollierten Ablauf.
-- Die macOS-App ist technisch ad-hoc signiert, aber mangels Apple-Developer-Zertifikat nicht notarisiert.
-- eQSL.cc bleibt **Coming soon**.
-- Entfernung und Peilung aus Locatoren sind wegen der Zellgröße Näherungswerte.
+v0.18.1 wird bewusst noch **ohne Windows-Code-Signatur** veröffentlicht. **[Free code signing provided by SignPath.io, certificate by SignPath Foundation](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.1/CODE_SIGNING_POLICY.md)** beschreibt den geplanten Ablauf. Nach diesem Referenzrelease kann die Aufnahme bei SignPath Foundation beantragt werden.
 
-Datennutzung und optionale Netzwerkdienste beschreibt die [Datenschutzerklärung](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.0/PRIVACY.md). Eine vollständige Bedienungsanleitung steht im [Benutzerhandbuch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.0/docs/USER_GUIDE.md); typische Probleme behandelt die [Fehlerhilfe](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.0/docs/TROUBLESHOOTING.md).
+Die macOS-App ist ad-hoc signiert, aber nicht notarisiert. eQSL.cc bleibt **Coming soon**. Entfernung und Peilung aus Maidenhead-Locatoren sind Näherungswerte.
+
+Datennutzung und optionale Netzwerkdienste beschreibt die [Datenschutzerklärung](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.1/PRIVACY.md). Das [Benutzerhandbuch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.1/docs/USER_GUIDE.md) enthält Installation, Deinstallation und vollständige Bedienung.
