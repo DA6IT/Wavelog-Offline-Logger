@@ -21,11 +21,12 @@ import (
 )
 
 const (
-	appVersion   = "0.17.2"
+	appVersion   = "0.18.0"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
 	JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+	JOB_OBJECT_LIMIT_BREAKAWAY_OK      = 0x00000800
 	JobObjectExtendedLimitInformation  = 9
 	PROCESS_SET_QUOTA                  = 0x0100
 	PROCESS_TERMINATE                  = 0x0001
@@ -60,6 +61,12 @@ var notificationsSource []byte
 
 //go:embed xota.py
 var xotaSource []byte
+
+//go:embed data_backup.py
+var dataBackupSource []byte
+
+//go:embed whats_new.py
+var whatsNewSource []byte
 
 //go:embed cty.dat
 var ctyData []byte
@@ -280,6 +287,12 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "xota.py"), xotaSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "data_backup.py"), dataBackupSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "whats_new.py"), whatsNewSource, 0644); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "cty.dat"), ctyData, 0644); err != nil {
 		return err
 	}
@@ -352,6 +365,8 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "ui_preferences.py"),
 		filepath.Join(appDir, "notifications.py"),
 		filepath.Join(appDir, "xota.py"),
+		filepath.Join(appDir, "data_backup.py"),
+		filepath.Join(appDir, "whats_new.py"),
 		filepath.Join(appDir, "cty.dat"),
 		filepath.Join(appDir, "assets", "da6it-logo.webp"),
 		filepath.Join(appDir, "assets", "da6it-icon.png"),
@@ -383,6 +398,8 @@ func embeddedAppFilesMatch(appDir string) bool {
 		"ui_preferences.py":   uiPreferencesSource,
 		"notifications.py":    notificationsSource,
 		"xota.py":             xotaSource,
+		"data_backup.py":      dataBackupSource,
+		"whats_new.py":        whatsNewSource,
 		"cty.dat":             ctyData,
 		filepath.Join("assets", "da6it-logo.webp"): da6itLogo,
 		filepath.Join("assets", "da6it-icon.png"):  da6itIcon,
@@ -402,7 +419,7 @@ func createKillJob() uintptr {
 		return 0
 	}
 	info := JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
-	info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK
 	r, _, _ := procSetInformationJobObject.Call(
 		h,
 		JobObjectExtendedLimitInformation,
@@ -449,7 +466,7 @@ func main() {
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
 	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v0172")
+	appDir := filepath.Join(base, "app-v0180")
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)
@@ -462,9 +479,16 @@ func main() {
 
 	pythonw := filepath.Join(runtimeDir, "pythonw.exe")
 	appPath := filepath.Join(appDir, "app.py")
+	launcherPath, _ := os.Executable()
 	cmd := exec.Command(pythonw, appPath)
 	cmd.Dir = appDir
-	cmd.Env = append(os.Environ(), "PYTHONUTF8=1", "PYTHONDONTWRITEBYTECODE=1")
+	cmd.Env = append(
+		os.Environ(),
+		"PYTHONUTF8=1",
+		"PYTHONDONTWRITEBYTECODE=1",
+		"WAVELOG_LAUNCHER_PATH="+launcherPath,
+		fmt.Sprintf("WAVELOG_LAUNCHER_PID=%d", os.Getpid()),
+	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	job := createKillJob()

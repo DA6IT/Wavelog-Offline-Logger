@@ -4,6 +4,26 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-29
+
+### Added
+
+- Vollständiges ZIP-Backup und Restore aller Logger-Profile, Einstellungen, ADI-Dateien, Metadatenbanken und lokaler Zusatzdaten; vor jeder Wiederherstellung wird automatisch eine zusätzliche Sicherung angelegt
+- Bestätigter In-App-Updater mit passender Plattformdatei, HTTPS-Download und verpflichtender SHA-256-Prüfung; unter Windows ersetzt ein separater Helfer die bisherige EXE nach dem Beenden
+- Einmalige deutsch- oder englischsprachige „Was ist neu?“-Übersicht beim ersten Start einer neuen Version
+- Das zuletzt erfolgreich geloggte QSO bleibt nach dem automatischen Leeren des Formulars als bewusster DX-Spot-Kandidat verfügbar
+- Öffentliche Datenschutz-, Sicherheits- und Code-Signing-Richtlinien zur Vorbereitung der SignPath-Bewerbung
+
+### Changed
+
+- Der Update-Dialog führt bestätigte Aktualisierungen direkt aus, statt den Benutzer nur zur Downloadseite weiterzuleiten
+- macOS- und Linux-Updates bevorzugen die zum gewählten Paket gehörende Prüfsummendatei; Windows verwendet weiterhin die vollständige `SHA256SUMS.txt`
+
+### Security
+
+- Restore-Archive werden vor Änderungen auf Format, Pfade, Dateianzahl und entpackte Gesamtgröße geprüft; bei Fehlern wird nicht übernommen und ein begonnener Austausch kann zurückgerollt werden
+- Heruntergeladene Updatepakete werden erst nach erfolgreichem SHA-256-Abgleich aus der temporären Datei freigegeben
+
 ## [0.17.2] - 2026-08-28
 
 ### Added

@@ -1,25 +1,13 @@
-# Sicherheitsrichtlinie
+# Security policy
 
-## Unterstützte Versionen
+## Supported versions
 
-Sicherheitskorrekturen werden für die jeweils neueste veröffentlichte Version beziehungsweise den aktuellen Release Candidate vorbereitet.
+Security fixes are provided for the latest published version. Users should upgrade to the newest release and verify its published SHA-256 checksum. Once code signing is active, users should additionally verify the Authenticode signature.
 
-## Sicherheitsproblem melden
+## Reporting a vulnerability
 
-Bitte Schwachstellen, mögliche Token-Offenlegungen oder Wege zu unbeabsichtigten Remote-Löschungen nicht als öffentliches Issue melden.
+Please report a vulnerability privately by email to `opensource@da6it.de` or through GitHub Private Vulnerability Reporting when it is enabled for the repository. Do not include passwords, Wavelog/QRZ tokens, private ADI logbooks or other personal data in a public issue.
 
-Nach Veröffentlichung des Repositorys bitte unter **Security → Advisories → Report a vulnerability** einen privaten Security Advisory öffnen. Falls diese Funktion noch nicht aktiviert ist, den Projektbetreiber über den auf dem GitHub-Profil angegebenen privaten Kontaktweg erreichen.
+Include the affected version, operating system, reproduction steps and the expected impact. The maintainer will acknowledge a usable report as soon as practical, investigate it, and coordinate a fix and disclosure. Reports about a suspected malicious or incorrectly signed artifact may also be sent to SignPath support after SignPath signing has been enabled.
 
-Bitte nach Möglichkeit angeben:
-
-- betroffene Version und Windows-Version
-- reproduzierbare Schritte ohne echte Zugangsdaten
-- erwartetes und beobachtetes Verhalten
-- mögliche Auswirkungen auf lokale ADI-Dateien oder Wavelog
-
-## Umgang mit Zugangsdaten
-
-- Wavelog-API-Tokens gehören niemals in Issues, Screenshots, Logs oder Commits.
-- Unter Windows werden neu gespeicherte Tokens mit DPAPI an das Benutzerkonto gebunden.
-- Historische `plain:`-Einträge bleiben nur für eine kontrollierte Migration lesbar.
-- Release-Artefakte werden mit SHA-256-Prüfsummen veröffentlicht.
+Public feature requests and non-sensitive bugs may continue to use GitHub Issues.

@@ -1,54 +1,48 @@
-# DA6IT.de Wavelog Offline Logger v0.17.2
+# DA6IT.de Wavelog Offline Logger v0.18.0
 
-v0.17.2 erweitert das normale QSO-Formular um eine Live-Anbindung an WSJT-X, lokale Worked-Informationen sowie Entfernung und Peilung zur Gegenstation. Extern empfangene QSOs werden weiterhin zuerst sicher lokal gespeichert und können anschließend automatisch mit Callbook-Daten ergänzt und zu Wavelog übertragen werden.
+v0.18.0 macht Aktualisierung und Datensicherung deutlich komfortabler. Der Logger kann ein bestätigtes Update selbst laden und prüfen, vollständige lokale Daten als ZIP sichern und wiederherstellen und zeigt die wichtigsten Änderungen nach dem ersten Start einmalig an.
 
-## WSJT-X-Live-Vorschau
+## Backup und Restore
 
-- Der Logger verarbeitet die laufenden Statuspakete des nativen WSJT-X-UDP-Protokolls.
-- Sobald in WSJT-X eine Gegenstation gewählt ist, erscheinen Rufzeichen, Locator, Frequenz, Band, Mode und Report bereits während des QSOs im normalen QSO-Formular.
-- Der vorhandene Callbook-Lookup kann dadurch schon vor dem Loggen Name, QTH, Foto und weitere Angaben anzeigen.
-- Ein Live-Status speichert niemals selbstständig ein QSO. Erst das echte `QSO Logged`-Paket erzeugt den lokalen ADI-Eintrag.
-- Nach einem erfolgreich manuell oder extern geloggten QSO wird das Formular automatisch geleert.
-- Eine vorhandene manuelle Eingabe für ein anderes Rufzeichen wird nicht durch WSJT-X überschrieben.
+- Unter **Einstellungen → Daten & Verbindungen** lässt sich eine vollständige ZIP-Sicherung erstellen.
+- Enthalten sind alle Logger-Profile, Einstellungen, ADI-Logbücher, Metadatenbanken, Callbook-Caches sowie Contest- und xOTA-Zuordnungen.
+- SQLite-Dateien werden als konsistente Snapshots gesichert.
+- Vor einem Restore prüft die App Format, Pfade, Dateianzahl und entpackte Gesamtgröße des Archivs.
+- Direkt vor jeder Wiederherstellung wird automatisch ein zusätzliches Sicherheitsbackup des aktuellen Stands erzeugt.
+- Ein fehlgeschlagener Austausch kann zurückgerollt werden. Nach erfolgreichem Restore wird die App kontrolliert neu gestartet beziehungsweise beendet und kann mit den wiederhergestellten Daten geöffnet werden.
 
-Für die Live-Vorschau müssen primärer WSJT-X-UDP-Server und Logger dieselbe Adresse und denselben Port verwenden. Der sekundäre, als veraltet markierte ADIF-Broadcast überträgt ausschließlich abgeschlossene QSOs und keine Live-Statuspakete.
+Backups können Zugangsdaten und API-Tokens enthalten. Sie sollten deshalb wie das Originalprofil geschützt und nicht öffentlich weitergegeben werden.
 
-## Worked-Anzeige und lokale Historie
+## Automatische, geprüfte Updates
 
-- Bereits auf demselben Band und Mode gearbeitete Rufzeichen werden im manuellen QSO-Formular grün markiert.
-- Frühere QSOs auf anderen Bändern oder Modes erscheinen als gelber Hinweis.
-- Unter dem Formular werden die letzten lokalen Verbindungen mit dem eingegebenen Rufzeichen einschließlich Datum, UTC-Zeit, Band und Mode angezeigt.
-- Die Prüfung erfolgt ausschließlich gegen das aktive lokale Profil und benötigt keine Internetverbindung.
+- Der bekannte Update-Hinweis bietet nun an, die passende Plattformdatei direkt herunterzuladen.
+- Downloads erfolgen ausschließlich über HTTPS und werden zwingend gegen die im GitHub-Release veröffentlichte SHA-256-Prüfsumme geprüft.
+- Unter Windows beendet ein separater Helfer die laufende Anwendung, ersetzt die bisherige EXE und startet die neue Version.
+- macOS und Linux laden das passende Paket verifiziert herunter und öffnen anschließend den Speicherort für die plattformübliche Installation.
+- Ohne passende Prüfsumme oder bei einer Abweichung wird das Paket nicht installiert.
 
-## Entfernung und Peilung
+## Was ist neu?
 
-- Sobald im aktiven Profil ein eigener Maidenhead-Locator und für die Gegenstation ein Locator vorliegen, zeigt der Callbook-Bereich die ungefähre Entfernung in Kilometern an.
-- Zusätzlich werden Anfangspeilung in Grad und Himmelsrichtung ausgegeben.
-- Die Berechnung erfolgt offline anhand der Zellmittelpunkte der Maidenhead-Locatoren und funktioniert unabhängig von Wavelog oder QRZ.com.
+Nach dem ersten Start von v0.18.0 erscheint einmalig eine kurze Übersicht der wichtigsten Änderungen in der gewählten Sprache. Sie kann später über **Hilfe → Was ist neu?** erneut geöffnet werden. Die App speichert lediglich lokal, welche Versionsübersicht bereits bestätigt wurde; daraus entsteht keine Telemetrie.
 
-## Callbook-Ergänzung externer QSOs
+## DX-Spot nach dem Loggen
 
-- Über WSJT-X oder ADIF/UDP empfangene QSOs werden unmittelbar lokal gespeichert.
-- Fehlende Angaben wie Name, Locator, QTH, Land sowie CQ-/ITU-Zone können anschließend im Hintergrund über die konfigurierte Wavelog- oder QRZ.com-Quelle ergänzt werden.
-- Bereits vom sendenden Programm gelieferte Werte werden niemals überschrieben.
-- Ohne Internet oder bei einem Lookup-Fehler bleibt das sicher gespeicherte lokale QSO unverändert erhalten.
-- Ein aktivierter automatischer Wavelog-Push wartet auf die laufende Ergänzung, damit die vollständigen Daten übertragen werden.
+Nach einem erfolgreichen manuellen oder externen QSO wird das Formular weiterhin automatisch geleert. Rufzeichen, Frequenz, Band, Mode und Kommentar des zuletzt geloggten QSOs bleiben jedoch intern als Spot-Kandidat erhalten. **DX-Spot senden** verwendet nach einer klaren Bestätigung diese letzten Daten, solange noch kein neues QSO vorbereitet wurde.
 
-## UDP-Logging und Profile
+## Bestehende Funktionen
 
-- Beim Profilwechsel beendet der Logger den Listener des alten Profils.
-- Für das neu gewählte Profil wird dessen eigene Host-/Port-Konfiguration automatisch gestartet, wenn UDP-Autostart aktiviert ist.
-- Die Einstellung heißt deshalb nun ausdrücklich **UDP Logging beim App-Start und Profilwechsel automatisch starten**.
+Die Funktionen aus v0.17.2 bleiben vollständig enthalten:
 
-## Bedienung
-
-- Die redundante Schaltfläche **Speichern + Neu** im normalen QSO-Formular wurde entfernt.
-- **QSO speichern** speichert lokal, setzt anschließend alle QSO-Felder zurück und fokussiert erneut das Rufzeichenfeld.
-- Fast Log, Contest Logging, xOTA, ADIF-Import/-Export und der stationsbezogene Wavelog-Sync aus v0.17.1 bleiben erhalten.
+- WSJT-X-Live-Vorschau und profilbezogener UDP-Empfang
+- Worked-Historie im QSO-Formular
+- Entfernung und Peilung aus Maidenhead-Locatoren
+- Callbook-Anreicherung über Wavelog oder QRZ.com
+- Contest-, xOTA-, ADIF-Import/-Export-, CAT-, DX-Cluster- und Wavelog-Sync-Funktionen
+- getrennte Stationsprofile, Deutsch/Englisch und Light/Dark
 
 ## Plattformen und Downloads
 
-Der GitHub-Release enthält:
+Der GitHub-Release baut und veröffentlicht automatisch:
 
 - Windows x64: EXE und ZIP
 - macOS Apple Silicon: App-ZIP
@@ -56,20 +50,17 @@ Der GitHub-Release enthält:
 - Linux x64 und ARM64: DEB, AppImage und Arch-Paket
 - SHA-256-Prüfsummen für alle Pakete
 
-Windows-Pakete sind derzeit nicht digital signiert. Die macOS-App ist technisch ad-hoc signiert, aber nicht notarisiert. Bitte ausschließlich aus dem offiziellen GitHub-Release laden.
-
 ## Upgrade und Datensicherheit
 
-v0.17.2 kann direkt über v0.17.1 oder eine ältere Version installiert werden. Vorhandene Profile, Einstellungen, ADI-Dateien, Sync-Metadaten und Callbook-Caches bleiben erhalten. Jedes neue QSO wird weiterhin zuerst lokal in der profilbezogenen ADI-Datei gespeichert.
+v0.18.0 kann direkt über v0.17.2 oder eine ältere Version installiert werden. Vorhandene Profile, Einstellungen, ADI-Dateien, Sync-Metadaten und Callbook-Caches bleiben erhalten. Jedes neue QSO wird weiterhin zuerst lokal in der profilbezogenen ADI-Datei gespeichert.
 
-Vor einem Upgrade empfiehlt sich trotzdem eine zusätzliche Kopie des vollständigen Anwendungs- und gegebenenfalls externen ADI-Ordners.
+Vor dem Upgrade empfiehlt sich erstmals die neue ZIP-Sicherung. Bei einem Upgrade von einer älteren Version kann alternativ weiterhin der vollständige Anwendungs- und externe ADI-Ordner manuell kopiert werden.
 
-## Bekannte Einschränkungen
+## Code signing policy und bekannte Einschränkungen
 
-- keine Windows-Code-Signatur
-- keine Apple-Notarisierung
-- eQSL.cc-Anbindung weiterhin **Coming soon**
-- vollständiges ZIP-Backup und Restore über die Oberfläche weiterhin geplant
-- Entfernung und Peilung sind wegen der Locator-Zellgröße Näherungswerte
+- v0.18.0 wird bewusst noch **ohne Windows-Code-Signatur** veröffentlicht. Erst danach wird die kostenlose Aufnahme bei SignPath Foundation beantragt. **[Free code signing provided by SignPath.io, certificate by SignPath Foundation](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.0/CODE_SIGNING_POLICY.md)** beschreibt den geplanten kontrollierten Ablauf.
+- Die macOS-App ist technisch ad-hoc signiert, aber mangels Apple-Developer-Zertifikat nicht notarisiert.
+- eQSL.cc bleibt **Coming soon**.
+- Entfernung und Peilung aus Locatoren sind wegen der Zellgröße Näherungswerte.
 
-Eine vollständige Bedienungsanleitung steht im [Benutzerhandbuch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.17.2/docs/USER_GUIDE.md); typische Probleme behandelt die [Fehlerhilfe](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.17.2/docs/TROUBLESHOOTING.md).
+Datennutzung und optionale Netzwerkdienste beschreibt die [Datenschutzerklärung](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.0/PRIVACY.md). Eine vollständige Bedienungsanleitung steht im [Benutzerhandbuch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.0/docs/USER_GUIDE.md); typische Probleme behandelt die [Fehlerhilfe](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.0/docs/TROUBLESHOOTING.md).

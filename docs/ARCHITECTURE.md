@@ -16,6 +16,10 @@ bootstrap_windows.go
         |
         +--------->  update_check.py <---->  GitHub Releases API
         |
+        +--------->  data_backup.py <---->  validiertes ZIP / SQLite-Snapshot
+        |
+        +--------->  whats_new.py
+        |
         +--------->  callbook.py <----> Wavelog Lookup API / QRZ XML API
         |
         +--------->  notifications.py <----> Windows / macOS / Linux Desktop
@@ -60,7 +64,15 @@ Implementiert den lokal start- und stoppbaren UDP-Empfänger, das native WSJT-X-
 
 ### `update_check.py`
 
-Fragt nach dem Programmstart in einem Hintergrundthread ausschließlich die öffentliche GitHub-Release-Liste ab. Netzwerk-, HTTP- und Formatfehler liefern still kein Ergebnis. Stabile Versionen ignorieren Vorabversionen.
+Fragt nach dem Programmstart in einem Hintergrundthread ausschließlich die öffentliche GitHub-Release-Liste ab. Netzwerk-, HTTP- und Formatfehler liefern still kein Ergebnis. Stabile Versionen ignorieren Vorabversionen. Ein bestätigtes Update wählt das passende Plattformpaket, lädt ausschließlich per HTTPS und verlangt vor der Installation eine veröffentlichte SHA-256-Prüfsumme.
+
+### `data_backup.py`
+
+Erzeugt konsistente SQLite-Snapshots und ein portables ZIP mit Profilregister, Einstellungen, ADI-Dateien und Metadaten. Ein Restore akzeptiert nur das eigene manifestierte Format, begrenzt Pfade, Dateianzahl und Gesamtgröße, legt vorab automatisch ein Sicherheitsbackup an und tauscht Daten erst nach vollständiger Prüfung aus.
+
+### `whats_new.py`
+
+Enthält die kurzen deutsch- und englischsprachigen Hinweise, die pro Version nur einmal angezeigt werden. Der quittierte Versionsstand liegt in den app-weiten UI-Einstellungen und enthält keine Nutzungsstatistik.
 
 ### `callbook.py`
 

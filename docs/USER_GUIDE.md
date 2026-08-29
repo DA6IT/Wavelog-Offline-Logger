@@ -1,6 +1,6 @@
 # Benutzerhandbuch
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.17.2. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.18.0. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -77,7 +77,8 @@ Einstellungen mit Zugangsdaten, Speicherort und Stationsrufzeichen gelten pro Lo
 - **Sprache:** Deutsch oder Englisch
 - **Theme:** Hell oder Dunkel
 - Änderungen an Sprache und Theme werden nach einem Neustart vollständig aktiv.
-- Der Bereich Daten & Backup weist auf die lokale Datensicherung hin; eine automatische ZIP-Wiederherstellung ist in 0.16.0 noch nicht enthalten.
+- **Was ist neu?** öffnet die Versionshinweise erneut. Nach dem ersten Start einer neuen Version erscheinen sie einmal automatisch.
+- Unter **Daten & Backup** lassen sich alle Profile, Einstellungen, Sync-Metadaten und ADI-Logbücher in einem ZIP sichern und wiederherstellen.
 
 ![Englische Oberfläche im Dark-Theme](screenshots/qso-logging-english-dark.png)
 
@@ -292,7 +293,7 @@ Fehlt der Mode, wertet die App Kommentar, typische FT8-Frequenzen und eindeutige
 
 - **Doppelklick:** TRX auf Frequenz und Mode abstimmen; kein Seitenwechsel
 - **QSO übernehmen:** ausgewählten Spot in das QSO-Formular übertragen
-- **DX-Spot senden:** aktuellen QSO-Kandidaten über die getrennte DXSpider-Verbindung melden
+- **DX-Spot senden:** aktuellen QSO-Kandidaten über die getrennte DXSpider-Verbindung melden. Nach dem Speichern und Leeren des Formulars bleibt das letzte QSO als eigener Spot-Kandidat erhalten.
 
 ## 13. UDP Logging / WSJT-X
 
@@ -314,22 +315,17 @@ Fehlen bei einem über WSJT-X oder den ADIF/UDP-Broadcast empfangenen QSO Name, 
 
 ## 14. Lokale Daten sichern und wiederherstellen
 
-Version 0.16.0 enthält noch keinen automatischen ZIP-Backup-/Restore-Knopf. Für eine vollständige manuelle Sicherung die App beenden und den gesamten Anwendungsordner kopieren. Damit werden Profile, Einstellungen, Sync-Metadaten, Callbook-Cache und standardmäßig auch die verwalteten ADI-Ordner erfasst.
+Unter **Einstellungen → Allgemein → Daten & Backup** erstellt **Backup erstellen** ein portables ZIP. Enthalten sind alle Logger-Profile, app-weiten Einstellungen, profilbezogenen Datenbanken und auch ADI-Dateien aus extern gewählten Logverzeichnissen. Weil gespeicherte Tokens und Passwörter enthalten sein können, muss das ZIP wie ein Zugangsschlüssel geschützt aufbewahrt werden.
 
-Wurde für ein Profil ein ADI-Ordner außerhalb des Anwendungsordners gewählt, muss dieser zusätzlich gesichert werden.
-
-Zur Wiederherstellung:
-
-1. App vollständig beenden.
-2. Den vorhandenen Anwendungsordner vorsichtshalber umbenennen.
-3. Die Sicherung an den ursprünglichen Pfad kopieren.
-4. App starten und Profile sowie ADI-Pfade kontrollieren.
+**Backup wiederherstellen** prüft Inhalt, Format, Pfade und Größenlimits, zeigt Herkunft und Profilzahl an und verlangt eine ausdrückliche Bestätigung. Vor jeder Wiederherstellung erzeugt die App automatisch ein zweites Sicherheitsbackup des aktuellen Zustands. Die wiederhergestellten ADI-Dateien landen anschließend in sicheren profilbezogenen Logverzeichnissen. Nach erfolgreicher Wiederherstellung schließt sich die App und muss neu gestartet werden.
 
 Eine einzelne ADI-Datei darf bei geschlossener App ersetzt oder aus einer Sicherung zurückkopiert werden. Niemals nur die SQLite-Datei als QSO-Sicherung behandeln – ADI ist das primäre Logbuch.
 
 ## 15. Updates
 
-Beim Start prüft die App im Hintergrund, ob ein neueres GitHub-Release vorhanden ist. Ohne Internet erscheint keine Fehlermeldung. Ein Update wird nicht automatisch installiert; der Benutzer entscheidet selbst über Download und Start der neuen Version.
+Beim Start prüft die App im Hintergrund, ob ein neueres GitHub-Release vorhanden ist. Ohne Internet erscheint keine Fehlermeldung. Nach Zustimmung lädt die App ausschließlich das zum System passende HTTPS-Paket und verifiziert es gegen die im Release veröffentlichte SHA-256-Prüfsumme. Unter Windows ersetzt ein Helfer nach dem sauberen Beenden die bisherige Programmdatei, behält eine Rückfallkopie und startet die neue Version. Auf macOS und Linux wird das geprüfte Paket gespeichert und anschließend mit dem üblichen Systemweg installiert.
+
+Beim ersten Start einer neuen Version erscheint einmalig **Was ist neu?**. Die Hinweise können später unter **Einstellungen → Allgemein** erneut geöffnet werden.
 
 ## 16. Datenschutz und Netzwerkzugriffe
 
