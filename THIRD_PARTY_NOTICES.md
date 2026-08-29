@@ -22,6 +22,17 @@ The main DA6IT.de Wavelog Offline Logger source remains licensed under the MIT
 License. Hamlib runs as a separate `rigctld` process and is accessed through
 its documented local TCP protocol.
 
+## Python
+
+The Windows version installs the official CPython 3.12.10 runtime distributed
+by the Python Software Foundation into the application's private runtime
+directory. The download URL and SHA-256 checksum are pinned in the Windows
+bootstrapper. macOS and Linux packages are likewise built with CPython.
+
+- Project: https://www.python.org/
+- License: https://docs.python.org/3/license.html
+- License name: Python Software Foundation License
+
 ## Pillow
 
 Release packages include Pillow 12.3.0 for displaying QRZ station photos.

@@ -4,6 +4,19 @@ Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Form
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-08-29
+
+### Added
+
+- Windows-`VERSIONINFO` mit einheitlichem Produktnamen, Produkt-/Dateiversion, Beschreibung und ursprünglichem Dateinamen; der Windows-Build bricht bei jeder Abweichung ab
+- Vollständige Deinstallationsanweisungen für Windows, macOS, Debian/Ubuntu, Arch Linux und AppImage mit klarer Trennung von Programm-, Profil- und ADI-Daten
+- CPython 3.12.10 und die Python Software Foundation License in den Drittanbieterhinweisen
+
+### Changed
+
+- Code-Signing-Rollen verwenden ausdrücklich die SignPath-Bezeichnungen Authors/Committers, Reviewers und Approvers
+- SignPath-Unterlagen nennen v0.18.1 als noch unsigniertes Referenzrelease in exakt dem später zu signierenden Buildformat
+
 ## [0.18.0] - 2026-08-29
 
 ### Added

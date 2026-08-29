@@ -132,9 +132,40 @@ try {
         throw 'Windows-Build fehlgeschlagen.'
     }
 
-    & $python (Join-Path $PSScriptRoot 'set-windows-icon.py') $outputPath (Join-Path $projectRoot 'assets\da6it-icon.ico')
+    & $python (Join-Path $PSScriptRoot 'set-windows-icon.py') $outputPath (Join-Path $projectRoot 'assets\da6it-icon.ico') $version
     if ($LASTEXITCODE -ne 0) {
-        throw 'Das DA6IT.de-Icon konnte nicht in die Windows-EXE eingebettet werden.'
+        throw 'Icon und VERSIONINFO konnten nicht in die Windows-EXE eingebettet werden.'
+    }
+
+    $expectedOriginalFilename = [System.IO.Path]::GetFileName($outputPath)
+    $versionInfo = (Get-Item -LiteralPath $outputPath).VersionInfo
+    $metadata = @{
+        ProductName = [string]$versionInfo.ProductName
+        ProductVersion = [string]$versionInfo.ProductVersion
+        FileVersion = [string]$versionInfo.FileVersion
+        FileDescription = [string]$versionInfo.FileDescription
+        OriginalFilename = [string]$versionInfo.OriginalFilename
+    }
+    $expectedMetadata = @{
+        ProductName = 'DA6IT.de Wavelog Offline Logger'
+        ProductVersion = $version
+        FileVersion = $version
+        FileDescription = 'DA6IT.de Wavelog Offline Logger'
+        OriginalFilename = $expectedOriginalFilename
+    }
+    foreach ($key in $expectedMetadata.Keys) {
+        if ($metadata[$key].Trim() -ne [string]$expectedMetadata[$key]) {
+            throw "Windows-Dateimetadatum stimmt nicht: $key='$($metadata[$key])', erwartet '$($expectedMetadata[$key])'"
+        }
+    }
+    $versionParts = $version.Split('.') | ForEach-Object { [int]$_ }
+    if (
+        $versionInfo.FileMajorPart -ne $versionParts[0] -or
+        $versionInfo.FileMinorPart -ne $versionParts[1] -or
+        $versionInfo.FileBuildPart -ne $versionParts[2] -or
+        $versionInfo.FilePrivatePart -ne 0
+    ) {
+        throw "Die numerische Windows-Dateiversion stimmt nicht mit $version.0 überein."
     }
 
     $hash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash.ToLowerInvariant()

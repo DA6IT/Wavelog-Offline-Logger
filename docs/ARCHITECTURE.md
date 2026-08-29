@@ -117,3 +117,5 @@ Unter Windows werden neue Tokens und Passwörter mit DPAPI verschlüsselt. Kann 
 ## Release-Artefakt
 
 Der Go-Bootstrapper ist kein Python-Onefile-Bundle. Die Anwendung bleibt als eingebetteter Python-Quellcode im Launcher enthalten und wird versionsabhängig in den lokalen Anwendungsordner geschrieben. Pillow wird beim Windows-Build ohne Abhängigkeit von `pip` als offizielles, per PyPI-SHA-256 geprüftes Wheel vorbereitet. `build_pyinstaller_windows.bat` ist nur noch ein Kompatibilitätsstarter für denselben Go-Build.
+
+Nach dem Go-Build werden Icon und eine native Windows-`VERSIONINFO`-Ressource in die EXE geschrieben. Das Buildskript liest Product Name, Product/File Version, Beschreibung, Originaldateiname und die numerische Viererteil-Version anschließend aus dem fertigen Artefakt zurück und bricht bei Abweichungen ab. Erst danach entstehen SHA-256-Prüfsumme und ZIP; eine spätere SignPath-Integration muss entsprechend vor der endgültigen Prüfsummenerzeugung liegen.

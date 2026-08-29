@@ -52,6 +52,18 @@ Beim ersten Start werden vorhandene Tages-ADI-Dateien vor der Zusammenführung a
 
 Beim ersten Windows-Start lädt der Bootstrapper einmalig eine verifizierte private Python-Laufzeit. Python muss nicht systemweit installiert sein. Für CAT kann zusätzlich der Windows-Treiber des Funkgeräts erforderlich sein.
 
+## Deinstallation
+
+Programm und Benutzerdaten werden bewusst getrennt entfernt:
+
+- **Windows:** App schließen und die heruntergeladene EXE beziehungsweise den entpackten Programmordner und eigene Verknüpfungen löschen. Optional anschließend `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\` entfernen. Dieser Ordner enthält die private Python-Laufzeit, Profile, Einstellungen, Tokens, Caches und Sync-Metadaten.
+- **macOS:** App schließen und **DA6IT.de Wavelog Offline Logger.app** aus **Programme** in den Papierkorb verschieben. Optional `~/Library/Application Support/AFU-Tools/WavelogOfflineLogger/` löschen.
+- **Debian/Ubuntu:** `sudo apt remove wavelog-offline-logger`; optional danach `~/.local/share/AFU-Tools/WavelogOfflineLogger/` löschen.
+- **Arch Linux:** `sudo pacman -R wavelog-offline-logger`; optional danach denselben lokalen Datenordner löschen.
+- **AppImage:** App schließen und die AppImage-Datei löschen; optional den genannten Linux-Datenordner entfernen.
+
+**Wichtig:** Die ADI-Logbücher liegen standardmäßig getrennt unter `Dokumente/DA6IT.de Wavelog Logger/Profiles/…/Logs` oder an einem selbst gewählten Speicherort. Sie werden durch die obigen Schritte nicht automatisch gelöscht. Vor dem Entfernen von Benutzerdaten empfiehlt sich **Einstellungen → Daten & Verbindungen → Backup erstellen**.
+
 ## Schnelleinstieg
 
 1. Unter **Einstellungen → Station & Wavelog** Rufzeichen, Operator und optional Wavelog eintragen.
@@ -76,7 +88,7 @@ Der Logger ersetzt Wavelog nicht. Er ergänzt es für portable Einsätze, DXpedi
 
 **[Free code signing provided by SignPath.io, certificate by SignPath Foundation](CODE_SIGNING_POLICY.md)**
 
-Die Aufnahme bei SignPath wird nach Veröffentlichung von v0.18.0 beantragt. Dieses Release bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
+Die Aufnahme bei SignPath wird nach Veröffentlichung von v0.18.1 beantragt. Dieses Release bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
 
 ## Dokumentation
 

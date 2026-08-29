@@ -1,6 +1,6 @@
 # Benutzerhandbuch
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.18.0. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.18.1. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -46,6 +46,19 @@ sudo pacman -U DA6IT.de-Wavelog-Offline-Logger-*.pkg.tar.zst
 ```
 
 Anwendungsdaten unter Linux: `~/.local/share/AFU-Tools/WavelogOfflineLogger/`
+
+### Deinstallation
+
+Vor der Deinstallation die App schließen. Ein ZIP-Backup unter **Einstellungen → Daten & Verbindungen** bewahrt Profile, Einstellungen, Metadaten und ADI-Logbücher gemeinsam auf.
+
+- **Windows:** Die heruntergeladene EXE beziehungsweise den entpackten Programmordner und eigene Verknüpfungen löschen. `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\` bleibt zunächst erhalten, damit Profile und Einstellungen nicht versehentlich verloren gehen. Wer wirklich alle App-Daten entfernen möchte, kann diesen Ordner anschließend bewusst löschen.
+- **macOS:** Die `.app` aus **Programme** löschen. Die optional zu entfernenden App-Daten liegen unter `~/Library/Application Support/AFU-Tools/WavelogOfflineLogger/`.
+- **Debian/Ubuntu:** `sudo apt remove wavelog-offline-logger` ausführen.
+- **Arch Linux:** `sudo pacman -R wavelog-offline-logger` ausführen.
+- **AppImage:** Die AppImage-Datei löschen.
+- **Linux-Benutzerdaten:** Bei vollständiger Entfernung zusätzlich `~/.local/share/AFU-Tools/WavelogOfflineLogger/` löschen.
+
+Die eigentlichen ADI-Dateien liegen standardmäßig unter `~/Documents/DA6IT.de Wavelog Logger/Profiles/<Profil-ID>/Logs/` beziehungsweise unter Windows im entsprechenden Dokumente-Ordner. Falls kein Dokumente-Ordner vorhanden war oder ein eigener Speicherort gewählt wurde, kann der Pfad abweichen. Paket-Deinstallation und Löschen des App-Datenordners entfernen diese Logbücher nicht automatisch; sie dürfen nur nach eigener Prüfung bewusst gelöscht werden.
 
 ## 3. Oberfläche und Navigation
 

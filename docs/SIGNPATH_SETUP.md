@@ -1,15 +1,16 @@
-# SignPath-Einrichtung nach v0.18.0
+# SignPath-Einrichtung nach v0.18.1
 
-Dieses Dokument ist die Maintainer-Checkliste für die Bewerbung und spätere CI-Integration. v0.18.0 wird noch unsigniert veröffentlicht. Ein aktiver Workflow wird erst ergänzt, wenn SignPath das Projekt angenommen und die konkreten Organisations-, Projekt- und Richtlinienkennungen bereitgestellt hat; Platzhalter-Geheimnisse sollen keinen Release-Workflow absichtlich fehlschlagen lassen.
+Dieses Dokument ist die Maintainer-Checkliste für die Bewerbung und spätere CI-Integration. v0.18.1 wird noch unsigniert, aber bereits mit den später zu prüfenden Windows-Dateimetadaten veröffentlicht. Ein aktiver Workflow wird erst ergänzt, wenn SignPath das Projekt angenommen und die konkreten Organisations-, Projekt- und Richtlinienkennungen bereitgestellt hat; Platzhalter-Geheimnisse sollen keinen Release-Workflow absichtlich fehlschlagen lassen.
 
 ## Vor der Bewerbung
 
-- v0.18.0 mit Windows-Artefakt und vollständiger Dokumentation veröffentlichen.
+- v0.18.1 mit Windows-Artefakt, `VERSIONINFO` und vollständiger Dokumentation veröffentlichen.
 - In GitHub für das Maintainer-Konto Mehrfaktor-Authentifizierung aktivieren.
 - Unter **Settings → Security** nach Möglichkeit Private Vulnerability Reporting aktivieren.
 - Prüfen, dass README und Release-Seite auf **Code signing policy** und **Privacy policy** verweisen.
 - Prüfen, dass Lizenz, Quellcode, Buildskripte und Drittanbieterhinweise öffentlich sind.
 - Die Rollen aus `CODE_SIGNING_POLICY.md` bestätigen.
+- Am veröffentlichten Windows-Artefakt `ProductName`, `ProductVersion`, `FileVersion`, `FileDescription` und `OriginalFilename` prüfen.
 
 Antragsdaten:
 
@@ -34,4 +35,3 @@ Antrag: https://signpath.org/apply.html
 7. Einen Test-Tag verwenden und anschließend README, Release Notes sowie diese Anleitung auf den tatsächlich aktiven Ablauf aktualisieren.
 
 Die jeweils aktuellen Bedingungen stehen unter https://signpath.org/terms.html. Keine Projektkennung, Secret-Namen oder Workflow-Action dürfen vor der Freigabe geraten werden.
-
