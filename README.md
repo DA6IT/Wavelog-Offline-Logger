@@ -1,5 +1,7 @@
 # DA6IT.de Wavelog Offline Logger
 
+**Deutsch** · [English](README.en.md)
+
 Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn Wavelog oder das Internet nicht erreichbar ist. Jedes QSO wird zuerst sicher lokal als ADI gespeichert und später manuell oder automatisch mit Wavelog synchronisiert.
 
 **Download:** [Aktuelles Release für Windows, macOS und Linux](https://github.com/DA6IT/Wavelog-Offline-Logger/releases/latest)
@@ -88,7 +90,7 @@ Der Logger ersetzt Wavelog nicht. Er ergänzt es für portable Einsätze, DXpedi
 
 **[Free code signing provided by SignPath.io, certificate by SignPath Foundation](CODE_SIGNING_POLICY.md)**
 
-Die Aufnahme bei SignPath wird nach Veröffentlichung von v0.18.1 beantragt. Dieses Release bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
+Die Aufnahme bei SignPath wird nach Veröffentlichung von v0.18.2 beantragt. Dieses Release bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
 
 ## Dokumentation
 

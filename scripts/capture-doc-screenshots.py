@@ -114,6 +114,7 @@ def main() -> int:
         if width < 10 or height < 10:
             raise RuntimeError(f"Widget for {filename} has no usable size: {width}x{height}")
         target = output / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
         # Use Windows' built-in System.Drawing instead of Pillow. This keeps
         # documentation capture independent from a system Python/Pillow
         # installation and avoids ACL differences in sandbox-built packages.
@@ -498,8 +499,9 @@ try {
             pass
         running.destroy()
 
-        # One additional capture proves both optional presentation variants:
-        # English UI and dark theme.  It reuses only the isolated demo profile.
+        # A complete English screenshot set proves that every main page and
+        # every Settings tab is available in the selected language.  It
+        # reuses only the isolated demo profile.
         cancel_all_after(root)
         root.shutdown()
         cancel_all_after(root)
@@ -508,7 +510,7 @@ try {
         preferences_file = app_data_dir() / "ui_preferences.json"
         preferences_file.parent.mkdir(parents=True, exist_ok=True)
         preferences_file.write_text(
-            json.dumps({"language": "en", "theme": "dark"}, indent=2) + "\n",
+            json.dumps({"language": "en", "theme": "light"}, indent=2) + "\n",
             encoding="utf-8",
         )
         root = LoggerApp()
@@ -531,7 +533,46 @@ try {
         root._set_wavelog_mode_ui(True)
         root.status_var.set("Ready · documentation demo without a real online connection")
         root._show_page("log")
-        capture(root, "qso-logging-english-dark.png")
+        capture(root, "en/qso-logging.png")
+
+        english_pages = (
+            ("fast_log", "en/fast-log.png"),
+            ("contest", "en/contest-logging.png"),
+            ("xota", "en/xota.png"),
+            ("qsos", "en/logbook-sync.png"),
+            ("stats", "en/statistics.png"),
+            ("cat", "en/cat-setup.png"),
+            ("dx_cluster", "en/dx-cluster.png"),
+            ("udp_log", "en/udp-logging.png"),
+        )
+        for page_name, filename in english_pages:
+            root._show_page(page_name)
+            capture(root, filename)
+
+        root._show_page("settings")
+        notebook = notebook_below(root.pages["settings"])
+        if notebook is None:
+            raise RuntimeError("Settings notebook not found for English documentation")
+        for index, filename in (
+            (0, "en/settings-general.png"),
+            (1, "en/settings-wavelog.png"),
+            (2, "en/settings-callbook.png"),
+            (3, "en/settings-data-connections.png"),
+        ):
+            notebook.select(index)
+            capture(root, filename)
+
+        root._show_page("qsos")
+        running = SyncProgressDialog(root, "startup", "Comparing local and remote QSOs …")
+        capture(running, "en/sync-progress-running.png")
+        running.complete(True, "6 local QSOs checked\n4 new QSOs transferred\n2 records already current\n0 conflicts")
+        capture(running, "en/sync-progress-complete.png")
+        try:
+            running.grab_release()
+        except tk.TclError:
+            pass
+        running.destroy()
+
         root.attributes("-topmost", False)
 
         print(f"Created {len(created)} documentation screenshots in {output}")

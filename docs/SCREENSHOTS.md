@@ -1,6 +1,8 @@
 # Screenshot-Galerie
 
-Die Bilder zeigen Version 0.18.1 mit automatisch erzeugten, isolierten Demo-Daten. Der Aufnahmeprozess greift weder auf echte Logger-Profile noch auf Funkgerät, Netzwerk, API-Tokens oder persönliche ADI-Dateien zu.
+**Deutsch** · [English](en/SCREENSHOTS.md)
+
+Die Bilder zeigen Version 0.18.2 mit automatisch erzeugten, isolierten Demo-Daten. Der Aufnahmeprozess greift weder auf echte Logger-Profile noch auf Funkgerät, Netzwerk, API-Tokens oder persönliche ADI-Dateien zu.
 
 ## QSO loggen
 

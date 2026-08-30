@@ -1,5 +1,21 @@
 # Changelog
 
+**Deutsch** · [English](CHANGELOG.en.md)
+
+## [0.18.2] - 2026-08-30
+
+### Added
+
+- vollständige englische Übersetzung aller Hauptseiten, Dialoge, Sicherheitsabfragen, Fehler- und Statusmeldungen
+- vollständige englische Benutzer- und Maintainer-Dokumentation
+- eigener englischer Screenshot-Satz für jede Hauptseite und jedes Einstellungsregister
+- zweisprachige README, Release-Hinweise, Beitragsanleitung und Changelog
+
+### Changed
+
+- Release-Pakete und Prüfskripte verlangen und enthalten jetzt beide Sprachfassungen
+- Sprachwahl unter Einstellungen → Allgemein gilt dokumentiert appweit für alle Stationsprofile
+
 Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Format orientiert sich an Keep a Changelog; Versionsnummern folgen Semantic Versioning.
 
 ## [Unreleased]

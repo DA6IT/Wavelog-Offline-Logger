@@ -1,5 +1,7 @@
 # Mitwirken
 
+**Deutsch** · [English](CONTRIBUTING.en.md)
+
 Danke für dein Interesse am DA6IT.de Wavelog Offline Logger.
 
 ## Grundregeln
