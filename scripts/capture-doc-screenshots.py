@@ -86,6 +86,43 @@ def main() -> int:
     created: list[Path] = []
     root: LoggerApp | None = None
 
+    class Rect(ctypes.Structure):
+        _fields_ = (
+            ("left", ctypes.c_long), ("top", ctypes.c_long),
+            ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+        )
+
+    def windows_work_area() -> tuple[int, int, int, int]:
+        """Return the desktop work area, explicitly excluding the taskbar."""
+        if os.name != "nt":
+            return (0, 0, 10000, 10000)
+        rect = Rect()
+        if not ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+            raise ctypes.WinError()
+        return (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+
+    work_left, work_top, work_right, work_bottom = windows_work_area()
+
+    def fit_window(widget: tk.Misc, width: int, height: int, x: int = 20, y: int = 8) -> None:
+        """Place a window completely inside the taskbar-free work area."""
+        x = max(work_left, min(int(x), work_right - 200))
+        y = max(work_top, min(int(y), work_bottom - 150))
+        # Tk geometry describes the client area. Windows adds the resize
+        # border and title bar outside it (8 px per side and about 31 px at
+        # the active DPI on a normal Windows 11 setup). Keep a deliberately
+        # larger reserve so the complete top-level HWND remains inside the
+        # taskbar-free work area at other DPI settings as well.
+        decoration_width = 32
+        decoration_height = 64
+        safe_width = min(int(width), work_right - x - decoration_width)
+        safe_height = min(int(height), work_bottom - y - decoration_height)
+        if safe_width < 800 or safe_height < 540:
+            raise RuntimeError(
+                f"Desktop work area is too small for documentation capture: "
+                f"{work_right - work_left}x{work_bottom - work_top}"
+            )
+        widget.geometry(f"{safe_width}x{safe_height}+{x}+{y}")
+
     def settle(widget: tk.Misc, delay: float = 0.22) -> None:
         widget.update_idletasks()
         widget.update()
@@ -113,11 +150,20 @@ def main() -> int:
         height = widget.winfo_height()
         if width < 10 or height < 10:
             raise RuntimeError(f"Widget for {filename} has no usable size: {width}x{height}")
+        if x < work_left or y < work_top or x + width > work_right or y + height > work_bottom:
+            raise RuntimeError(
+                f"Screenshot {filename} would include non-work-area pixels "
+                f"(window={x},{y},{width}x{height}; work area="
+                f"{work_left},{work_top},{work_right},{work_bottom})."
+            )
         target = output / filename
         target.parent.mkdir(parents=True, exist_ok=True)
-        # Use Windows' built-in System.Drawing instead of Pillow. This keeps
-        # documentation capture independent from a system Python/Pillow
-        # installation and avoids ACL differences in sandbox-built packages.
+        # Copy exactly the Tk client rectangle. fit_window() keeps that
+        # rectangle inside the taskbar-free work area and the documentation
+        # window is topmost, so no desktop, taskbar, title bar or surrounding
+        # pixels can enter the image. Avoid PrintWindow here: it sends a
+        # synchronous paint request to Tk while this thread waits for the
+        # helper and can therefore crash the Tcl/Tk process on Windows.
         capture_command = r"""
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -212,7 +258,7 @@ try {
         """Exercise every main page at representative supported sizes."""
         page_names = ("log", "fast_log", "contest", "xota", "qsos", "stats", "cat", "dx_cluster", "udp_log", "settings")
         for width, height in ((900, 580), (1100, 680), (1355, 790), (1420, 820)):
-            window.geometry(f"{width}x{height}+20+20")
+            fit_window(window, width, height, 20, 8)
             settle(window, 0.04)
             for page_name in page_names:
                 window._show_page(page_name)
@@ -267,7 +313,7 @@ try {
 
     try:
         root = LoggerApp()
-        root.geometry("1420x820+40+40")
+        fit_window(root, 1420, 820, 20, 8)
         root.attributes("-topmost", True)
         settle(root, 0.35)
 
@@ -293,7 +339,7 @@ try {
         root.db.set_token("wl2_documentation_demo_token")
         root._load_settings_to_ui()
         validate_responsive_pages(root)
-        root.geometry("1420x820+40+40")
+        fit_window(root, 1420, 820, 20, 8)
         settle(root)
         root.set_station_profile.set("DA6IT Portable · Profil-ID 1")
 
@@ -373,7 +419,7 @@ try {
 
         # Contest Logging needs a little more vertical room than the other
         # pages so its header and complete session card remain visible.
-        root.geometry("1420x900+40+20")
+        fit_window(root, 1420, 900, 20, 8)
         root._show_page("contest")
         root.contest_preset_var.set("Dokumentations-Contest")
         root.contest_call_var.set("OK1DIX")
@@ -394,7 +440,7 @@ try {
         for line in ("026  I0VCE      30m CW", "025  HB9JCL     17m FT8", "024  F5RRS      15m USB"):
             root.contest_recent.insert("end", line)
         capture(root, "contest-logging.png")
-        root.geometry("1420x820+40+40")
+        fit_window(root, 1420, 820, 20, 8)
 
         # xOTA with several deliberately unconfirmed references. No GPS,
         # network service or real Wavelog station is contacted.
@@ -514,7 +560,7 @@ try {
             encoding="utf-8",
         )
         root = LoggerApp()
-        root.geometry("1420x820+40+40")
+        fit_window(root, 1420, 820, 20, 8)
         root.attributes("-topmost", True)
         root.call_var.set("DL1ABC")
         root.freq_var.set("14.205")
