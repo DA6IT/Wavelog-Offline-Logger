@@ -1,8 +1,8 @@
-# User guide — DA6IT.de Wavelog Offline Logger 0.18.3
+# User guide — DA6IT.de Wavelog Offline Logger 0.18.4
 
 [Deutsch](../USER_GUIDE.md) · **English**
 
-This guide covers the complete application. Its screenshots are generated with isolated demo data strictly inside the taskbar-free Windows work area and contain no private logs, tokens or credentials.
+This guide covers the complete application. Its screenshots are generated with isolated demo data and contain no private logs, tokens or credentials.
 
 ## 1. Language, theme and profiles
 
@@ -84,7 +84,7 @@ External QSOs are saved locally first, deduplicated and optionally enriched from
 
 ## 13. Updates and What's new
 
-The app checks GitHub Releases silently. After confirmation it downloads only the matching HTTPS package and validates its SHA-256 checksum. On Windows a helper replaces the old executable after clean shutdown, preserves a rollback copy and starts the new version. macOS/Linux packages are downloaded for normal system installation. A one-time **What's new?** page appears on first start of each release and remains available under Settings.
+The app checks GitHub Releases silently. After confirmation it downloads only the matching HTTPS package and validates its SHA-256 checksum. On Windows the bootstrapper records the exact path and filename of the EXE actually launched. After clean shutdown a helper replaces precisely that file and restarts it at the same location under the same custom name; the download and rollback copy are kept in the protected update directory. macOS/Linux packages are downloaded for normal system installation. A one-time **What's new?** page appears on first start of each release and remains available under Settings.
 
 ## 14. Privacy and troubleshooting
 

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
+    "0.18.4": (
+        "Automatische Windows-Updates ersetzen und starten jetzt zuverlässig die tatsächlich gestartete Programmdatei – unabhängig von Speicherort und Dateiname.",
+        "Das zuletzt gespeicherte QSO bleibt nach dem Leeren des Formulars zuverlässig für einen DX-Spot verfügbar.",
+    ),
     "0.18.3": (
-        "Dokumentations-Screenshots werden jetzt garantiert ohne Windows-Taskleiste aufgenommen.",
-        "Die vollständige deutsche und englische Dokumentation aus v0.18.2 ist enthalten.",
+        "Screenshots und Darstellung der Dokumentation wurden angepasst.",
+        "Die vollständige deutsche und englische Dokumentation ist enthalten.",
     ),
     "0.18.2": (
         "Die gesamte Oberfläche ist jetzt durchgängig auf Deutsch und Englisch verfügbar.",
@@ -21,9 +25,13 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
+    "0.18.4": (
+        "Automatic Windows updates now reliably replace and restart the exact launched program file, regardless of its location or filename.",
+        "The most recently saved QSO remains reliably available for a DX spot after the form is cleared.",
+    ),
     "0.18.3": (
-        "Documentation screenshots are now guaranteed to exclude the Windows taskbar.",
-        "The complete German and English documentation from v0.18.2 is included.",
+        "Documentation screenshots and presentation have been refined.",
+        "The complete German and English documentation is included.",
     ),
     "0.18.2": (
         "The complete user interface is now consistently available in German and English.",

@@ -222,3 +222,65 @@ def download_verified_asset(
         return destination, actual
     finally:
         partial.unlink(missing_ok=True)
+
+
+def current_windows_launcher(environ: dict[str, str] | None = None) -> Path | None:
+    """Return the exact user-started Windows EXE passed by the bootstrapper."""
+    values = os.environ if environ is None else environ
+    raw = str(values.get("WAVELOG_LAUNCHER_PATH") or "").strip()
+    if not raw:
+        return None
+    try:
+        # Do not replace this with sys.executable: in the Windows package that
+        # is the private pythonw.exe, not the user-named launcher.
+        candidate = Path(os.path.abspath(os.path.expandvars(os.path.expanduser(raw))))
+    except (OSError, ValueError):
+        return None
+    if candidate.suffix.lower() != ".exe" or not candidate.is_file():
+        return None
+    return candidate
+
+
+def windows_update_helper_script() -> str:
+    """PowerShell helper that atomically replaces the exact launched EXE."""
+    return (
+        "param([int]$ProcessId,[string]$Target,[string]$Package,[string]$Log)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "$targetFull = [System.IO.Path]::GetFullPath($Target)\n"
+        "$packageFull = [System.IO.Path]::GetFullPath($Package)\n"
+        "if ([System.IO.Path]::GetExtension($targetFull) -ine '.exe') { throw 'Update target is not an EXE.' }\n"
+        "if (-not (Test-Path -LiteralPath $targetFull -PathType Leaf)) { throw 'Started EXE no longer exists.' }\n"
+        "if (-not (Test-Path -LiteralPath $packageFull -PathType Leaf)) { throw 'Downloaded package is missing.' }\n"
+        "if ($targetFull -ieq $packageFull) { throw 'Target and package must be different files.' }\n"
+        "$backup = $targetFull + '.previous'\n"
+        "$staged = $targetFull + '.update-new'\n"
+        "$targetDir = Split-Path -LiteralPath $targetFull -Parent\n"
+        "$archivedBackup = Join-Path (Split-Path -LiteralPath $packageFull -Parent) ((Split-Path -Leaf $targetFull) + '.previous')\n"
+        "try { Wait-Process -Id $ProcessId -Timeout 180 -ErrorAction SilentlyContinue } catch {}\n"
+        "if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) { throw 'The running launcher did not exit in time.' }\n"
+        "for ($i=0; $i -lt 60; $i++) {\n"
+        "  try {\n"
+        "    Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue\n"
+        "    Copy-Item -LiteralPath $packageFull -Destination $staged -Force\n"
+        "    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue\n"
+        "    Move-Item -LiteralPath $targetFull -Destination $backup -Force\n"
+        "    try { Move-Item -LiteralPath $staged -Destination $targetFull -Force }\n"
+        "    catch { Move-Item -LiteralPath $backup -Destination $targetFull -Force; throw }\n"
+        "    try { Start-Process -FilePath $targetFull -WorkingDirectory $targetDir }\n"
+        "    catch { Remove-Item -LiteralPath $targetFull -Force -ErrorAction SilentlyContinue; Move-Item -LiteralPath $backup -Destination $targetFull -Force; throw }\n"
+        "    Move-Item -LiteralPath $backup -Destination $archivedBackup -Force -ErrorAction SilentlyContinue\n"
+        "    Remove-Item -LiteralPath $packageFull -Force -ErrorAction SilentlyContinue\n"
+        "    if ($Log) { Add-Content -LiteralPath $Log -Value ((Get-Date -Format o) + ' Updated and restarted: ' + $targetFull) -ErrorAction SilentlyContinue }\n"
+        "    exit 0\n"
+        "  } catch {\n"
+        "    if (-not (Test-Path -LiteralPath $targetFull) -and (Test-Path -LiteralPath $backup)) {\n"
+        "      Move-Item -LiteralPath $backup -Destination $targetFull -Force -ErrorAction SilentlyContinue\n"
+        "    }\n"
+        "    if ($Log) { Add-Content -LiteralPath $Log -Value ((Get-Date -Format o) + ' Retry ' + $i + ': ' + $_.Exception.Message) -ErrorAction SilentlyContinue }\n"
+        "    Start-Sleep -Milliseconds 500\n"
+        "  }\n"
+        "}\n"
+        "Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue\n"
+        "if (-not (Test-Path -LiteralPath $targetFull) -and (Test-Path -LiteralPath $backup)) { Move-Item -LiteralPath $backup -Destination $targetFull -Force }\n"
+        "exit 1\n"
+    )

@@ -1,8 +1,8 @@
-# Screenshot gallery 0.18.3
+# Screenshot gallery 0.18.4
 
 [Deutsch](../SCREENSHOTS.md) · **English**
 
-All images are generated automatically with isolated demo data. The app window is constrained to the Windows work area excluding the taskbar; capture aborts if any requested rectangle leaves that area. No real ADI log, token, radio, network service or user profile is accessed.
+All images are generated automatically with isolated demo data. No real ADI log, token, radio, network service or user profile is accessed.
 
 - [QSO logging](../screenshots/en/qso-logging.png)
 - [Fast Log](../screenshots/en/fast-log.png)

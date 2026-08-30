@@ -1,8 +1,10 @@
-# DA6IT.de Wavelog Offline Logger v0.18.3
+# DA6IT.de Wavelog Offline Logger v0.18.4
 
 ## Deutsch
 
-v0.18.3 ist das Dokumentations-Hotfix für das vollständig zweisprachige Release. Sämtliche deutschen und englischen Screenshots werden neu erzeugt und liegen garantiert vollständig innerhalb des Windows-Arbeitsbereichs – die Taskleiste erscheint nicht mehr in den Bildern. Eine Aufnahme außerhalb dieses Bereichs lässt das Release jetzt hart fehlschlagen.
+v0.18.4 verbessert den automatischen Update-Ablauf unter Windows. Der Updater ersetzt und startet zuverlässig genau die Programmdatei, die der Benutzer gestartet hat. Individueller Dateiname und Speicherort bleiben dabei erhalten.
+
+Außerdem bleibt das zuletzt gespeicherte QSO nach dem Leeren des Formulars zuverlässig für einen DX-Spot verfügbar – auch wenn CAT bereits wieder die aktuelle Funkfrequenz einträgt.
 
 Neu im Release:
 
@@ -15,15 +17,17 @@ Neu im Release:
 
 Die Funktionen von v0.18.1 bleiben vollständig erhalten: Offline-first ADI, Wavelog-Sync, QRZ/Wavelog-Callbook, WSJT-X Live/UDP, CAT/Hamlib, DX Cluster, Contest, xOTA, Backup/Restore und verifizierte Updates.
 
-v0.18.3 wird weiterhin bewusst **ohne Windows-Code-Signatur** veröffentlicht. Die [Code-Signing-Richtlinie](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/CODE_SIGNING_POLICY.md) beschreibt den geplanten SignPath-Prozess.
+v0.18.4 wird weiterhin bewusst **ohne Windows-Code-Signatur** veröffentlicht. Die [Code-Signing-Richtlinie](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/CODE_SIGNING_POLICY.md) beschreibt den geplanten SignPath-Prozess.
 
-Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/docs/en/USER_GUIDE.md)
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/docs/en/USER_GUIDE.md)
 
 ---
 
 ## English
 
-v0.18.3 is the documentation hotfix for the fully bilingual release. Every German and English screenshot is regenerated strictly inside the taskbar-free Windows work area, so the taskbar is no longer visible. Capture now fails hard if any requested rectangle leaves that area.
+v0.18.4 improves the automatic Windows update flow. The updater reliably replaces and restarts the exact program file launched by the user, preserving its custom filename and location.
+
+The most recently saved QSO also remains reliably available for a DX spot after the form is cleared, even when CAT has already restored the current radio frequency.
 
 New in this release:
 
@@ -36,6 +40,6 @@ New in this release:
 
 All v0.18.1 functionality remains included: offline-first ADI, Wavelog sync, QRZ/Wavelog callbook, WSJT-X live/UDP, CAT/Hamlib, DX Cluster, contest, xOTA, backup/restore and verified updates.
 
-v0.18.3 is still intentionally published **without a Windows code signature**. The [code-signing policy](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/CODE_SIGNING_POLICY.md) documents the planned SignPath process.
+v0.18.4 is still intentionally published **without a Windows code signature**. The [code-signing policy](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/CODE_SIGNING_POLICY.md) documents the planned SignPath process.
 
-Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/docs/en/USER_GUIDE.md)
+Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/docs/en/USER_GUIDE.md)

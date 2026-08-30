@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/SCREENSHOTS.md)
 
-Die Bilder zeigen Version 0.18.3 mit automatisch erzeugten, isolierten Demo-Daten. Das Fenster wird auf den Windows-Arbeitsbereich ohne Taskleiste begrenzt; eine Aufnahme außerhalb dieses Bereichs bricht den Release ab. Der Prozess greift weder auf echte Logger-Profile noch auf Funkgerät, Netzwerk, API-Tokens oder persönliche ADI-Dateien zu.
+Die Bilder zeigen Version 0.18.4 mit automatisch erzeugten, isolierten Demo-Daten. Der Prozess greift weder auf echte Logger-Profile noch auf Funkgerät, Netzwerk, API-Tokens oder persönliche ADI-Dateien zu.
 
 ## QSO loggen
 

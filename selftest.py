@@ -445,6 +445,7 @@ with TemporaryDirectory() as d:
 assert notes_for_version("0.18.0", "de") and notes_for_version("0.18.0", "en")
 assert notes_for_version("0.18.2", "de") and notes_for_version("0.18.2", "en")
 assert notes_for_version("0.18.3", "de") and notes_for_version("0.18.3", "en")
+assert notes_for_version("0.18.4", "de") and notes_for_version("0.18.4", "en")
 print("BACKUP AND WHAT'S NEW SELFTEST OK")
 
 # Legacy v0.9 migration: copy single-profile metadata without touching rollback file.
@@ -810,8 +811,9 @@ print("NOTIFICATION SELFTEST OK")
 import json
 import urllib.error
 from update_check import (
-    ReleaseAsset, ReleaseInfo, download_verified_asset, find_newer_release,
-    is_prerelease, select_update_asset, version_key,
+    ReleaseAsset, ReleaseInfo, current_windows_launcher, download_verified_asset,
+    find_newer_release, is_prerelease, select_update_asset, version_key,
+    windows_update_helper_script,
 )
 
 assert version_key("v0.12.0-rc2") > version_key("0.12.0-rc1")
@@ -858,6 +860,19 @@ asset = ReleaseAsset("DA6IT.de-Wavelog-Offline-Logger-v9.9.9-windows-x64.exe", "
 checksums = ReleaseAsset("SHA256SUMS.txt", "https://example.invalid/SHA256SUMS.txt")
 release_info = ReleaseInfo("9.9.9", "Test", "https://example.invalid/release", False, (asset, checksums))
 assert select_update_asset(release_info, system="win32", machine="AMD64") == asset
+
+with TemporaryDirectory() as launcher_dir:
+    custom_launcher = Path(launcher_dir) / "DA6IT.de-Wavelog-Offline-Logger-latest.exe"
+    custom_launcher.write_bytes(b"launcher")
+    assert current_windows_launcher({"WAVELOG_LAUNCHER_PATH": str(custom_launcher)}) == custom_launcher
+    assert current_windows_launcher({"WAVELOG_LAUNCHER_PATH": str(Path(launcher_dir) / "missing.exe")}) is None
+    assert current_windows_launcher({"WAVELOG_LAUNCHER_PATH": str(Path(launcher_dir) / "wrong.txt")}) is None
+
+helper_script = windows_update_helper_script()
+assert "$targetFull" in helper_script and "Start-Process -FilePath $targetFull" in helper_script
+assert "$targetFull + '.update-new'" in helper_script
+assert "Remove-Item -LiteralPath $packageFull" in helper_script
+assert "DA6IT.de-Wavelog-Offline-Logger-v" not in helper_script
 
 class DownloadResponse:
     def __init__(self, body):
@@ -1052,7 +1067,7 @@ from dx_cluster import (
     DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DEFAULT_SPOTTER_HOST,
     DEFAULT_SPOTTER_PORT, DxClusterClient, DxClusterConfig, DxSpotterConfig,
     DxClusterError, bandplan_spot_mode, infer_spot_mode, normalize_worked_mode, parse_dx_spot,
-    spot_comment_with_mode, spot_sort_value, spotter_region_for_continent,
+    select_dx_spot_candidate, spot_comment_with_mode, spot_sort_value, spotter_region_for_continent,
     worked_flags,
 )
 
@@ -1108,6 +1123,15 @@ assert infer_spot_mode("Calling CQ", 21_275_000) == "USB"
 assert infer_spot_mode("", 7_100_000) == "LSB"
 assert spot_comment_with_mode("TEST", "FM") == "FM TEST"
 assert spot_comment_with_mode("FM TEST", "FM") == "FM TEST"
+last_spot_qso = {"call": "DL1ABC", "freq": "14.200", "mode": "USB", "comment": "TEST"}
+spot_candidate, using_last = select_dx_spot_candidate(
+    {"call": "", "freq": "14.250", "mode": "USB", "comment": ""}, last_spot_qso,
+)
+assert using_last and spot_candidate == last_spot_qso
+spot_candidate, using_last = select_dx_spot_candidate(
+    {"call": "DL2XYZ", "freq": "14.250", "mode": "USB", "comment": "NEW"}, last_spot_qso,
+)
+assert not using_last and spot_candidate["call"] == "DL2XYZ"
 assert spot_comment_with_mode("portable\nsecond line", "USB") == "USB portable second line"
 reference_now = datetime(2026, 8, 14, 0, 5, tzinfo=timezone.utc)
 usb_spot = parse_dx_spot(

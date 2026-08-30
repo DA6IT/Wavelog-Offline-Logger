@@ -42,11 +42,12 @@ from dx_cluster import (
     DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DEFAULT_SPOTTER_HOST,
     DEFAULT_SPOTTER_PORT, DxClusterClient, DxClusterConfig, DxSpotterConfig,
     DxClusterError, DxSpot, SPOTTER_REGION_OPTIONS, normalize_worked_mode,
-    spot_comment_with_mode, spot_sort_value, spotter_region_for_continent,
+    select_dx_spot_candidate, spot_comment_with_mode, spot_sort_value, spotter_region_for_continent,
     worked_flags,
 )
 from update_check import (
-    ReleaseInfo, download_verified_asset, find_newer_release, select_update_asset,
+    ReleaseInfo, current_windows_launcher, download_verified_asset, find_newer_release,
+    select_update_asset, windows_update_helper_script,
 )
 from data_backup import BackupError, create_backup, inspect_backup, restore_backup
 from whats_new import notes_for_version
@@ -826,9 +827,18 @@ class LoggerApp(tk.Tk):
 
     def _update_download_finished(self, release: ReleaseInfo, package: Path, checksum: str):
         self._close_update_progress()
-        launcher = Path(os.environ.get("WAVELOG_LAUNCHER_PATH", "")).expanduser()
+        launcher = current_windows_launcher()
         launcher_pid = os.environ.get("WAVELOG_LAUNCHER_PID", "").strip()
-        if os.name == "nt" and launcher_pid.isdigit() and launcher.is_file() and package.suffix.lower() == ".exe":
+        if os.name == "nt" and package.suffix.lower() == ".exe":
+            if launcher is None or not launcher_pid.isdigit():
+                messagebox.showerror(
+                    "Update fehlgeschlagen",
+                    "Die aktuell gestartete Programmdatei konnte nicht eindeutig bestimmt werden. "
+                    "Das geprüfte Update wurde deshalb nicht automatisch installiert.\n\n"
+                    f"Download: {package}",
+                    parent=self,
+                )
+                return
             try:
                 self._schedule_windows_update(package, launcher, int(launcher_pid))
             except Exception as exc:
@@ -837,7 +847,8 @@ class LoggerApp(tk.Tk):
             messagebox.showinfo(
                 "Update geprüft",
                 f"Version {release.version} wurde vollständig heruntergeladen und per SHA-256 geprüft.\n\n"
-                "Die App wird jetzt geschlossen, aktualisiert und automatisch neu gestartet.",
+                "Die aktuell gestartete Programmdatei wird jetzt ersetzt und automatisch neu gestartet:\n\n"
+                f"{launcher}",
                 parent=self,
             )
             self.close_requested = True
@@ -854,26 +865,22 @@ class LoggerApp(tk.Tk):
         updates_dir = self.data_dir / "updates"
         updates_dir.mkdir(parents=True, exist_ok=True)
         helper = updates_dir / "apply-update.ps1"
-        helper.write_text(
-            "param([int]$ProcessId,[string]$Target,[string]$Package)\n"
-            "$ErrorActionPreference = 'Stop'\n"
-            "$backup = $Target + '.previous'\n"
-            "try { Wait-Process -Id $ProcessId -Timeout 120 -ErrorAction SilentlyContinue } catch {}\n"
-            "for ($i=0; $i -lt 60; $i++) {\n"
-            "  try { if (Test-Path -LiteralPath $Target) { Copy-Item -LiteralPath $Target -Destination $backup -Force }; "
-            "Copy-Item -LiteralPath $Package -Destination $Target -Force; Start-Process -FilePath $Target; exit 0 }\n"
-            "  catch { Start-Sleep -Milliseconds 500 }\n"
-            "}\n"
-            "if (Test-Path -LiteralPath $backup) { Copy-Item -LiteralPath $backup -Destination $Target -Force }\n"
-            "exit 1\n",
-            encoding="utf-8-sig",
-        )
+        # Test the real launcher directory before closing the application. A
+        # custom filename or location is preserved; only that exact file is
+        # replaced after the launcher process has exited.
+        probe = launcher.parent / f".wavelog-update-write-test-{os.getpid()}.tmp"
+        try:
+            probe.write_bytes(b"write-test")
+        finally:
+            probe.unlink(missing_ok=True)
+        helper.write_text(windows_update_helper_script(), encoding="utf-8-sig")
+        update_log = updates_dir / "update.log"
         flags = 0x00000008 | 0x00000200 | 0x01000000  # detached, new group, break away from launcher job
         subprocess.Popen(
             [
                 "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
                 "-File", str(helper), "-ProcessId", str(launcher_pid), "-Target", str(launcher),
-                "-Package", str(package),
+                "-Package", str(package), "-Log", str(update_log),
             ],
             close_fds=True,
             creationflags=flags,
@@ -2188,11 +2195,14 @@ class LoggerApp(tk.Tk):
             self.db.ensure_local(q["local_id"], qso_hash(q))
             self._bind_active_xota_qso(q)
             self._notify_qso_saved(q)
-            self._remember_last_spottable_qso(q)
             self.status_var.set(f"Gespeichert: {q['call']} · {q['band']} · {q['mode']} · {Path(q['_file']).name}")
             self.refresh_qsos()
             self._local_sync_change()
             self.clear_qso_form()
+            # Remember only after clearing the form.  CAT may repopulate the
+            # rig frequency immediately, but the completed QSO must stay the
+            # default candidate until another callsign is entered.
+            self._remember_last_spottable_qso(q)
             self.wsjtx_live_form_call = ""
             self.call_entry.focus_set()
         except Exception as e:
@@ -2265,8 +2275,8 @@ class LoggerApp(tk.Tk):
     def _update_dx_spot_button(self):
         if not hasattr(self, "dx_spot_button"):
             return
-        current = bool(self.call_var.get().strip() or self.freq_var.get().strip())
-        if current:
+        current_call = bool(self.call_var.get().strip())
+        if current_call:
             text = "DX-Spot senden"
             state = "normal"
         elif self.last_spottable_qso:
@@ -5030,15 +5040,12 @@ class LoggerApp(tk.Tk):
     def send_current_dx_spot(self):
         current_call = self.call_var.get().strip().upper()
         current_frequency = self.freq_var.get().strip().replace(",", ".")
-        if not current_call and not current_frequency and self.last_spottable_qso:
-            candidate = self.last_spottable_qso
-        else:
-            candidate = {
-                "call": current_call,
-                "freq": current_frequency,
-                "mode": self.mode_var.get().strip().upper(),
-                "comment": self.form_vars["comment"].get().strip(),
-            }
+        candidate, _using_last_saved = select_dx_spot_candidate({
+            "call": current_call,
+            "freq": current_frequency,
+            "mode": self.mode_var.get().strip().upper(),
+            "comment": self.form_vars["comment"].get().strip(),
+        }, self.last_spottable_qso)
         try:
             call = str(candidate.get("call") or "").strip().upper()
             if not call:

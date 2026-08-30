@@ -17,6 +17,20 @@ DEFAULT_SPOTTER_HOST = "dxcluster.afu-tools.de"
 DEFAULT_SPOTTER_PORT = 7301
 
 
+def select_dx_spot_candidate(current: dict, last_saved: dict | None) -> tuple[dict, bool]:
+    """Select the form QSO or the last saved QSO for manual spotting.
+
+    CAT polling may restore the current rig frequency immediately after the
+    QSO form was cleared.  A frequency by itself is not a new spot candidate;
+    until another callsign is entered the last saved QSO must remain usable.
+    The boolean result indicates that the saved QSO was selected.
+    """
+    current_call = str(current.get("call") or "").strip()
+    if not current_call and last_saved:
+        return dict(last_saved), True
+    return dict(current), False
+
+
 class DxClusterError(RuntimeError):
     pass
 

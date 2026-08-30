@@ -1,10 +1,10 @@
-# SignPath-Einrichtung nach v0.18.3
+# SignPath-Einrichtung nach v0.18.4
 
-Dieses Dokument ist die Maintainer-Checkliste für die Bewerbung und spätere CI-Integration. v0.18.3 wird noch unsigniert, aber bereits mit den später zu prüfenden Windows-Dateimetadaten veröffentlicht. Ein aktiver Workflow wird erst ergänzt, wenn SignPath das Projekt angenommen und die konkreten Organisations-, Projekt- und Richtlinienkennungen bereitgestellt hat; Platzhalter-Geheimnisse sollen keinen Release-Workflow absichtlich fehlschlagen lassen.
+Dieses Dokument ist die Maintainer-Checkliste für die Bewerbung und spätere CI-Integration. v0.18.4 wird noch unsigniert, aber bereits mit den später zu prüfenden Windows-Dateimetadaten veröffentlicht. Ein aktiver Workflow wird erst ergänzt, wenn SignPath das Projekt angenommen und die konkreten Organisations-, Projekt- und Richtlinienkennungen bereitgestellt hat; Platzhalter-Geheimnisse sollen keinen Release-Workflow absichtlich fehlschlagen lassen.
 
 ## Vor der Bewerbung
 
-- v0.18.3 mit Windows-Artefakt, `VERSIONINFO` und vollständiger zweisprachiger Dokumentation veröffentlichen.
+- v0.18.4 mit Windows-Artefakt, `VERSIONINFO` und vollständiger zweisprachiger Dokumentation veröffentlichen.
 - In GitHub für das Maintainer-Konto Mehrfaktor-Authentifizierung aktivieren.
 - Unter **Settings → Security** nach Möglichkeit Private Vulnerability Reporting aktivieren.
 - Prüfen, dass README und Release-Seite auf **Code signing policy** und **Privacy policy** verweisen.

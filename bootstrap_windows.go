@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.18.3"
+	appVersion   = "0.18.4"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -466,7 +466,7 @@ func main() {
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
 	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v0183")
+	appDir := filepath.Join(base, "app-v0184")
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)
@@ -479,7 +479,16 @@ func main() {
 
 	pythonw := filepath.Join(runtimeDir, "pythonw.exe")
 	appPath := filepath.Join(appDir, "app.py")
-	launcherPath, _ := os.Executable()
+	launcherPath, err := os.Executable()
+	if err != nil {
+		messageBox("DA6IT.de Logger - Startfehler", "Pfad der gestarteten Programmdatei konnte nicht bestimmt werden:\n"+err.Error(), 0x10)
+		return
+	}
+	launcherPath, err = filepath.Abs(launcherPath)
+	if err != nil {
+		messageBox("DA6IT.de Logger - Startfehler", "Pfad der gestarteten Programmdatei konnte nicht normalisiert werden:\n"+err.Error(), 0x10)
+		return
+	}
 	cmd := exec.Command(pythonw, appPath)
 	cmd.Dir = appDir
 	cmd.Env = append(
@@ -514,7 +523,7 @@ func main() {
 	// Keep the invisible launcher alive while the desktop application runs.
 	// Closing the app ends pythonw; closing/crashing the launcher closes the
 	// job and kills pythonw plus any remaining rigctld child process.
-	err := cmd.Wait()
+	err = cmd.Wait()
 	if err != nil {
 		logPath := filepath.Join(base, "startup.log")
 		messageBox("DA6IT.de Logger", "Die Anwendung wurde unerwartet beendet.\n\nDetails stehen ggf. in:\n"+logPath, 0x10)
