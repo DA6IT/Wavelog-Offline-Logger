@@ -1,8 +1,8 @@
-# DA6IT.de Wavelog Offline Logger v0.18.2
+# DA6IT.de Wavelog Offline Logger v0.18.3
 
 ## Deutsch
 
-v0.18.2 liefert erstmals das **gesamte Release vollständig auf Deutsch und Englisch** aus. Die Sprachwahl unter **Einstellungen → Allgemein** gilt für alle Stationsprofile. Neben Navigation und Hauptseiten sind nun auch Dialoge, Sicherheitsabfragen, Updates, Backup/Restore, Contest, xOTA, CAT, DX Cluster, UDP und dynamische Statusmeldungen durchgängig übersetzt.
+v0.18.3 ist das Dokumentations-Hotfix für das vollständig zweisprachige Release. Sämtliche deutschen und englischen Screenshots werden neu erzeugt und liegen garantiert vollständig innerhalb des Windows-Arbeitsbereichs – die Taskleiste erscheint nicht mehr in den Bildern. Eine Aufnahme außerhalb dieses Bereichs lässt das Release jetzt hart fehlschlagen.
 
 Neu im Release:
 
@@ -15,15 +15,15 @@ Neu im Release:
 
 Die Funktionen von v0.18.1 bleiben vollständig erhalten: Offline-first ADI, Wavelog-Sync, QRZ/Wavelog-Callbook, WSJT-X Live/UDP, CAT/Hamlib, DX Cluster, Contest, xOTA, Backup/Restore und verifizierte Updates.
 
-v0.18.2 wird weiterhin bewusst **ohne Windows-Code-Signatur** veröffentlicht. Die [Code-Signing-Richtlinie](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/CODE_SIGNING_POLICY.md) beschreibt den geplanten SignPath-Prozess.
+v0.18.3 wird weiterhin bewusst **ohne Windows-Code-Signatur** veröffentlicht. Die [Code-Signing-Richtlinie](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/CODE_SIGNING_POLICY.md) beschreibt den geplanten SignPath-Prozess.
 
-Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/docs/en/USER_GUIDE.md)
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/docs/en/USER_GUIDE.md)
 
 ---
 
 ## English
 
-v0.18.2 is the first release in which the **entire release is available in both German and English**. The language selected under **Settings → General** applies to every station profile. Navigation, main pages, dialogs, safety confirmations, updates, backup/restore, contest, xOTA, CAT, DX Cluster, UDP and dynamic status messages are now consistently localized.
+v0.18.3 is the documentation hotfix for the fully bilingual release. Every German and English screenshot is regenerated strictly inside the taskbar-free Windows work area, so the taskbar is no longer visible. Capture now fails hard if any requested rectangle leaves that area.
 
 New in this release:
 
@@ -36,6 +36,6 @@ New in this release:
 
 All v0.18.1 functionality remains included: offline-first ADI, Wavelog sync, QRZ/Wavelog callbook, WSJT-X live/UDP, CAT/Hamlib, DX Cluster, contest, xOTA, backup/restore and verified updates.
 
-v0.18.2 is still intentionally published **without a Windows code signature**. The [code-signing policy](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/CODE_SIGNING_POLICY.md) documents the planned SignPath process.
+v0.18.3 is still intentionally published **without a Windows code signature**. The [code-signing policy](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/CODE_SIGNING_POLICY.md) documents the planned SignPath process.
 
-Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/docs/en/USER_GUIDE.md)
+Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.3/docs/en/USER_GUIDE.md)

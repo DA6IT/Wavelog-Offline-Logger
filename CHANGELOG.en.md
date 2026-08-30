@@ -2,6 +2,13 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.18.3 — 2026-08-30
+
+- captures exactly the topmost Tk client rectangle, never surrounding desktop pixels
+- excludes taskbar, wallpaper, title bar and surrounding applications from every documentation screenshot
+- constrains the app to the taskbar-free work area and aborts on invalid capture bounds
+- regenerates every German and English screenshot for the hotfix release
+
 ## 0.18.2 — 2026-08-29
 
 - completed English localization for all main pages, dialogs, confirmations, errors and runtime status messages

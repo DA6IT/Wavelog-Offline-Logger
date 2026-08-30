@@ -444,6 +444,7 @@ with TemporaryDirectory() as d:
 
 assert notes_for_version("0.18.0", "de") and notes_for_version("0.18.0", "en")
 assert notes_for_version("0.18.2", "de") and notes_for_version("0.18.2", "en")
+assert notes_for_version("0.18.3", "de") and notes_for_version("0.18.3", "en")
 print("BACKUP AND WHAT'S NEW SELFTEST OK")
 
 # Legacy v0.9 migration: copy single-profile metadata without touching rollback file.

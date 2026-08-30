@@ -90,7 +90,7 @@ Der Logger ersetzt Wavelog nicht. Er ergänzt es für portable Einsätze, DXpedi
 
 **[Free code signing provided by SignPath.io, certificate by SignPath Foundation](CODE_SIGNING_POLICY.md)**
 
-Die Aufnahme bei SignPath wird nach Veröffentlichung von v0.18.2 beantragt. Dieses Release bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
+Die Aufnahme bei SignPath wird nach Veröffentlichung von v0.18.3 beantragt. Dieses Release bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
 
 ## Dokumentation
 

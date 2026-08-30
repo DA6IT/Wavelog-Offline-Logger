@@ -2,6 +2,10 @@ from __future__ import annotations
 
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
+    "0.18.3": (
+        "Dokumentations-Screenshots werden jetzt garantiert ohne Windows-Taskleiste aufgenommen.",
+        "Die vollständige deutsche und englische Dokumentation aus v0.18.2 ist enthalten.",
+    ),
     "0.18.2": (
         "Die gesamte Oberfläche ist jetzt durchgängig auf Deutsch und Englisch verfügbar.",
         "Handbuch, Fehlerhilfe, Release-Dokumentation und Screenshot-Galerie liegen vollständig in beiden Sprachen bei.",
@@ -17,6 +21,10 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
+    "0.18.3": (
+        "Documentation screenshots are now guaranteed to exclude the Windows taskbar.",
+        "The complete German and English documentation from v0.18.2 is included.",
+    ),
     "0.18.2": (
         "The complete user interface is now consistently available in German and English.",
         "The user guide, troubleshooting, release documentation and screenshot gallery are included in both languages.",

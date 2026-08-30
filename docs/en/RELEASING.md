@@ -6,4 +6,4 @@ Releases are tag-driven and must be built from a clean, reviewed commit. The ver
 
 The publish script creates/reuses the release branch and pull request, waits for all GitHub checks, merges, tags the exact merge commit, waits for the release workflow and verifies every expected Windows, macOS and Linux asset plus `SHA256SUMS.txt`. Release notes are bilingual. Do not manually attach locally built binaries as official artifacts.
 
-Version 0.18.2 remains unsigned while the project prepares its SignPath application. Signing integration must only be enabled after real SignPath organization/project/policy identifiers are available.
+Version 0.18.3 remains unsigned while the project prepares its SignPath application. Signing integration must only be enabled after real SignPath organization/project/policy identifiers are available.

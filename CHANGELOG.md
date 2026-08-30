@@ -2,6 +2,12 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.18.3] - 2026-08-30
+
+- Dokumentationsfenster werden automatisch auf den Windows-Arbeitsbereich ohne Taskleiste begrenzt
+- Screenshot-Aufnahme bricht ab, sobald ein Aufnahmebereich in die Taskleiste oder außerhalb des Arbeitsbereichs ragen würde
+- alle deutschen und englischen Screenshots werden für das Hotfix-Release neu erzeugt
+
 ## [0.18.2] - 2026-08-30
 
 ### Added

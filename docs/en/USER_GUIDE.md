@@ -1,8 +1,8 @@
-# User guide — DA6IT.de Wavelog Offline Logger 0.18.2
+# User guide — DA6IT.de Wavelog Offline Logger 0.18.3
 
 [Deutsch](../USER_GUIDE.md) · **English**
 
-This guide covers the complete application. Its screenshots are generated with isolated demo data and contain no private logs, tokens or credentials.
+This guide covers the complete application. Its screenshots are generated with isolated demo data strictly inside the taskbar-free Windows work area and contain no private logs, tokens or credentials.
 
 ## 1. Language, theme and profiles
 
