@@ -35,7 +35,11 @@ $required = @(
     "statistics.png", "cat-setup.png", "dx-cluster.png", "udp-logging.png",
     "settings-general.png", "settings-wavelog.png", "settings-callbook.png",
     "settings-data-connections.png", "sync-progress-running.png", "sync-progress-complete.png",
-    "qso-logging-english-dark.png"
+    "en/qso-logging.png", "en/fast-log.png", "en/contest-logging.png", "en/xota.png",
+    "en/logbook-sync.png", "en/statistics.png", "en/cat-setup.png", "en/dx-cluster.png",
+    "en/udp-logging.png", "en/settings-general.png", "en/settings-wavelog.png",
+    "en/settings-callbook.png", "en/settings-data-connections.png",
+    "en/sync-progress-running.png", "en/sync-progress-complete.png"
 )
 $missing = $required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $OutputDirectory $_)) }
 if ($missing) {

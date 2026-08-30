@@ -443,6 +443,7 @@ with TemporaryDirectory() as d:
     assert len(restored_qsos) == 1 and restored_qsos[0]["call"] == "DL1BACKUP"
 
 assert notes_for_version("0.18.0", "de") and notes_for_version("0.18.0", "en")
+assert notes_for_version("0.18.2", "de") and notes_for_version("0.18.2", "en")
 print("BACKUP AND WHAT'S NEW SELFTEST OK")
 
 # Legacy v0.9 migration: copy single-profile metadata without touching rollback file.
@@ -781,6 +782,19 @@ with TemporaryDirectory() as preferences_dir:
     assert load_ui_preferences(preferences_root) == UiPreferences()
 assert translate_text("QSO speichern", "en") == "Save QSO"
 assert translate_text("QSO speichern", "de") == "QSO speichern"
+for german_ui_text in (
+    "Update verfügbar",
+    "Während einer Synchronisierung kann das Profil nicht gewechselt werden.",
+    "Contest-QSO konnte nicht gespeichert werden",
+    "Keine xOTA-Aktivierung aktiv",
+    "ADIF-Import fehlgeschlagen",
+    "CAT wird nach jedem Programmstart bewusst manuell gestartet.",
+    "Bitte zuerst einen DX-Spot auswählen.",
+    "UDP Logging konnte nicht gestartet werden",
+    "Backup wird wiederhergestellt",
+    "Das aktive Profil kann nicht gelöscht werden. Bitte zuerst ein anderes Profil aktivieren.",
+):
+    assert translate_text(german_ui_text, "en") != german_ui_text, german_ui_text
 print("UI PREFERENCES SELFTEST OK")
 
 from notifications import qso_notification_text

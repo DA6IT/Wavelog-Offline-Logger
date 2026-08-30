@@ -147,7 +147,11 @@ try {
         "statistics.png", "cat-setup.png", "dx-cluster.png", "udp-logging.png",
         "settings-general.png", "settings-wavelog.png", "settings-callbook.png",
         "settings-data-connections.png", "sync-progress-running.png", "sync-progress-complete.png",
-        "qso-logging-english-dark.png"
+        "en/qso-logging.png", "en/fast-log.png", "en/contest-logging.png", "en/xota.png",
+        "en/logbook-sync.png", "en/statistics.png", "en/cat-setup.png", "en/dx-cluster.png",
+        "en/udp-logging.png", "en/settings-general.png", "en/settings-wavelog.png",
+        "en/settings-callbook.png", "en/settings-data-connections.png",
+        "en/sync-progress-running.png", "en/sync-progress-complete.png"
     )
     $missingScreenshots = $requiredScreenshots | Where-Object {
         -not (Test-Path -LiteralPath (Join-Path $projectRoot "docs\screenshots\$_"))
@@ -247,11 +251,15 @@ try {
         "assets/da6it-icon.png",
         "packaging/arch/PKGBUILD",
         "README.md",
+        "README.en.md",
         "PRIVACY.md",
         "CODE_SIGNING_POLICY.md",
         "SECURITY.md",
         "THIRD_PARTY_NOTICES.md",
         "CHANGELOG.md",
+        "CHANGELOG.en.md",
+        "CONTRIBUTING.md",
+        "CONTRIBUTING.en.md",
         "docs/ARCHITECTURE.md",
         "docs/GITHUB_SETUP.md",
         "docs/RELEASE_NOTES.md",
@@ -260,6 +268,14 @@ try {
         "docs/USER_GUIDE.md",
         "docs/SCREENSHOTS.md",
         "docs/SIGNPATH_SETUP.md",
+        "docs/en/ARCHITECTURE.md",
+        "docs/en/GITHUB_SETUP.md",
+        "docs/en/RELEASE_NOTES.md",
+        "docs/en/RELEASING.md",
+        "docs/en/TROUBLESHOOTING.md",
+        "docs/en/USER_GUIDE.md",
+        "docs/en/SCREENSHOTS.md",
+        "docs/en/SIGNPATH_SETUP.md",
         "scripts/build-linux.sh",
         "scripts/build-macos.sh",
         "scripts/build-windows.ps1",

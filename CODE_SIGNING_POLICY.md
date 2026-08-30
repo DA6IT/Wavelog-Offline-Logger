@@ -4,7 +4,7 @@ The DA6IT.de Wavelog Offline Logger is preparing to use SignPath for future Wind
 
 **Free code signing provided by SignPath.io, certificate by SignPath Foundation**
 
-Version 0.18.1 is intentionally released before the SignPath application and therefore remains unsigned. It contains the same Windows file metadata and release format intended for later signing. The statement above documents the policy that will apply after the project has been accepted; it does not claim that an unsigned artifact already has a signature. Release notes always state the actual signing status.
+Versions 0.18.1 and 0.18.2 are intentionally released before the SignPath application and therefore remain unsigned. They contain the same Windows file metadata and release format intended for later signing. The statement above documents the policy that will apply after the project has been accepted; it does not claim that an unsigned artifact already has a signature. Release notes always state the actual signing status.
 
 ## Project roles
 

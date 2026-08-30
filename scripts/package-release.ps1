@@ -40,9 +40,15 @@ if (-not $stage.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCa
 try {
     New-Item -ItemType Directory -Path $stage | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $stage 'docs') | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $stage 'docs\en') | Out-Null
     Copy-Item -LiteralPath $exePath -Destination $stage
     Copy-Item -LiteralPath $checksumPath -Destination $stage
     Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'README.en.md') -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'CHANGELOG.md') -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'CHANGELOG.en.md') -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'CONTRIBUTING.md') -Destination $stage
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'CONTRIBUTING.en.md') -Destination $stage
     Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $stage
     Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $stage
     Copy-Item -LiteralPath (Join-Path $projectRoot 'PRIVACY.md') -Destination $stage
@@ -53,6 +59,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\RELEASE_NOTES.md') -Destination (Join-Path $stage 'docs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\TROUBLESHOOTING.md') -Destination (Join-Path $stage 'docs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\SIGNPATH_SETUP.md') -Destination (Join-Path $stage 'docs')
+    Copy-Item -Path (Join-Path $projectRoot 'docs\en\*') -Destination (Join-Path $stage 'docs\en') -Recurse
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\screenshots') -Destination (Join-Path $stage 'docs') -Recurse
 
     if (Test-Path -LiteralPath $zipPath) {

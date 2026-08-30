@@ -1,60 +1,41 @@
-# DA6IT.de Wavelog Offline Logger v0.18.1
+# DA6IT.de Wavelog Offline Logger v0.18.2
 
-v0.18.1 ist ein kleines, weiterhin unsigniertes SignPath-Readiness-Release. Die Windows-Datei besitzt erstmals vollständige, automatisch geprüfte Versions- und Produktmetadaten. Außerdem sind Deinstallation, Rollen und die verwendete Python-Laufzeit öffentlich vollständig dokumentiert. Die Funktionen aus v0.18.0 bleiben unverändert enthalten.
+## Deutsch
 
-## Windows-Dateimetadaten
+v0.18.2 liefert erstmals das **gesamte Release vollständig auf Deutsch und Englisch** aus. Die Sprachwahl unter **Einstellungen → Allgemein** gilt für alle Stationsprofile. Neben Navigation und Hauptseiten sind nun auch Dialoge, Sicherheitsabfragen, Updates, Backup/Restore, Contest, xOTA, CAT, DX Cluster, UDP und dynamische Statusmeldungen durchgängig übersetzt.
 
-Die Windows-EXE enthält jetzt eine native `VERSIONINFO`-Ressource:
+Neu im Release:
 
-- `ProductName`: `DA6IT.de Wavelog Offline Logger`
-- `ProductVersion`: `0.18.1`
-- `FileVersion`: `0.18.1`
-- `FileDescription`: `DA6IT.de Wavelog Offline Logger`
-- `OriginalFilename`: `DA6IT.de-Wavelog-Offline-Logger-v0.18.1-windows-x64.exe`
-- numerische Dateiversion: `0.18.1.0`
+- vollständige englische Oberfläche für alle Funktionsbereiche
+- vollständiges englisches Benutzerhandbuch, Fehlerhilfe, Architektur-, GitHub-, Release- und SignPath-Dokumentation
+- separate deutsche und englische Screenshot-Sätze für alle Hauptseiten und Einstellungsregister
+- zweisprachige README, Beiträge, Changelog und Release-Hinweise
+- Windows-ZIP und Dokumentationspakete enthalten beide Sprachfassungen
+- automatische Release-Prüfung stellt sicher, dass kein englischer Pflicht-Screenshot oder Dokumentationsbestandteil fehlt
 
-Der Windows-Build liest diese Werte nach dem Einbetten direkt aus der fertigen EXE und bricht bei einer Abweichung ab. Damit entspricht das veröffentlichte, noch unsignierte Artefakt bereits dem Dateiformat, das nach einer SignPath-Annahme signiert werden soll.
+Die Funktionen von v0.18.1 bleiben vollständig erhalten: Offline-first ADI, Wavelog-Sync, QRZ/Wavelog-Callbook, WSJT-X Live/UDP, CAT/Hamlib, DX Cluster, Contest, xOTA, Backup/Restore und verifizierte Updates.
 
-## Deinstallation und Daten
+v0.18.2 wird weiterhin bewusst **ohne Windows-Code-Signatur** veröffentlicht. Die [Code-Signing-Richtlinie](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/CODE_SIGNING_POLICY.md) beschreibt den geplanten SignPath-Prozess.
 
-README und Benutzerhandbuch erklären die Deinstallation getrennt für Windows, macOS, Debian/Ubuntu, Arch Linux und AppImage. Programmdateien, lokale App-Daten und ADI-Logbücher sind bewusst getrennt:
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/docs/en/USER_GUIDE.md)
 
-- Das Entfernen des Programms löscht keine ADI-Logbücher.
-- Profile, Einstellungen, Tokens und Sync-Metadaten verbleiben standardmäßig im plattformspezifischen App-Datenordner.
-- ADI-Dateien liegen standardmäßig unter `Dokumente/DA6IT.de Wavelog Logger/Profiles/…/Logs` oder an einem selbst gewählten Ort.
-- Vor vollständiger Datenlöschung sollte das integrierte ZIP-Backup verwendet werden.
+---
 
-## SignPath-Vorbereitung
+## English
 
-- Die Code-Signing-Richtlinie nennt nun ausdrücklich **Authors / Committers**, **Reviewers** und **Approvers**.
-- CPython 3.12.10 und die Python Software Foundation License sind in `THIRD_PARTY_NOTICES.md` dokumentiert.
-- Datenschutz, Sicherheitsmeldungen, Buildherkunft und der spätere manuelle Freigabeprozess bleiben öffentlich dokumentiert.
-- Der SignPath-Workflow selbst wird erst nach Annahme des Projekts und Erhalt der echten Projektkennungen eingerichtet.
+v0.18.2 is the first release in which the **entire release is available in both German and English**. The language selected under **Settings → General** applies to every station profile. Navigation, main pages, dialogs, safety confirmations, updates, backup/restore, contest, xOTA, CAT, DX Cluster, UDP and dynamic status messages are now consistently localized.
 
-## Enthaltene Funktionen aus v0.18.0
+New in this release:
 
-- automatischer, per SHA-256 verifizierter In-App-Updater
-- vollständiges ZIP-Backup und Restore aller Profile, Einstellungen, ADI-Dateien und Metadaten
-- einmalige „Was ist neu?“-Übersicht
-- DX-Spot des zuletzt geloggten QSOs auch nach dem automatischen Leeren des Formulars
-- WSJT-X-Live-Vorschau, Worked-Historie, Entfernung und Peilung
-- Wavelog-/QRZ-Callbook, profilbezogener Sync, Contest und xOTA
-- Windows-, macOS- und Linux-Pakete
+- complete English user interface for every functional area
+- complete English user guide, troubleshooting, architecture, GitHub, release and SignPath documentation
+- separate German and English screenshot sets for every main page and Settings tab
+- bilingual README, contributing guide, changelog and release notes
+- Windows ZIP and documentation packages contain both language versions
+- release validation fails if a required English screenshot or document is missing
 
-## Plattformen und Downloads
+All v0.18.1 functionality remains included: offline-first ADI, Wavelog sync, QRZ/Wavelog callbook, WSJT-X live/UDP, CAT/Hamlib, DX Cluster, contest, xOTA, backup/restore and verified updates.
 
-Der GitHub-Release baut und veröffentlicht automatisch:
+v0.18.2 is still intentionally published **without a Windows code signature**. The [code-signing policy](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/CODE_SIGNING_POLICY.md) documents the planned SignPath process.
 
-- Windows x64: EXE und ZIP
-- macOS Apple Silicon: App-ZIP
-- macOS Intel: App-ZIP
-- Linux x64 und ARM64: DEB, AppImage und Arch-Paket
-- SHA-256-Prüfsummen für alle Pakete
-
-## Code signing policy und bekannte Einschränkungen
-
-v0.18.1 wird bewusst noch **ohne Windows-Code-Signatur** veröffentlicht. **[Free code signing provided by SignPath.io, certificate by SignPath Foundation](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.1/CODE_SIGNING_POLICY.md)** beschreibt den geplanten Ablauf. Nach diesem Referenzrelease kann die Aufnahme bei SignPath Foundation beantragt werden.
-
-Die macOS-App ist ad-hoc signiert, aber nicht notarisiert. eQSL.cc bleibt **Coming soon**. Entfernung und Peilung aus Maidenhead-Locatoren sind Näherungswerte.
-
-Datennutzung und optionale Netzwerkdienste beschreibt die [Datenschutzerklärung](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.1/PRIVACY.md). Das [Benutzerhandbuch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.1/docs/USER_GUIDE.md) enthält Installation, Deinstallation und vollständige Bedienung.
+Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.2/docs/en/USER_GUIDE.md)

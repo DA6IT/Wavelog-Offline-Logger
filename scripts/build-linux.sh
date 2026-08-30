@@ -75,7 +75,9 @@ mkdir -p \
 cp -a "${APP_BUNDLE}/." "${DEB_ROOT}/opt/${APP_BINARY}/"
 cp "${PROJECT_ROOT}/packaging/linux/wavelog-offline-logger.desktop" "${DEB_ROOT}/usr/share/applications/"
 cp "${PROJECT_ROOT}/assets/wavelog-offline-logger.svg" "${DEB_ROOT}/usr/share/icons/hicolor/scalable/apps/"
-cp "${PROJECT_ROOT}/README.md" "${PROJECT_ROOT}/LICENSE" "${PROJECT_ROOT}/THIRD_PARTY_NOTICES.md" \
+cp "${PROJECT_ROOT}/README.md" "${PROJECT_ROOT}/README.en.md" \
+  "${PROJECT_ROOT}/CHANGELOG.md" "${PROJECT_ROOT}/CHANGELOG.en.md" \
+  "${PROJECT_ROOT}/LICENSE" "${PROJECT_ROOT}/THIRD_PARTY_NOTICES.md" \
   "${PROJECT_ROOT}/PRIVACY.md" "${PROJECT_ROOT}/CODE_SIGNING_POLICY.md" "${PROJECT_ROOT}/SECURITY.md" \
   "${DEB_ROOT}/usr/share/doc/${APP_BINARY}/"
 cat > "${DEB_ROOT}/usr/bin/${APP_BINARY}" <<'EOF'
