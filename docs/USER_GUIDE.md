@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/USER_GUIDE.md)
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.18.3. Die Screenshots wurden automatisch mit isolierten Demo-Daten und ausschließlich innerhalb des taskleistenfreien Windows-Arbeitsbereichs erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.18.4. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -338,7 +338,7 @@ Eine einzelne ADI-Datei darf bei geschlossener App ersetzt oder aus einer Sicher
 
 ## 15. Updates
 
-Beim Start prüft die App im Hintergrund, ob ein neueres GitHub-Release vorhanden ist. Ohne Internet erscheint keine Fehlermeldung. Nach Zustimmung lädt die App ausschließlich das zum System passende HTTPS-Paket und verifiziert es gegen die im Release veröffentlichte SHA-256-Prüfsumme. Unter Windows ersetzt ein Helfer nach dem sauberen Beenden die bisherige Programmdatei, behält eine Rückfallkopie und startet die neue Version. Auf macOS und Linux wird das geprüfte Paket gespeichert und anschließend mit dem üblichen Systemweg installiert.
+Beim Start prüft die App im Hintergrund, ob ein neueres GitHub-Release vorhanden ist. Ohne Internet erscheint keine Fehlermeldung. Nach Zustimmung lädt die App ausschließlich das zum System passende HTTPS-Paket und verifiziert es gegen die im Release veröffentlichte SHA-256-Prüfsumme. Unter Windows ermittelt der Bootstrapper den exakten Pfad und Dateinamen der tatsächlich gestarteten EXE. Ein Helfer ersetzt nach dem sauberen Beenden genau diese Datei und startet sie am selben Ort mit demselben individuellen Namen neu. Download und Rückfallkopie werden im geschützten Update-Ordner verwaltet. Auf macOS und Linux wird das geprüfte Paket gespeichert und anschließend mit dem üblichen Systemweg installiert.
 
 Beim ersten Start einer neuen Version erscheint einmalig **Was ist neu?**. Die Hinweise können später unter **Einstellungen → Allgemein** erneut geöffnet werden.
 

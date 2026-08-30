@@ -372,6 +372,10 @@ ENGLISH.update({
 
 
 PHRASES = (
+    ("Die aktuell gestartete Programmdatei wird jetzt ersetzt und automatisch neu gestartet:", "The currently running program file will now be replaced and restarted automatically:"),
+    ("Die aktuell gestartete Programmdatei konnte nicht eindeutig bestimmt werden.", "The currently running program file could not be identified unambiguously."),
+    ("Das geprüfte Update wurde deshalb nicht automatisch installiert.", "The verified update was therefore not installed automatically."),
+    ("wurde vollständig heruntergeladen und per SHA-256 geprüft.", "was downloaded completely and verified using SHA-256."),
     ("Sprache und Darstellung gelten für alle Stationsprofile.", "Language and appearance apply to all station profiles."),
     ("Synchronisierung läuft", "Synchronization running"),
     ("Synchronisierung abgeschlossen", "Synchronization completed"),

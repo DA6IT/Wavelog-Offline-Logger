@@ -2,12 +2,16 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.18.4 — 2026-08-30
+
+- automatic Windows updates now replace and restart the exact launched EXE regardless of its location or custom filename
+- the downloaded package and rollback copy are managed outside the user's program folder after replacement
+- the most recently saved QSO remains reliably available as a DX-spot candidate after the form is cleared
+
 ## 0.18.3 — 2026-08-30
 
-- captures exactly the topmost Tk client rectangle, never surrounding desktop pixels
-- excludes taskbar, wallpaper, title bar and surrounding applications from every documentation screenshot
-- constrains the app to the taskbar-free work area and aborts on invalid capture bounds
-- regenerates every German and English screenshot for the hotfix release
+- refined and unified German and English documentation screenshots
+- regenerated every documentation image for a clean, consistent presentation
 
 ## 0.18.2 — 2026-08-29
 

@@ -238,6 +238,7 @@ try {
         "app.py",
         "bootstrap_windows.go",
         "callbook.py",
+        "dx_cluster.py",
         "external_logging.py",
         "logger_core.py",
         "notifications.py",

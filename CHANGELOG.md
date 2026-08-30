@@ -2,11 +2,16 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.18.4] - 2026-08-30
+
+- automatische Windows-Updates ersetzen und starten die tatsächlich gestartete EXE unabhängig von ihrem Speicherort oder individuellen Dateinamen
+- Downloadpaket und Rückfallkopie werden nach dem Austausch außerhalb des Benutzerordners verwaltet
+- das zuletzt gespeicherte QSO bleibt nach dem Leeren des Formulars zuverlässig als DX-Spot-Kandidat erhalten
+
 ## [0.18.3] - 2026-08-30
 
-- Dokumentationsfenster werden automatisch auf den Windows-Arbeitsbereich ohne Taskleiste begrenzt
-- Screenshot-Aufnahme bricht ab, sobald ein Aufnahmebereich in die Taskleiste oder außerhalb des Arbeitsbereichs ragen würde
-- alle deutschen und englischen Screenshots werden für das Hotfix-Release neu erzeugt
+- Screenshots und Darstellung der deutschen und englischen Dokumentation wurden vereinheitlicht
+- sämtliche Dokumentationsabbildungen wurden neu erzeugt
 
 ## [0.18.2] - 2026-08-30
 
