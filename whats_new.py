@@ -2,6 +2,11 @@ from __future__ import annotations
 
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
+    "0.19.0": (
+        "FLRig lässt sich per IP/Hostname und Port verbinden und auf Wunsch automatisch im lokalen Netzwerk finden.",
+        "Der Wavelog-3.2.0-Abgleich unterstützt ClubLog-Status und fragt Bestätigungen gezielt für das gewählte Stationsprofil ab.",
+        "Wavelog-API-Fehler zeigen jetzt zusätzlich den maschinenlesbaren Fehlercode und vorhandene Details.",
+    ),
     "0.18.4": (
         "Automatische Windows-Updates ersetzen und starten jetzt zuverlässig die tatsächlich gestartete Programmdatei – unabhängig von Speicherort und Dateiname.",
         "Das zuletzt gespeicherte QSO bleibt nach dem Leeren des Formulars zuverlässig für einen DX-Spot verfügbar.",
@@ -25,6 +30,11 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
+    "0.19.0": (
+        "FLRig can be connected by IP/hostname and port and optionally discovered on the local network.",
+        "Wavelog 3.2.0 synchronization supports ClubLog status and requests confirmations for the selected station profile.",
+        "Wavelog API errors now include the machine-readable error code and available details.",
+    ),
     "0.18.4": (
         "Automatic Windows updates now reliably replace and restart the exact launched program file, regardless of its location or filename.",
         "The most recently saved QSO remains reliably available for a DX spot after the form is cleared.",

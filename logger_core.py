@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.18.4"
+VERSION = "0.19.0"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -1122,6 +1122,7 @@ class MetadataDB:
                     qrz TEXT NOT NULL DEFAULT 'unknown',
                     lotw TEXT NOT NULL DEFAULT 'unknown',
                     eqsl TEXT NOT NULL DEFAULT 'unknown',
+                    clublog TEXT NOT NULL DEFAULT 'unknown',
                     dcl TEXT NOT NULL DEFAULT 'unknown',
                     updated_at TEXT NOT NULL
                 );
@@ -1134,6 +1135,13 @@ class MetadataDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_callbook_updated ON callbook_cache(updated_at);
             """)
+            qsl_columns = {
+                str(row[1]).lower() for row in self.conn.execute("PRAGMA table_info(qsl_meta)")
+            }
+            if "clublog" not in qsl_columns:
+                self.conn.execute(
+                    "ALTER TABLE qsl_meta ADD COLUMN clublog TEXT NOT NULL DEFAULT 'unknown'"
+                )
             # v0.5: "pending" from older builds means the same as LOCAL ONLY.
             self.conn.execute("UPDATE sync_meta SET status='local_only' WHERE status='pending' AND wavelog_id IS NULL")
             self.conn.commit()
@@ -1289,19 +1297,20 @@ class MetadataDB:
 
     def get_qsl_status(self, wavelog_id: int | None) -> dict[str, Any]:
         if not wavelog_id:
-            return {"qrz":"unknown","lotw":"unknown","eqsl":"unknown","dcl":"unknown"}
+            return {"qrz":"unknown","lotw":"unknown","eqsl":"unknown","clublog":"unknown","dcl":"unknown"}
         with self.lock:
             r = self.conn.execute("SELECT * FROM qsl_meta WHERE wavelog_id=?", (int(wavelog_id),)).fetchone()
-            return dict(r) if r else {"qrz":"unknown","lotw":"unknown","eqsl":"unknown","dcl":"unknown"}
+            return dict(r) if r else {"qrz":"unknown","lotw":"unknown","eqsl":"unknown","clublog":"unknown","dcl":"unknown"}
 
     def set_qsl_status(self, wavelog_id: int, statuses: dict[str, str]):
         now = utc_now_iso()
-        vals = [statuses.get(k, "unknown") for k in ("qrz","lotw","eqsl","dcl")]
+        vals = [statuses.get(k, "unknown") for k in ("qrz","lotw","eqsl","clublog","dcl")]
         with self.lock:
             self.conn.execute(
-                """INSERT INTO qsl_meta(wavelog_id,qrz,lotw,eqsl,dcl,updated_at) VALUES(?,?,?,?,?,?)
+                """INSERT INTO qsl_meta(wavelog_id,qrz,lotw,eqsl,clublog,dcl,updated_at) VALUES(?,?,?,?,?,?,?)
                    ON CONFLICT(wavelog_id) DO UPDATE SET qrz=excluded.qrz,lotw=excluded.lotw,
-                   eqsl=excluded.eqsl,dcl=excluded.dcl,updated_at=excluded.updated_at""",
+                   eqsl=excluded.eqsl,clublog=excluded.clublog,dcl=excluded.dcl,
+                   updated_at=excluded.updated_at""",
                 (int(wavelog_id), *vals, now),
             )
             self.conn.commit()
@@ -1463,7 +1472,16 @@ class WavelogClient:
             raw = e.read().decode("utf-8", errors="replace")
             try:
                 j = json.loads(raw)
-                msg = j.get("error", {}).get("message") or raw
+                error = j.get("error") if isinstance(j, dict) else None
+                if isinstance(error, dict):
+                    code = str(error.get("code") or "").strip()
+                    message = str(error.get("message") or "").strip()
+                    details = error.get("details")
+                    msg = f"{code}: {message}" if code and message else (message or code or raw)
+                    if details not in (None, "", [], {}):
+                        msg += " · " + json.dumps(details, ensure_ascii=False, separators=(",", ":"))
+                else:
+                    msg = raw
             except Exception:
                 msg = raw or str(e)
             raise WavelogError(f"HTTP {e.code}: {msg}") from e
@@ -1535,11 +1553,20 @@ class WavelogClient:
             page += 1
         return out
 
-    def list_confirmations(self, *, qso_since: str | None = None, qso_until: str | None = None, types: str = "lotw,eqsl,qrz") -> list[dict[str, Any]]:
+    def list_confirmations(
+        self, *, station_ids: Iterable[int] | None = None,
+        qso_since: str | None = None, qso_until: str | None = None,
+        types: str = "lotw,eqsl,qrz,clublog",
+    ) -> list[dict[str, Any]]:
         page = 1
         out: list[dict[str, Any]] = []
         while True:
-            params = {"type":types, "qso_since":qso_since, "qso_until":qso_until, "page":page, "per_page":1000}
+            station_filter = ",".join(str(int(value)) for value in (station_ids or []))
+            params = {
+                "type": types, "station_id": station_filter,
+                "qso_since": qso_since, "qso_until": qso_until,
+                "page": page, "per_page": 1000,
+            }
             r = self._request("GET", "confirmation", params=params) or {}
             data = r.get("data") or []
             if isinstance(data, list):
@@ -1614,6 +1641,7 @@ def service_statuses_from_adif(fields: dict[str, str]) -> dict[str, str]:
             ("QRZCOM_QSO_UPLOAD_STATUS", "QRZ_QSO_UPLOAD_STATUS"),
             ("QRZCOM_QSL_RCVD", "QRZ_QSL_RCVD", "QRZCOM_QSO_DOWNLOAD_STATUS"),
         ),
+        "clublog": _status_from_adif(fields, ("CLUBLOG_QSO_UPLOAD_STATUS",), ()),
         "dcl": _status_from_adif(fields, ("DCL_QSL_SENT",), ("DCL_QSL_RCVD",)),
     }
 
@@ -2265,7 +2293,10 @@ class SyncEngine:
         # Only refresh records actually visible to this token. This matters for
         # member-scoped clubstation tokens, which intentionally see only their
         # own OPERATOR QSOs; cached status for other operators must not be wiped.
-        statuses: dict[int, dict[str,str]] = {wid:{"qrz":"unknown","lotw":"unknown","eqsl":"unknown","dcl":"unknown"} for wid in linked if wid in visible_ids}
+        statuses: dict[int, dict[str,str]] = {
+            wid: {"qrz":"unknown","lotw":"unknown","eqsl":"unknown","clublog":"unknown","dcl":"unknown"}
+            for wid in linked if wid in visible_ids
+        }
         try:
             adif_rows = self.client.export_qsos_adif(qso_since=qso_since, station_ids=allowed)
             for f in adif_rows:
@@ -2279,7 +2310,10 @@ class SyncEngine:
 
         # Confirmation endpoint is authoritative for received confirmations.
         try:
-            for c in self.client.list_confirmations(qso_since=qso_since, types="lotw,eqsl,qrz"):
+            for c in self.client.list_confirmations(
+                station_ids=allowed, qso_since=qso_since,
+                types="lotw,eqsl,qrz,clublog",
+            ):
                 try:
                     wid = int(c.get("qso_id"))
                 except Exception:
@@ -2290,6 +2324,7 @@ class SyncEngine:
                 if typ == "lotw": statuses[wid]["lotw"] = "confirmed"
                 elif typ == "eqsl": statuses[wid]["eqsl"] = "confirmed"
                 elif typ in ("qrz.com", "qrz"): statuses[wid]["qrz"] = "confirmed"
+                elif typ == "clublog": statuses[wid]["clublog"] = "confirmed"
         except Exception:
             # Typically means confirmation:read is missing. Keep ADIF sent states.
             errors += 1

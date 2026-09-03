@@ -1,4 +1,4 @@
-# Screenshot gallery 0.18.4
+# Screenshot gallery 0.19.0
 
 [Deutsch](../SCREENSHOTS.md) · **English**
 
@@ -11,6 +11,7 @@ All images are generated automatically with isolated demo data. No real ADI log,
 - [Logbook and sync](../screenshots/en/logbook-sync.png)
 - [Statistics](../screenshots/en/statistics.png)
 - [CAT Setup](../screenshots/en/cat-setup.png)
+- [FLRig network setup](../screenshots/en/cat-flrig.png)
 - [DX Cluster](../screenshots/en/dx-cluster.png)
 - [UDP Logging](../screenshots/en/udp-logging.png)
 - [Settings — General](../screenshots/en/settings-general.png)

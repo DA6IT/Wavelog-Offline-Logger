@@ -2,6 +2,15 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.19.0 — 2026-09-04
+
+- FLRig can be used from CAT Setup through a freely editable `IP/hostname:port` endpoint
+- optional FLRig discovery on the local computer and bounded private IPv4 networks with positive XML-RPC identification
+- ClubLog status in the existing logbook and statistics QSL displays
+- Wavelog 3.2.0 confirmation requests are restricted to the permitted station locations
+- structured Wavelog API error codes and details are retained in the visible failure reason
+- existing `qsl_meta` tables gain the `clublog` column automatically without changing stored status values
+
 ## 0.18.4 — 2026-08-30
 
 - automatic Windows updates now replace and restart the exact launched EXE regardless of its location or custom filename

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import http.client
+import ipaddress
 import re
 import shutil
 import socket
@@ -8,12 +10,17 @@ import subprocess
 import sys
 import threading
 import time
+import xmlrpc.client
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 
 HAMLIB_VERSION = "4.7.2"
+FLRIG_MODEL_ID = 4
+DEFAULT_FLRIG_ENDPOINT = "127.0.0.1:12345"
+FLRIG_DISCOVERY_PORTS = tuple(range(12345, 12356))
 CAT_BAUD_RATES = (300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 CAT_DATA_BITS = (7, 8)
 CAT_STOP_BITS = (1, 2)
@@ -66,10 +73,16 @@ class CatConfig:
                 return default
 
         enabled = str(getter("cat_enabled", "0")).strip().lower() in {"1", "true", "yes", "on"}
+        model_id = integer("cat_model_id", 0)
+        device = (
+            str(getter("cat_flrig_endpoint", DEFAULT_FLRIG_ENDPOINT) or DEFAULT_FLRIG_ENDPOINT).strip()
+            if model_id == FLRIG_MODEL_ID else
+            str(getter("cat_device", "")).strip()
+        )
         return cls(
             enabled=enabled,
-            model_id=integer("cat_model_id", 0),
-            device=str(getter("cat_device", "")).strip(),
+            model_id=model_id,
+            device=device,
             baud=integer("cat_baud", 9600),
             data_bits=integer("cat_data_bits", 8),
             stop_bits=integer("cat_stop_bits", 1),
@@ -82,10 +95,9 @@ class CatConfig:
         )
 
     def settings(self) -> dict[str, str]:
-        return {
+        settings = {
             "cat_enabled": "1" if self.enabled else "0",
             "cat_model_id": str(self.model_id),
-            "cat_device": self.device,
             "cat_baud": str(self.baud),
             "cat_data_bits": str(self.data_bits),
             "cat_stop_bits": str(self.stop_bits),
@@ -96,12 +108,16 @@ class CatConfig:
             "cat_port": str(self.port),
             "cat_poll_interval_ms": str(self.poll_interval_ms),
         }
+        settings["cat_flrig_endpoint" if self.model_id == FLRIG_MODEL_ID else "cat_device"] = self.device
+        return settings
 
     def validate(self) -> None:
         if self.model_id <= 0:
             raise CatError("Bitte ein Funkgerät aus der Hamlib-Liste auswählen")
         if not self.device and self.model_id not in {1, 6}:
             raise CatError("Bitte eine CAT-/COM-Schnittstelle auswählen")
+        if self.model_id == FLRIG_MODEL_ID:
+            parse_network_endpoint(self.device)
         if not 300 <= self.baud <= 115200:
             raise CatError("Die CAT-Baudrate muss zwischen 300 und 115200 liegen")
         if self.data_bits not in CAT_DATA_BITS:
@@ -125,6 +141,133 @@ class CatReading:
     frequency_hz: int
     raw_mode: str
     logger_mode: str
+
+
+def parse_network_endpoint(endpoint: str) -> tuple[str, int]:
+    """Validate and split a Hamlib network device in host:port form."""
+    value = str(endpoint or "").strip()
+    match = re.fullmatch(r"\[([^\]]+)\]:(\d+)", value)
+    if match:
+        host, port_text = match.group(1), match.group(2)
+    else:
+        host, separator, port_text = value.rpartition(":")
+        if not separator or ":" in host:
+            raise CatError("Bitte die FLRig-Adresse als IP/Hostname:Port eingeben")
+    host = host.strip()
+    if (
+        not host or len(host) > 253 or any(ch.isspace() for ch in host)
+        or any(ch in host for ch in "/\\?#@")
+    ):
+        raise CatError("Bitte eine gültige FLRig-IP oder einen Hostnamen eingeben")
+    try:
+        port = int(port_text)
+    except ValueError as exc:
+        raise CatError("Bitte einen gültigen FLRig-Port eingeben") from exc
+    if not 1 <= port <= 65535:
+        raise CatError("Der FLRig-Port muss zwischen 1 und 65535 liegen")
+    return host, port
+
+
+def probe_flrig(endpoint: str, timeout: float = 0.35) -> str | None:
+    """Return the FLRig version only when its XML-RPC service answers."""
+    host, port = parse_network_endpoint(endpoint)
+    body = xmlrpc.client.dumps((), methodname="main.get_version").encode("utf-8")
+    connection = http.client.HTTPConnection(host, port, timeout=max(0.05, float(timeout)))
+    try:
+        connection.request(
+            "POST", "/RPC2", body=body,
+            headers={"Content-Type": "text/xml", "User-Agent": "Wavelog-Offline-Logger"},
+        )
+        response = connection.getresponse()
+        if response.status != 200:
+            return None
+        values, _method = xmlrpc.client.loads(response.read(65536))
+        version = str(values[0] if values else "").strip()
+        return version or "FLRig"
+    except (OSError, http.client.HTTPException, ValueError, xmlrpc.client.Error):
+        return None
+    finally:
+        connection.close()
+
+
+def local_ipv4_addresses() -> list[str]:
+    """Return usable local IPv4 addresses without external network traffic."""
+    addresses: set[str] = set()
+    try:
+        for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM):
+            address = str(item[4][0])
+            parsed = ipaddress.ip_address(address)
+            if not parsed.is_loopback and not parsed.is_link_local:
+                addresses.add(address)
+    except (OSError, ValueError):
+        pass
+    return sorted(addresses)
+
+
+def flrig_discovery_targets(
+    current_endpoint: str = "", local_addresses: list[str] | None = None,
+) -> list[str]:
+    """Build a bounded list of local FLRig XML-RPC candidates."""
+    targets: list[str] = []
+
+    def add(endpoint: str) -> None:
+        if endpoint and endpoint not in targets:
+            targets.append(endpoint)
+
+    current_port = 12345
+    if current_endpoint:
+        try:
+            current_host, current_port = parse_network_endpoint(current_endpoint)
+            formatted_host = f"[{current_host}]" if ":" in current_host else current_host
+            add(f"{formatted_host}:{current_port}")
+        except CatError:
+            pass
+    for port in FLRIG_DISCOVERY_PORTS:
+        add(f"127.0.0.1:{port}")
+
+    addresses = local_ipv4_addresses() if local_addresses is None else list(local_addresses)
+    scan_ports = sorted({12345, current_port})
+    networks: list[ipaddress.IPv4Network] = []
+    for value in addresses:
+        try:
+            address = ipaddress.ip_address(value)
+            if not isinstance(address, ipaddress.IPv4Address) or not address.is_private:
+                continue
+            network = ipaddress.ip_network(f"{address}/24", strict=False)
+            if network not in networks:
+                networks.append(network)
+        except ValueError:
+            continue
+        if len(networks) >= 4:
+            break
+    for network in networks:
+        for address in network.hosts():
+            for port in scan_ports:
+                add(f"{address}:{port}")
+    return targets
+
+
+def discover_flrig(
+    current_endpoint: str = "", *, timeout: float = 0.25,
+    local_addresses: list[str] | None = None,
+    probe: Callable[[str, float], str | None] = probe_flrig,
+) -> list[tuple[str, str]]:
+    """Find FLRig servers on loopback and bounded private /24 networks."""
+    targets = flrig_discovery_targets(current_endpoint, local_addresses)
+    found: list[tuple[str, str]] = []
+    if not targets:
+        return found
+    with ThreadPoolExecutor(max_workers=min(48, len(targets))) as executor:
+        futures = {executor.submit(probe, endpoint, timeout): endpoint for endpoint in targets}
+        for future in as_completed(futures):
+            try:
+                version = future.result()
+            except Exception:
+                version = None
+            if version:
+                found.append((futures[future], str(version)))
+    order = {endpoint: index for index, endpoint in enumerate(targets)}
+    return sorted(found, key=lambda item: order.get(item[0], len(order)))
 
 
 def _windows_creation_flags() -> int:
@@ -272,6 +415,8 @@ def build_rigctld_args(config: CatConfig) -> list[str]:
     args = ["-m", str(config.model_id)]
     if config.model_id in {1, 6}:
         return [*args, "-T", "127.0.0.1", "-t", str(config.port)]
+    if config.model_id == FLRIG_MODEL_ID:
+        return [*args, "-r", config.device, "-T", "127.0.0.1", "-t", str(config.port)]
 
     serial_settings = [
         f"data_bits={config.data_bits}",

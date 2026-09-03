@@ -10,7 +10,9 @@ An offline-first desktop logger for amateur radio: log contacts in the field eve
 
 ## Highlights
 
-- normal QSO logging, Fast Log/DXpedition and contest logging
+- normal, Fast/DXpedition and contest logging with Wavelog session synchronization
+- FLRig CAT through an editable network endpoint with optional local discovery
+- station-scoped Wavelog 3.2.0 synchronization with ClubLog status
 - one continuous ADI file per profile as the primary local logbook
 - validated ADIF import/export with backup and duplicate protection
 - xOTA sessions combining POTA, SOTA, WWFF, IOTA and COTA/WCA references

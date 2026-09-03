@@ -1,16 +1,17 @@
-# DA6IT.de Wavelog Offline Logger v0.18.4
+# DA6IT.de Wavelog Offline Logger v0.19.0
 
-Version 0.18.4 improves the automatic Windows update flow. It reliably replaces and restarts the exact program file launched by the user, preserving its custom filename and location. Select **English** under **Settings → General**, save and restart; the preference applies to all station profiles.
+Version 0.19.0 extends CAT and Wavelog integration while preserving the offline-first workflow and full bidirectional QSO synchronization.
 
-The most recently saved QSO also remains reliably available for a DX spot after the form is cleared, even when CAT has already restored the current radio frequency.
+Highlights:
 
-The release includes:
+- FLRig accepts a freely editable `IP/hostname:port` endpoint, defaulting to `127.0.0.1:12345` locally.
+- Optional discovery checks the local computer and bounded private IPv4 networks and positively identifies the FLRig XML-RPC service.
+- Existing QSO and contest synchronization was validated against the final Wavelog 3.2.0 API v2 contract.
+- ClubLog status appears in the existing logbook and statistics QSL displays.
+- Existing profile databases gain the ClubLog field automatically without losing QRZ, LoTW, eQSL or DCL values.
+- Confirmation requests are scoped to the permitted station locations of the active logger profile.
+- Structured Wavelog API error codes and details remain visible as synchronization failure reasons.
 
-- complete English navigation, pages, dialogs, safety confirmations, errors and runtime status messages
-- full English user guide, troubleshooting, screenshot gallery and maintainer documentation
-- English screenshots of every main page and Settings tab
-- bilingual README, changelog, contributing guide and GitHub release notes
-- both languages in packaged documentation
-- release checks for all German and English documentation screenshots
+Manual FLRig entry remains available at all times. Full QSO comparison, remote edit/delete detection, conflicts, club-station protection and older contest fallbacks remain unchanged.
 
-The application remains offline-first: every QSO is written to ADI locally before optional Wavelog transfer. There is no telemetry or usage counting. Version 0.18.4 remains intentionally unsigned while SignPath onboarding is prepared.
+The application contains complete German and English documentation and remains intentionally unsigned on Windows while SignPath onboarding is pending. It collects no telemetry or usage counts.

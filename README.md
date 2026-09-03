@@ -11,6 +11,8 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 ## Highlights
 
 - normales QSO-Logging, Fast Log/DXpedition und Contest-Logging mit Wavelog-Session-Abgleich
+- FLRig-CAT über frei editierbare Netzwerkadresse mit optionaler lokaler Erkennung
+- stationsbezogener Wavelog-3.2.0-Abgleich mit ClubLog-Status
 - eine fortlaufende ADI-Datei je Profil als primäres lokales Logbuch
 - geprüfter ADIF-Import und -Export mit Backup und Dublettenschutz
 - integrierter xOTA-Modus für kombinierte POTA-, SOTA-, WWFF-, IOTA- und COTA/WCA-Aktivierungen
@@ -90,7 +92,7 @@ Der Logger ersetzt Wavelog nicht. Er ergänzt es für portable Einsätze, DXpedi
 
 **[Free code signing provided by SignPath.io, certificate by SignPath Foundation](CODE_SIGNING_POLICY.md)**
 
-Die Aufnahme bei SignPath wird nach Veröffentlichung von v0.18.4 beantragt. Dieses Release bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
+Die Aufnahme bei SignPath ist vorbereitet, aber noch nicht abgeschlossen. v0.19.0 bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
 
 ## Dokumentation
 

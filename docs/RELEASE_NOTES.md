@@ -1,45 +1,41 @@
-# DA6IT.de Wavelog Offline Logger v0.18.4
+# DA6IT.de Wavelog Offline Logger v0.19.0
 
 ## Deutsch
 
-v0.18.4 verbessert den automatischen Update-Ablauf unter Windows. Der Updater ersetzt und startet zuverlässig genau die Programmdatei, die der Benutzer gestartet hat. Individueller Dateiname und Speicherort bleiben dabei erhalten.
+v0.19.0 erweitert die vorhandene CAT- und Wavelog-Anbindung, ohne den bewährten Offline-first-Ablauf zu verändern. Jedes QSO wird weiterhin zuerst lokal gespeichert. Der vollständige Sync behält Downloads, Änderungen, Löschungen, Konflikte und Clubstation-Schutz bei.
 
-Außerdem bleibt das zuletzt gespeicherte QSO nach dem Leeren des Formulars zuverlässig für einen DX-Spot verfügbar – auch wenn CAT bereits wieder die aktuelle Funkfrequenz einträgt.
+Neu und verbessert:
 
-Neu im Release:
+- **FLRig über Netzwerk:** Nach Auswahl des Hamlib-Modells FLRig wird eine frei editierbare Adresse im Format `IP/Hostname:Port` angezeigt. `127.0.0.1:12345` bleibt die lokale Vorgabe.
+- **Optionale Erkennung:** Ein bewusster Klick durchsucht zuerst den eigenen Rechner und anschließend begrenzte private IPv4-Netze. Nur ein antwortender FLRig-XML-RPC-Dienst gilt als Treffer. Manuelle Eingabe bleibt immer möglich.
+- **Wavelog 3.2.0:** Der bestehende QSO- und Contest-Sync wurde gegen den finalen API-v2-Vertrag geprüft. Der vollständige QSO-Vergleich und die älteren Contest-Fallbacks bleiben erhalten.
+- **ClubLog:** Logbuch und Statistik zeigen ClubLog neben QRZ, LoTW, eQSL und DCL. Bestehende Profildatenbanken werden automatisch und verlustfrei erweitert.
+- **Stationsbezogene Bestätigungen:** Die Confirmation-API erhält die erlaubten Station-Location-IDs des aktiven Profils und lädt keine unnötigen Statusdaten anderer Stationen.
+- **Bessere Fehlerursachen:** API-v2-Fehlercode, Nachricht und strukturierte Details bleiben für die Sync-Anzeige erhalten.
 
-- vollständige englische Oberfläche für alle Funktionsbereiche
-- vollständiges englisches Benutzerhandbuch, Fehlerhilfe, Architektur-, GitHub-, Release- und SignPath-Dokumentation
-- separate deutsche und englische Screenshot-Sätze für alle Hauptseiten und Einstellungsregister
-- zweisprachige README, Beiträge, Changelog und Release-Hinweise
-- Windows-ZIP und Dokumentationspakete enthalten beide Sprachfassungen
-- automatische Release-Prüfung stellt sicher, dass kein englischer Pflicht-Screenshot oder Dokumentationsbestandteil fehlt
+Die komplette deutsche und englische Dokumentation ist enthalten. eQSL bleibt weiterhin als **Coming soon** vorbereitet und führt keinen direkten Upload oder Download aus.
 
-Die Funktionen von v0.18.1 bleiben vollständig erhalten: Offline-first ADI, Wavelog-Sync, QRZ/Wavelog-Callbook, WSJT-X Live/UDP, CAT/Hamlib, DX Cluster, Contest, xOTA, Backup/Restore und verifizierte Updates.
+v0.19.0 wird weiterhin bewusst **ohne Windows-Code-Signatur** bereitgestellt, solange die geplante SignPath-Aufnahme noch nicht abgeschlossen ist. Die [Code-Signing-Richtlinie](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.0/CODE_SIGNING_POLICY.md) beschreibt den vorgesehenen Prozess.
 
-v0.18.4 wird weiterhin bewusst **ohne Windows-Code-Signatur** veröffentlicht. Die [Code-Signing-Richtlinie](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/CODE_SIGNING_POLICY.md) beschreibt den geplanten SignPath-Prozess.
-
-Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/docs/en/USER_GUIDE.md)
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.0/docs/en/USER_GUIDE.md)
 
 ---
 
 ## English
 
-v0.18.4 improves the automatic Windows update flow. The updater reliably replaces and restarts the exact program file launched by the user, preserving its custom filename and location.
+v0.19.0 extends the existing CAT and Wavelog integration without changing the proven offline-first workflow. Every QSO is still written locally first. Full synchronization continues to handle downloads, edits, deletions, conflicts and club-station safeguards.
 
-The most recently saved QSO also remains reliably available for a DX spot after the form is cleared, even when CAT has already restored the current radio frequency.
+New and improved:
 
-New in this release:
+- **FLRig over the network:** Selecting the Hamlib FLRig model exposes a freely editable `IP/hostname:port` endpoint. `127.0.0.1:12345` remains the local default.
+- **Optional discovery:** A deliberate click checks the local computer and then bounded private IPv4 networks. A candidate is accepted only when its FLRig XML-RPC service answers. Manual entry always remains available.
+- **Wavelog 3.2.0:** Existing QSO and contest synchronization was verified against the final API v2 contract. Full QSO comparison and older contest fallbacks remain intact.
+- **ClubLog:** The logbook and statistics show ClubLog alongside QRZ, LoTW, eQSL and DCL. Existing profile databases are upgraded automatically without losing status values.
+- **Station-scoped confirmations:** Confirmation requests include the station-location IDs permitted for the active profile and avoid unrelated status data.
+- **Clearer failure reasons:** API v2 error codes, messages and structured details remain available to the synchronization UI.
 
-- complete English user interface for every functional area
-- complete English user guide, troubleshooting, architecture, GitHub, release and SignPath documentation
-- separate German and English screenshot sets for every main page and Settings tab
-- bilingual README, contributing guide, changelog and release notes
-- Windows ZIP and documentation packages contain both language versions
-- release validation fails if a required English screenshot or document is missing
+Complete German and English documentation is included. eQSL remains a **Coming soon** placeholder and performs no direct upload or download.
 
-All v0.18.1 functionality remains included: offline-first ADI, Wavelog sync, QRZ/Wavelog callbook, WSJT-X live/UDP, CAT/Hamlib, DX Cluster, contest, xOTA, backup/restore and verified updates.
+v0.19.0 remains intentionally **unsigned on Windows** while the planned SignPath onboarding is pending. The [code-signing policy](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.0/CODE_SIGNING_POLICY.md) documents the intended process.
 
-v0.18.4 is still intentionally published **without a Windows code signature**. The [code-signing policy](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/CODE_SIGNING_POLICY.md) documents the planned SignPath process.
-
-Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.18.4/docs/en/USER_GUIDE.md)
+Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.0/docs/en/USER_GUIDE.md)
