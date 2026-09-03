@@ -30,9 +30,10 @@ from logger_core import (
 )
 from cat_control import (
     CAT_BAUD_RATES, CAT_DATA_BITS, CAT_HANDSHAKES, CAT_LINE_STATES,
-    CAT_PARITIES, CAT_STOP_BITS, CatConfig, CatError, HamlibManager,
+    CAT_PARITIES, CAT_STOP_BITS, DEFAULT_FLRIG_ENDPOINT, FLRIG_MODEL_ID,
+    CatConfig, CatError, HamlibManager,
     RigModel, format_frequency_mhz, hamlib_version, list_rig_models,
-    list_serial_ports, map_hamlib_mode,
+    discover_flrig, list_serial_ports, map_hamlib_mode,
 )
 from external_logging import (
     ExternalLogError, UdpLogConfig, UdpLogEvent, UdpLogReceiver, UdpStatusEvent,
@@ -3273,12 +3274,12 @@ class LoggerApp(tk.Tk):
         card = self._card(p, row=1, column=0, sticky="nsew")
         card.columnconfigure(0, weight=1)
         card.rowconfigure(0, weight=1)
-        cols = ("date", "time", "call", "operator", "contest", "band", "mode", "freq", "rst", "status", "qrz", "lotw", "eqsl", "dcl")
+        cols = ("date", "time", "call", "operator", "contest", "band", "mode", "freq", "rst", "status", "qrz", "lotw", "eqsl", "clublog", "dcl")
         self.tree = ttk.Treeview(card, columns=cols, show="headings", selectmode="browse")
         headings = {"date":"Datum UTC", "time":"Zeit", "call":"Call", "operator":"Operator", "contest":"Contest", "band":"Band", "mode":"Mode", "freq":"MHz", "rst":"RST", "status":"Sync",
-                    "qrz":"QRZ", "lotw":"LoTW", "eqsl":"eQSL", "dcl":"DCL"}
+                    "qrz":"QRZ", "lotw":"LoTW", "eqsl":"eQSL", "clublog":"ClubLog", "dcl":"DCL"}
         widths = {"date":88,"time":62,"call":88,"operator":82,"contest":100,"band":52,"mode":60,"freq":80,"rst":62,"status":88,
-                  "qrz":52,"lotw":52,"eqsl":52,"dcl":52}
+                  "qrz":52,"lotw":52,"eqsl":52,"clublog":62,"dcl":52}
         for c in cols:
             self.tree.heading(c, text=self._tr(headings[c]))
             self.tree.column(c, width=widths[c], minwidth=45, stretch=(c in ("call", "contest")))
@@ -3356,7 +3357,8 @@ class LoggerApp(tk.Tk):
                 q.get("qso_date", ""), tm, q.get("call", ""), q.get("operator_call", "") or "—", q.get("contest_id", "") or "—", q.get("band", ""), q.get("mode", ""), q.get("freq", ""),
                 f"{q.get('rst_sent','')}/{q.get('rst_rcvd','')}", s,
                 self._display_qsl_status(qsl.get("qrz")), self._display_qsl_status(qsl.get("lotw")),
-                self._display_qsl_status(qsl.get("eqsl")), self._display_qsl_status(qsl.get("dcl")),
+                self._display_qsl_status(qsl.get("eqsl")), self._display_qsl_status(qsl.get("clublog")),
+                self._display_qsl_status(qsl.get("dcl")),
             ))
         metas = self.db.list_meta()
         local_only = sum(1 for m in metas if m.get("wavelog_id") is None and m.get("status") not in ("pending_delete",))
@@ -3809,7 +3811,7 @@ class LoggerApp(tk.Tk):
         for w in parent.winfo_children():
             w.destroy()
         linked = local = issues = 0
-        qsl = {name: Counter() for name in ("qrz", "lotw", "eqsl", "dcl")}
+        qsl = {name: Counter() for name in ("qrz", "lotw", "eqsl", "clublog", "dcl")}
         pota = sota = wwff = 0
         for q in qsos:
             meta = self.db.get_meta(q.get("local_id", ""))
@@ -3837,7 +3839,7 @@ class LoggerApp(tk.Tk):
         if issues:
             add_row("Offene Sync-Themen", str(issues), WARN)
         ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=6)
-        for svc, label in (("qrz", "QRZ"), ("lotw", "LoTW"), ("eqsl", "eQSL"), ("dcl", "DCL")):
+        for svc, label in (("qrz", "QRZ"), ("lotw", "LoTW"), ("eqsl", "eQSL"), ("clublog", "ClubLog"), ("dcl", "DCL")):
             c = qsl[svc]
             parts = []
             if c.get("confirmed"): parts.append(f"{c['confirmed']} ✓")
@@ -3918,6 +3920,10 @@ class LoggerApp(tk.Tk):
         self.cat_model_search_var = tk.StringVar()
         self.cat_model_var = tk.StringVar()
         self.cat_saved_model_id = 0
+        self.cat_ui_model_id = 0
+        self.cat_serial_device = ""
+        self.cat_flrig_endpoint = DEFAULT_FLRIG_ENDPOINT
+        self.flrig_search_generation = 0
         ttk.Label(left, text="Funkgerät suchen", style="Card.TLabel").grid(row=3, column=0, sticky="w", pady=(5, 3))
         model_search = ttk.Entry(left, textvariable=self.cat_model_search_var)
         model_search.grid(row=4, column=0, sticky="ew")
@@ -3927,26 +3933,33 @@ class LoggerApp(tk.Tk):
         self.cat_model_combo.grid(row=6, column=0, sticky="ew")
         self.cat_model_combo.bind("<<ComboboxSelected>>", self._cat_model_selected)
 
-        ttk.Label(left, text="CAT-/COM-Schnittstelle", style="Card.TLabel").grid(row=7, column=0, sticky="w", pady=(10, 3))
+        self.cat_device_label = ttk.Label(left, text="CAT-/COM-Schnittstelle", style="Card.TLabel")
+        self.cat_device_label.grid(row=7, column=0, sticky="w", pady=(10, 3))
         port_row = ttk.Frame(left, style="Card.TFrame")
         port_row.grid(row=8, column=0, sticky="ew")
         port_row.columnconfigure(0, weight=1)
         self.cat_device_var = tk.StringVar()
         self.cat_device_combo = ttk.Combobox(port_row, textvariable=self.cat_device_var, state="normal")
         self.cat_device_combo.grid(row=0, column=0, sticky="ew")
-        ttk.Button(port_row, text="Neu laden", style="Secondary.TButton", command=self._refresh_cat_ports).grid(row=0, column=1, padx=(6, 0))
+        self.cat_device_action_button = ttk.Button(
+            port_row, text="Neu laden", style="Secondary.TButton", command=self._refresh_cat_ports,
+        )
+        self.cat_device_action_button.grid(row=0, column=1, padx=(6, 0))
 
-        ttk.Label(left, text="Baudrate", style="Card.TLabel").grid(row=9, column=0, sticky="w", pady=(10, 3))
+        self.cat_baud_label = ttk.Label(left, text="Baudrate", style="Card.TLabel")
+        self.cat_baud_label.grid(row=9, column=0, sticky="w", pady=(10, 3))
         self.cat_baud_var = tk.StringVar(value="9600")
-        ttk.Combobox(
+        self.cat_baud_combo = ttk.Combobox(
             left,
             textvariable=self.cat_baud_var,
             values=[str(x) for x in CAT_BAUD_RATES],
             state="readonly",
-        ).grid(row=10, column=0, sticky="ew")
+        )
+        self.cat_baud_combo.grid(row=10, column=0, sticky="ew")
 
-        serial = ttk.LabelFrame(left, text="Serielle Parameter", padding=10)
-        serial.grid(row=11, column=0, sticky="ew", pady=(14, 0))
+        self.cat_serial_frame = ttk.LabelFrame(left, text="Serielle Parameter", padding=10)
+        self.cat_serial_frame.grid(row=11, column=0, sticky="ew", pady=(14, 0))
+        serial = self.cat_serial_frame
         for column in range(2):
             serial.columnconfigure(column, weight=1)
         self.cat_data_bits_var = tk.StringVar(value="8")
@@ -4059,6 +4072,7 @@ class LoggerApp(tk.Tk):
         )
         self._filter_cat_models()
         self._select_cat_model_id(self.cat_saved_model_id)
+        self._update_cat_device_controls()
 
     def _cat_runtime_failed(self, message: str):
         self.cat_hamlib_info.configure(text="✕ " + message, fg=ERR)
@@ -4101,10 +4115,45 @@ class LoggerApp(tk.Tk):
     def _cat_model_selected(self, _event=None):
         selected_id = self._selected_cat_model_id()
         if selected_id:
+            current = self.cat_device_var.get().strip()
+            if self.cat_ui_model_id == FLRIG_MODEL_ID:
+                self.cat_flrig_endpoint = current or DEFAULT_FLRIG_ENDPOINT
+            elif self.cat_ui_model_id:
+                self.cat_serial_device = current
             self.cat_saved_model_id = selected_id
+            self.cat_ui_model_id = selected_id
+            self.cat_device_var.set(
+                self.cat_flrig_endpoint if selected_id == FLRIG_MODEL_ID else self.cat_serial_device
+            )
+            self._update_cat_device_controls()
+
+    def _update_cat_device_controls(self):
+        if not hasattr(self, "cat_device_combo"):
+            return
+        is_flrig = (self._selected_cat_model_id() or self.cat_saved_model_id) == FLRIG_MODEL_ID
+        if is_flrig:
+            current = self.cat_device_var.get().strip() or self.cat_flrig_endpoint or DEFAULT_FLRIG_ENDPOINT
+            self.cat_device_var.set(current)
+            self.cat_device_combo.configure(values=[current] if current else [DEFAULT_FLRIG_ENDPOINT])
+            self.cat_device_label.configure(text=self._tr("FLRig-Adresse (IP/Hostname:Port)"))
+            self.cat_device_action_button.configure(text=self._tr("FLRig suchen"), command=self._detect_flrig)
+            self.cat_baud_label.grid_remove()
+            self.cat_baud_combo.grid_remove()
+            self.cat_serial_frame.grid_remove()
+        else:
+            self.cat_device_label.configure(text=self._tr("CAT-/COM-Schnittstelle"))
+            self.cat_device_action_button.configure(text=self._tr("Neu laden"), command=self._refresh_cat_ports)
+            self.cat_baud_label.grid()
+            self.cat_baud_combo.grid()
+            self.cat_serial_frame.grid()
+            self._refresh_cat_ports()
 
     def _refresh_cat_ports(self):
         if not hasattr(self, "cat_device_combo"):
+            return
+        if (self._selected_cat_model_id() or self.cat_saved_model_id) == FLRIG_MODEL_ID:
+            current = self.cat_device_var.get().strip() or DEFAULT_FLRIG_ENDPOINT
+            self.cat_device_combo.configure(values=[current])
             return
         ports = list_serial_ports()
         current = self.cat_device_var.get().strip()
@@ -4117,6 +4166,9 @@ class LoggerApp(tk.Tk):
     def _load_cat_settings_to_ui(self):
         config = CatConfig.from_getter(self.db.get_setting)
         self.cat_saved_model_id = config.model_id
+        self.cat_ui_model_id = config.model_id
+        self.cat_serial_device = self.db.get_setting("cat_device", "").strip()
+        self.cat_flrig_endpoint = self.db.get_setting("cat_flrig_endpoint", DEFAULT_FLRIG_ENDPOINT).strip() or DEFAULT_FLRIG_ENDPOINT
         self.cat_device_var.set(config.device)
         self.cat_baud_var.set(str(config.baud))
         self.cat_data_bits_var.set(str(config.data_bits))
@@ -4130,7 +4182,7 @@ class LoggerApp(tk.Tk):
         self.cat_model_search_var.set("")
         self._filter_cat_models()
         self._select_cat_model_id(config.model_id)
-        self._refresh_cat_ports()
+        self._update_cat_device_controls()
         self.cat_status_label.configure(
             text="CAT ist ausgeschaltet · zum Verbinden bitte CAT starten.",
             fg=MUTED,
@@ -4156,6 +4208,67 @@ class LoggerApp(tk.Tk):
     def _store_cat_config(self, config: CatConfig):
         for key, value in config.settings().items():
             self.db.set_setting(key, value)
+        if config.model_id == FLRIG_MODEL_ID:
+            self.cat_flrig_endpoint = config.device
+        else:
+            self.cat_serial_device = config.device
+
+    def _detect_flrig(self):
+        if (self._selected_cat_model_id() or self.cat_saved_model_id) != FLRIG_MODEL_ID:
+            return
+        self.flrig_search_generation += 1
+        generation = self.flrig_search_generation
+        current = self.cat_device_var.get().strip()
+        self.cat_device_action_button.configure(state="disabled", text=self._tr("FLRig wird gesucht …"))
+        self.cat_status_label.configure(
+            text=self._tr("FLRig wird lokal und im privaten Netzwerk gesucht …"), fg=MUTED,
+        )
+
+        def worker():
+            try:
+                results = discover_flrig(current)
+                error_message = ""
+            except Exception as exc:
+                results = []
+                error_message = str(exc)
+            if not self.closing:
+                self.after(
+                    0,
+                    lambda: self._flrig_detected(
+                        generation, current, results, error_message,
+                    ),
+                )
+
+        threading.Thread(target=worker, name="flrig-discovery", daemon=True).start()
+
+    def _flrig_detected(
+        self, generation: int, current: str, results: list[tuple[str, str]],
+        error_message: str = "",
+    ):
+        if generation != self.flrig_search_generation or self.closing:
+            return
+        self.cat_device_action_button.configure(state="normal", text=self._tr("FLRig suchen"))
+        if not results:
+            suffix = f" ({error_message})" if error_message else ""
+            self.cat_status_label.configure(
+                text=self._tr(
+                    "Kein FLRig automatisch gefunden. IP/Hostname:Port kann weiterhin von Hand eingetragen werden."
+                ) + suffix,
+                fg=WARN,
+            )
+            return
+        endpoints = [endpoint for endpoint, _version in results]
+        selected = current if current in endpoints else endpoints[0]
+        self.cat_device_combo.configure(values=endpoints)
+        self.cat_device_var.set(selected)
+        self.cat_flrig_endpoint = selected
+        version = next((value for endpoint, value in results if endpoint == selected), "FLRig")
+        more = f" · +{len(results) - 1}" if len(results) > 1 else ""
+        self.cat_status_label.configure(
+            text=self._tr("FLRig gefunden") + f": {selected} · {version}{more}\n" +
+                 self._tr("Bitte Einstellungen speichern oder die Verbindung direkt testen."),
+            fg=OK,
+        )
 
     def save_cat_settings(self):
         try:

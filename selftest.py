@@ -1,11 +1,17 @@
 import base64
 import os
 from pathlib import Path
+import sqlite3
 import sys
+import threading
+import xmlrpc.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from tempfile import TemporaryDirectory
 from logger_core import (
-    LogStore, MetadataDB, SyncEngine, ContestSyncEngine, WavelogOnlineSettings, WavelogError,
+    LogStore, MetadataDB, SyncEngine, ContestSyncEngine, WavelogClient,
+    WavelogOnlineSettings, WavelogError,
     build_fast_log_qso, qso_hash, remote_qsos_for_station, secure_tls_context,
+    service_statuses_from_adif,
 )
 from xota import (
     GPSService, ActivationReferenceService, XotaRepository, distance_m,
@@ -18,6 +24,7 @@ class FakeClient:
         self.rows = {}
         self.n = 100
         self.scopes = ["qso:read", "qso:write", "qso:delete", "station:read", "confirmation:read"]
+        self.confirmation_requests = []
     def token_info(self):
         return {"owner":"DK0GN", "scopes": list(self.scopes)}
     def stations(self):
@@ -69,7 +76,8 @@ class FakeClient:
             tm = dt.split(" ",1)[1].replace(":", "") if " " in dt else "000000"
             f = {
                 "CALL": r.get("call", ""), "QSO_DATE": date, "TIME_ON": tm[:6], "BAND": r.get("band", ""),
-                "LOTW_QSL_SENT": "Y", "EQSL_QSL_SENT": "Q", "QRZCOM_QSO_UPLOAD_STATUS": "Y", "DCL_QSL_SENT": "N",
+                "LOTW_QSL_SENT": "Y", "EQSL_QSL_SENT": "Q", "QRZCOM_QSO_UPLOAD_STATUS": "Y",
+                "CLUBLOG_QSO_UPLOAD_STATUS": "Y", "DCL_QSL_SENT": "N",
                 "OPERATOR": r.get("operator", ""), "STATION_CALLSIGN": "DK0GN",
                 "CONTEST_ID": r.get("contest_id", ""), "STX": str(r.get("stx", "")), "SRX": str(r.get("srx", "")),
                 "STX_STRING": r.get("stx_string", ""), "SRX_STRING": r.get("srx_string", ""),
@@ -77,6 +85,7 @@ class FakeClient:
             out.append(f)
         return out
     def list_confirmations(self, **kw):
+        self.confirmation_requests.append(dict(kw))
         # Mark the first current QSO as confirmed by LoTW and QRZ.
         if not self.rows:
             return []
@@ -85,6 +94,7 @@ class FakeClient:
         return [
             {"qso_id": wid, "callsign": r.get("call"), "type": "LoTW", "confirmation_date":"2026-08-12"},
             {"qso_id": wid, "callsign": r.get("call"), "type": "QRZ.com", "confirmation_date":"2026-08-12"},
+            {"qso_id": wid, "callsign": r.get("call"), "type": "ClubLog", "confirmation_date":"2026-08-12"},
         ]
 
 
@@ -115,6 +125,9 @@ with TemporaryDirectory() as d:
     qsl = db.get_qsl_status(wid)
     assert qsl["lotw"] == "confirmed" and qsl["qrz"] == "confirmed", qsl
     assert qsl["eqsl"] == "pending" and qsl["dcl"] == "none", qsl
+    assert qsl["clublog"] == "confirmed", qsl
+    assert fc.confirmation_requests[-1]["station_ids"] == {1}
+    assert fc.confirmation_requests[-1]["types"] == "lotw,eqsl,qrz,clublog"
 
     # Remote edit -> local ADI update
     fc.rows[wid]["comment"] = "REMOTE CHANGE"
@@ -446,6 +459,7 @@ assert notes_for_version("0.18.0", "de") and notes_for_version("0.18.0", "en")
 assert notes_for_version("0.18.2", "de") and notes_for_version("0.18.2", "en")
 assert notes_for_version("0.18.3", "de") and notes_for_version("0.18.3", "en")
 assert notes_for_version("0.18.4", "de") and notes_for_version("0.18.4", "en")
+assert notes_for_version("0.19.0", "de") and notes_for_version("0.19.0", "en")
 print("BACKUP AND WHAT'S NEW SELFTEST OK")
 
 # Legacy v0.9 migration: copy single-profile metadata without touching rollback file.
@@ -466,6 +480,93 @@ with TemporaryDirectory() as d:
     migrated.close()
 
 print("MIGRATION SELFTEST OK")
+
+# Existing profile databases gain ClubLog without losing their QSL state.
+with TemporaryDirectory() as d:
+    legacy_path = Path(d) / "legacy-qsl.db"
+    connection = sqlite3.connect(legacy_path)
+    connection.execute(
+        """CREATE TABLE qsl_meta (
+            wavelog_id INTEGER PRIMARY KEY,
+            qrz TEXT NOT NULL DEFAULT 'unknown',
+            lotw TEXT NOT NULL DEFAULT 'unknown',
+            eqsl TEXT NOT NULL DEFAULT 'unknown',
+            dcl TEXT NOT NULL DEFAULT 'unknown',
+            updated_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        "INSERT INTO qsl_meta VALUES(42,'confirmed','sent','pending','none','2026-08-30T12:00:00Z')"
+    )
+    connection.commit()
+    connection.close()
+    migrated_qsl = MetadataDB(legacy_path)
+    migrated_status = migrated_qsl.get_qsl_status(42)
+    assert migrated_status["qrz"] == "confirmed" and migrated_status["lotw"] == "sent"
+    assert migrated_status["eqsl"] == "pending" and migrated_status["dcl"] == "none"
+    assert migrated_status["clublog"] == "unknown"
+    assert "clublog" in {
+        str(row[1]).lower() for row in migrated_qsl.conn.execute("PRAGMA table_info(qsl_meta)")
+    }
+    migrated_qsl.close()
+
+assert service_statuses_from_adif({"CLUBLOG_QSO_UPLOAD_STATUS": "Y"})["clublog"] == "sent"
+assert service_statuses_from_adif({"CLUBLOG_QSO_UPLOAD_STATUS": "M"})["clublog"] == "pending"
+
+class ConfirmationCaptureClient(WavelogClient):
+    def __init__(self):
+        super().__init__("https://wavelog.invalid", "wl2_test")
+        self.requests = []
+
+    def _request(self, method, resource, ident=None, params=None, payload=None):
+        self.requests.append((method, resource, dict(params or {})))
+        return {"data": [], "meta": {"has_more": False}}
+
+confirmation_client = ConfirmationCaptureClient()
+confirmation_client.list_confirmations(station_ids=[8, 11], types="lotw,clublog")
+assert confirmation_client.requests == [(
+    "GET", "confirmation", {
+        "type": "lotw,clublog", "station_id": "8,11", "qso_since": None,
+        "qso_until": None, "page": 1, "per_page": 1000,
+    },
+)]
+
+class ApiErrorHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = __import__("json").dumps({
+            "error": {
+                "code": "conflict", "message": "QSO was changed",
+                "details": {"field": "qso"},
+            },
+        }).encode("utf-8")
+        self.send_response(409)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, _format, *_args):
+        pass
+
+api_error_server = ThreadingHTTPServer(("127.0.0.1", 0), ApiErrorHandler)
+api_error_thread = threading.Thread(target=api_error_server.serve_forever, daemon=True)
+api_error_thread.start()
+try:
+    try:
+        WavelogClient(
+            f"http://127.0.0.1:{api_error_server.server_port}", "wl2_test",
+        ).token_info()
+        raise AssertionError("Structured API error was not raised")
+    except WavelogError as exc:
+        error_text = str(exc)
+        assert "HTTP 409: conflict: QSO was changed" in error_text, error_text
+        assert '{"field":"qso"}' in error_text, error_text
+finally:
+    api_error_server.shutdown()
+    api_error_server.server_close()
+    api_error_thread.join(timeout=2)
+
+print("QSL METADATA MIGRATION SELFTEST OK")
 
 
 # Contest field round-trip and Wavelog payload test.
@@ -630,8 +731,9 @@ print("HASH MIGRATION SELFTEST OK")
 # CAT/Hamlib configuration, model parsing and logger-field mapping. These
 # tests deliberately need neither a connected radio nor a Hamlib installation.
 from cat_control import (
-    CatConfig, build_rigctld_args, format_frequency_mhz, hamlib_mode_for_logger,
-    map_hamlib_mode, parse_rigctld_models,
+    DEFAULT_FLRIG_ENDPOINT, FLRIG_MODEL_ID, CatConfig, build_rigctld_args,
+    discover_flrig, format_frequency_mhz, hamlib_mode_for_logger,
+    map_hamlib_mode, parse_network_endpoint, parse_rigctld_models, probe_flrig,
 )
 
 model_output = """\
@@ -660,6 +762,57 @@ assert args[:6] == ["-m", "1035", "-r", "COM7", "-s", "38400"], args
 serial_arg = args[args.index("-C") + 1]
 assert "serial_handshake=Hardware" in serial_arg
 assert "dtr_state=OFF" in serial_arg and "rts_state=ON" in serial_arg
+
+flrig_config = CatConfig.from_getter(lambda key, default="": {
+    "cat_model_id": str(FLRIG_MODEL_ID),
+    "cat_flrig_endpoint": "192.168.10.25:12346",
+    "cat_port": "4540",
+}.get(key, default))
+flrig_config.validate()
+assert flrig_config.device == "192.168.10.25:12346"
+assert flrig_config.settings()["cat_flrig_endpoint"] == "192.168.10.25:12346"
+assert "cat_device" not in flrig_config.settings()
+flrig_args = build_rigctld_args(flrig_config)
+assert flrig_args == ["-m", "4", "-r", "192.168.10.25:12346", "-T", "127.0.0.1", "-t", "4540"]
+assert parse_network_endpoint(DEFAULT_FLRIG_ENDPOINT) == ("127.0.0.1", 12345)
+assert parse_network_endpoint("flrig-shack.local:12349") == ("flrig-shack.local", 12349)
+
+probed_flrig = []
+def fake_flrig_probe(endpoint, timeout):
+    probed_flrig.append((endpoint, timeout))
+    return "2.0.04" if endpoint == "127.0.0.1:12347" else None
+
+found_flrig = discover_flrig(
+    "127.0.0.1:12347", timeout=0.01, local_addresses=[], probe=fake_flrig_probe,
+)
+assert found_flrig == [("127.0.0.1:12347", "2.0.04")]
+assert any(endpoint == "127.0.0.1:12345" for endpoint, _timeout in probed_flrig)
+
+class FlrigProbeHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        request_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        assert self.path == "/RPC2"
+        _params, method = xmlrpc.client.loads(request_body)
+        assert method == "main.get_version"
+        response_body = xmlrpc.client.dumps(("2.0.04",), methodresponse=True).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/xml")
+        self.send_header("Content-Length", str(len(response_body)))
+        self.end_headers()
+        self.wfile.write(response_body)
+
+    def log_message(self, _format, *_args):
+        pass
+
+probe_server = ThreadingHTTPServer(("127.0.0.1", 0), FlrigProbeHandler)
+probe_thread = threading.Thread(target=probe_server.serve_forever, daemon=True)
+probe_thread.start()
+try:
+    assert probe_flrig(f"127.0.0.1:{probe_server.server_port}", timeout=1.0) == "2.0.04"
+finally:
+    probe_server.shutdown()
+    probe_server.server_close()
+    probe_thread.join(timeout=2)
 
 assert format_frequency_mhz(14_074_000) == "14.074"
 assert format_frequency_mhz(145_500_000) == "145.5"
@@ -691,7 +844,6 @@ with TemporaryDirectory() as bundle_dir:
 # spawned process behind. A stop must invalidate the in-flight start and kill
 # that exact process as soon as Popen returns.
 import io
-import threading
 from unittest.mock import patch
 from cat_control import CatError, HamlibManager
 

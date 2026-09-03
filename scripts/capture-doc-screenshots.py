@@ -68,6 +68,7 @@ def main() -> int:
 
     import app as app_module
     from app import LoggerApp, SyncProgressDialog
+    from cat_control import DEFAULT_FLRIG_ENDPOINT, FLRIG_MODEL_ID
     from dx_cluster import DxSpot
     from logger_core import app_data_dir, qso_hash
     from xota import ReferenceCandidate
@@ -494,6 +495,24 @@ try {
         )
         capture(root, "cat-setup.png")
 
+        # Dedicated FLRig view: this documents the network endpoint and the
+        # optional discovery action without contacting a real FLRig instance.
+        root.cat_model_search_var.set("FLRig")
+        root.cat_model_var.set("FLRig · XML-RPC [ID 4]")
+        root.cat_saved_model_id = FLRIG_MODEL_ID
+        root.cat_ui_model_id = FLRIG_MODEL_ID
+        root.cat_flrig_endpoint = "192.168.1.25:12345"
+        root.cat_device_var.set(root.cat_flrig_endpoint)
+        root._update_cat_device_controls()
+        root.cat_status_label.configure(
+            text=(
+                "FLRig-Netzwerkziel als Dokumentations-Demo eingetragen.\n"
+                "Die Adresse bleibt manuell editierbar; FLRig suchen prüft den XML-RPC-Dienst."
+            ),
+            fg=app_module.OK,
+        )
+        capture(root, "cat-flrig.png")
+
         # DX Cluster with realistic, local-only rows.
         now = datetime.now(timezone.utc)
         demo_spots = (
@@ -595,6 +614,23 @@ try {
             root._show_page(page_name)
             capture(root, filename)
 
+        root._show_page("cat")
+        root.cat_model_search_var.set("FLRig")
+        root.cat_model_var.set("FLRig · XML-RPC [ID 4]")
+        root.cat_saved_model_id = FLRIG_MODEL_ID
+        root.cat_ui_model_id = FLRIG_MODEL_ID
+        root.cat_flrig_endpoint = "192.168.1.25:12345"
+        root.cat_device_var.set(root.cat_flrig_endpoint or DEFAULT_FLRIG_ENDPOINT)
+        root._update_cat_device_controls()
+        root.cat_status_label.configure(
+            text=(
+                "FLRig network target entered for this documentation demo.\n"
+                "The endpoint stays editable; Find FLRig verifies the XML-RPC service."
+            ),
+            fg=app_module.OK,
+        )
+        capture(root, "en/cat-flrig.png")
+
         root._show_page("settings")
         notebook = notebook_below(root.pages["settings"])
         if notebook is None:
@@ -618,6 +654,41 @@ try {
         except tk.TclError:
             pass
         running.destroy()
+
+        # One current dark-theme view completes the appearance documentation.
+        # Recreate the root because language and theme are intentionally
+        # applied on application start, exactly as they are for users.
+        root.attributes("-topmost", False)
+        cancel_all_after(root)
+        root.shutdown()
+        cancel_all_after(root)
+        root.destroy()
+        root = None
+        preferences_file.write_text(
+            json.dumps({"language": "en", "theme": "dark"}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        root = LoggerApp()
+        fit_window(root, 1420, 820, 20, 8)
+        root.attributes("-topmost", True)
+        root.call_var.set("DL1ABC")
+        root.freq_var.set("14.205")
+        root.band_var.set("20m")
+        root.mode_var.set("USB")
+        root.form_vars["tx_pwr"].set("100")
+        root.form_vars["gridsquare"].set("JO31AA")
+        root.form_vars["name"].set("Anna Example")
+        root.form_vars["qth"].set("Düsseldorf")
+        root.callbook_source_label.configure(text="WAVELOG / QRZ", bg=app_module.OK_BADGE_BG, fg=app_module.OK)
+        root.callbook_name_label.configure(text="DL1ABC · Anna Example")
+        root.callbook_details_label.configure(text="Düsseldorf, Germany\nGrid locator: JO31AA\nCQ / ITU: 14 / 28")
+        root.callbook_status_label.configure(text="Data loaded automatically · documentation demo", fg=app_module.OK)
+        root.current_country = root.country_db.lookup("DL1ABC")
+        root._update_country_summary()
+        root._set_wavelog_mode_ui(True)
+        root.status_var.set("Ready · English dark-theme documentation demo")
+        root._show_page("log")
+        capture(root, "qso-logging-english-dark.png")
 
         root.attributes("-topmost", False)
 

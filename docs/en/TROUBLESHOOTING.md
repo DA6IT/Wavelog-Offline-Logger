@@ -22,6 +22,8 @@ Enable UDP, use the same free address and port in both apps, and point WSJT-X's 
 
 Install the radio's USB driver if needed, close competing CAT applications, verify model/port/baud and start CAT manually. TUNE availability depends on Hamlib, radio and firmware. The app does not activate PTT for tuning.
 
+**FLRig** needs an `IP/hostname:port` endpoint instead of a COM port; the usual local endpoint is `127.0.0.1:12345`. If **Find FLRig** returns no result, verify FLRig's XML-RPC port and the firewall, then enter the endpoint manually. Automatic discovery is intentionally limited to the local computer and bounded private IPv4 networks; enter endpoints in other subnets or IPv6 endpoints manually.
+
 ## Layout or language looks stale
 
 Save language/theme under **Settings → General**, close the app normally and restart it. If reporting a layout issue, include OS scaling, display resolution and app window size.

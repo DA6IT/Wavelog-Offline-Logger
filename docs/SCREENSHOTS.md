@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/SCREENSHOTS.md)
 
-Die Bilder zeigen Version 0.18.4 mit automatisch erzeugten, isolierten Demo-Daten. Der Prozess greift weder auf echte Logger-Profile noch auf Funkgerät, Netzwerk, API-Tokens oder persönliche ADI-Dateien zu.
+Die Bilder zeigen Version 0.19.0 mit automatisch erzeugten, isolierten Demo-Daten. Der Prozess greift weder auf echte Logger-Profile noch auf Funkgerät, Netzwerk, API-Tokens oder persönliche ADI-Dateien zu.
 
 ## QSO loggen
 
@@ -31,6 +31,10 @@ Die Bilder zeigen Version 0.18.4 mit automatisch erzeugten, isolierten Demo-Date
 ## CAT Setup
 
 ![CAT Setup](screenshots/cat-setup.png)
+
+## FLRig im Netzwerk
+
+![FLRig-Adresse und automatische Suche](screenshots/cat-flrig.png)
 
 ## DX Cluster
 

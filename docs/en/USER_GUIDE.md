@@ -1,4 +1,4 @@
-# User guide — DA6IT.de Wavelog Offline Logger 0.18.4
+# User guide — DA6IT.de Wavelog Offline Logger 0.19.0
 
 [Deutsch](../USER_GUIDE.md) · **English**
 
@@ -46,6 +46,8 @@ Important states are `LOCAL ONLY`, `WAVELOG ✓`, changed, conflict and sync err
 
 Online mode pushes only new, never-linked QSOs. A full manual/startup/shutdown sync handles downloads, edits, deletions, confirmation status and conflicts. Automatic full sync displays a blocking progress window and a final summary before the app becomes usable or closes.
 
+The QRZ, LoTW, eQSL, ClubLog and DCL columns show status supplied by Wavelog when available. Since v0.19.0, confirmation requests are restricted to station locations belonging to the active logger profile. ClubLog upload state is also read from Wavelog ADIF, while received confirmations preferably come from the confirmation API.
+
 ADIF import validates records, creates a ZIP backup, skips duplicates and verifies the merged log. Export writes the current profile log. Since 0.17.0 each profile uses one continuous ADI file; older daily files are backed up and safely merged.
 
 ## 7. Statistics
@@ -59,6 +61,19 @@ Statistics are calculated only from the local ADI log. Filter by period and oper
 ![CAT Setup](../screenshots/en/cat-setup.png)
 
 Select the radio model, interface or network target, serial parameters and polling interval. Save, then start CAT or test the connection. CAT deliberately starts manually after every app launch. Frequency and safe mode information feed normal, Fast and contest logging. TUNE/ATU asks for confirmation, turns red while active and never enables PTT by itself.
+
+### FLRig over the network
+
+![FLRig address and automatic discovery](../screenshots/en/cat-flrig.png)
+
+Select **FLRig** as the radio. The serial interface field changes to **FLRig address (IP/hostname:port)**. The default is `127.0.0.1:12345` when FLRig runs on the same computer.
+
+- The endpoint always remains directly editable.
+- **Find FLRig** checks the local computer first, followed by a bounded search of private local IPv4 networks on the FLRig default port and any port already entered manually.
+- A candidate is accepted only when the FLRig XML-RPC service answers; an open TCP port alone is not enough.
+- Save the CAT settings after selecting a result, or test the connection directly.
+
+Discovery runs only when **Find FLRig** is clicked. Manual configuration remains available when nothing is found. Enter the endpoint directly when a firewall, another subnet, IPv6 or a custom network setup prevents discovery. FLRig must expose its XML-RPC service on the intended network interface.
 
 ## 9. DX Cluster
 

@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/USER_GUIDE.md)
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.18.4. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.19.0. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -236,7 +236,7 @@ Ein QSO kann lokal bearbeitet oder gelöscht werden. Bei einem Konflikt entschei
 
 Bei `SYNC-FEHLER` zeigt die Detailzeile unter der Tabelle die gespeicherte technische Ursache des ausgewählten QSOs. Eine Stationsprofil-Abweichung wird dort ausdrücklich genannt. Sie wird nicht automatisch repariert oder gelöscht.
 
-Die Spalten QRZ, LoTW, eQSL und DCL zeigen den von Wavelog gelieferten Bestätigungsstatus, sofern die API ihn bereitstellt.
+Die Spalten QRZ, LoTW, eQSL, ClubLog und DCL zeigen den von Wavelog gelieferten Bestätigungsstatus, sofern die API ihn bereitstellt. Seit v0.19.0 werden Confirmation-Abfragen auf die Station Locations des aktiven Logger-Profils begrenzt. ClubLog-Uploadstatus wird zusätzlich aus dem Wavelog-ADIF übernommen; empfangene Bestätigungen stammen bevorzugt aus der Confirmation-API.
 
 ### 9.1 Online-Modus
 
@@ -281,6 +281,19 @@ Statistiken werden ausschließlich aus dem lokalen Logbuch berechnet. Filterbar 
 CAT startet nach jedem App-Start bewusst ausgeschaltet. Der Logger übernimmt Frequenz und Mode in normales Logging, Fast Log und Contest Logging. Ein Doppelklick auf einen DX-Spot stimmt den TRX ebenfalls ab.
 
 Beim Stoppen von CAT, Profilwechsel und Programmende wird der von der App gestartete `rigctld`-Prozess beendet.
+
+### FLRig im Netzwerk
+
+![FLRig-Adresse und automatische Suche](screenshots/cat-flrig.png)
+
+Wähle als Funkgerät **FLRig**. Das Feld für die serielle Schnittstelle wird dann zu **FLRig-Adresse (IP/Hostname:Port)**. Die Standardadresse ist `127.0.0.1:12345`, wenn FLRig auf demselben Rechner läuft.
+
+- Die Adresse kann jederzeit direkt von Hand eingetragen oder geändert werden.
+- **FLRig suchen** prüft zuerst den eigenen Rechner und danach begrenzt die privaten lokalen IPv4-Netze auf dem FLRig-Standardport sowie einem bereits manuell eingetragenen Port.
+- Ein Treffer wird nur übernommen, wenn der XML-RPC-Dienst von FLRig tatsächlich antwortet; ein lediglich offener Port genügt nicht.
+- Nach der Auswahl die CAT-Einstellungen speichern oder die Verbindung direkt testen.
+
+Die Netzwerksuche startet nur durch einen Klick auf **FLRig suchen**. Wird nichts gefunden, bleibt die manuelle Eingabe vollständig nutzbar. Bei einer Firewall, einem anderen Subnetz, IPv6 oder einem ungewöhnlichen Port trage die Adresse daher direkt ein. FLRig muss seinen XML-RPC-Dienst für die gewünschte Netzwerkschnittstelle bereitstellen.
 
 ### TUNE / ATU
 

@@ -2,6 +2,24 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.19.0] - 2026-09-04
+
+### Added
+
+- FLRig kann im CAT Setup mit einer frei editierbaren `IP/Hostname:Port`-Adresse genutzt werden
+- optionale FLRig-Suche auf dem eigenen Rechner und in begrenzten privaten IPv4-Netzen mit eindeutiger XML-RPC-Erkennung
+- ClubLog-Status in der vorhandenen QSL-Anzeige des Logbuchs und der Statistik
+
+### Changed
+
+- Confirmation-Abfragen verwenden den finalen Wavelog-3.2.0-Vertrag und sind auf die erlaubten Station Locations begrenzt
+- Wavelog-API-Fehler enthalten in der sichtbaren Ursache zusätzlich Fehlercode und strukturierte Details
+- deutsche und englische CAT-, Sync- und Fehlerhilfe dokumentieren FLRig und ClubLog
+
+### Migration
+
+- vorhandene `qsl_meta`-Tabellen werden automatisch und verlustfrei um die Spalte `clublog` erweitert
+
 ## [0.18.4] - 2026-08-30
 
 - automatische Windows-Updates ersetzen und starten die tatsächlich gestartete EXE unabhängig von ihrem Speicherort oder individuellen Dateinamen
@@ -28,8 +46,6 @@
 - Sprachwahl unter Einstellungen → Allgemein gilt dokumentiert appweit für alle Stationsprofile
 
 Alle wesentlichen Änderungen dieses Projekts werden hier dokumentiert. Das Format orientiert sich an Keep a Changelog; Versionsnummern folgen Semantic Versioning.
-
-## [Unreleased]
 
 ## [0.18.1] - 2026-08-29
 
