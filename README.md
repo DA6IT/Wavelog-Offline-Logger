@@ -23,7 +23,7 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - bidirektionaler Abgleich von Wavelog-Contest-Sessions und deren QSO-Zuordnungen; Session-IDs werden automatisch übernommen
 - Callbook-Daten über Wavelog oder direkt über QRZ.com, einschließlich Stationsfoto
 - optionale Desktop-Benachrichtigung nach einem lokal gespeicherten QSO
-- CAT über mitgeliefertes Hamlib, inklusive TUNE/ATU
+- CAT über mitgeliefertes Hamlib, inklusive TUNE/ATU und manuellem Windows-Hamlib-Updater mit Rückfallversion
 - Telnet-DX-Cluster, Filter, Worked-Markierung und Spotversand
 - WSJT-X- und ADIF-Empfang über UDP
 - deutsche und englische Oberfläche, Light- und Dark-Theme
@@ -92,7 +92,7 @@ Der Logger ersetzt Wavelog nicht. Er ergänzt es für portable Einsätze, DXpedi
 
 **[Free code signing provided by SignPath.io, certificate by SignPath Foundation](CODE_SIGNING_POLICY.md)**
 
-Die Aufnahme bei SignPath ist vorbereitet, aber noch nicht abgeschlossen. v0.19.0 bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
+Die Aufnahme bei SignPath ist vorbereitet, aber noch nicht abgeschlossen. v0.19.1 bleibt deshalb transparent als unsigniert gekennzeichnet. Nach der Freigabe werden künftige Windows-Pakete im kontrollierten CI-Prozess signiert.
 
 ## Dokumentation
 

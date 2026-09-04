@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/USER_GUIDE.md)
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.19.0. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.19.1. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -281,6 +281,14 @@ Statistiken werden ausschließlich aus dem lokalen Logbuch berechnet. Filterbar 
 CAT startet nach jedem App-Start bewusst ausgeschaltet. Der Logger übernimmt Frequenz und Mode in normales Logging, Fast Log und Contest Logging. Ein Doppelklick auf einen DX-Spot stimmt den TRX ebenfalls ab.
 
 Beim Stoppen von CAT, Profilwechsel und Programmende wird der von der App gestartete `rigctld`-Prozess beendet.
+
+### Hamlib aktualisieren
+
+Unter Windows kann **Nach Update suchen** im CAT Setup jederzeit von Hand ausgeführt werden. Die App berücksichtigt ausschließlich stabile Hamlib-Versionen, lädt das offizielle Windows-x64-Paket aus dem Hamlib-GitHub-Release und prüft die von GitHub veröffentlichte SHA-256-Summe. Erst danach wird `rigctld --version` als Funktionstest ausgeführt und die neue Laufzeit aktiviert. Eine laufende CAT-Verbindung wird vorher beendet.
+
+Die zuvor verwendete Laufzeit bleibt als Rückfallkopie erhalten. Mit **Vorherige Version wiederherstellen** lassen sich aktuelle und vorige Version wieder tauschen, falls ein Funkgerät mit der neuen Hamlib-Version schlechter arbeitet. Logger-Profile, CAT-Einstellungen und QSOs werden dabei nicht verändert.
+
+Unter Linux und macOS bleibt Hamlib Bestandteil des jeweiligen App-Pakets, weil dort plattform- und architekturspezifisch gebaut beziehungsweise signiert werden muss. Dort erfolgt das Hamlib-Update deshalb weiterhin mit einem normalen App-Update.
 
 ### FLRig im Netzwerk
 

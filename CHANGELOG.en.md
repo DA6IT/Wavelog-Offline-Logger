@@ -2,6 +2,14 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.19.1 — 2026-09-05
+
+- unified dark-mode contrast for entries, combo boxes and their drop-down lists, tables, tabs, lists and disabled controls
+- the TUNE button can start the saved CAT connection automatically when required
+- the FTX-1 uses `AC003` through Hamlib's raw-command bridge because the current beta backend still maps generic `vfo_op TUNE` incorrectly to `AC002`
+- manually triggered Windows Hamlib updater in CAT Setup using the official GitHub release, SHA-256 verification and a runtime test before activation
+- the previously used Hamlib version is retained for rollback; Linux and macOS continue to receive Hamlib through the verified application packages
+
 ## 0.19.0 — 2026-09-04
 
 - FLRig can be used from CAT Setup through a freely editable `IP/hostname:port` endpoint

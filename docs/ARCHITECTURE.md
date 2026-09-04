@@ -54,6 +54,10 @@ Der vollständige Download filtert die token-sichtbare QSO-Liste zusätzlich nac
 
 Verwaltet den gebündelten `rigctld`-Prozess, liest die Hamlib-Modellliste, erkennt Windows-COM-Ports und ordnet Funkgerätemodi den Logger-/ADIF-Modi zu. CAT-Einstellungen werden über die bestehende profilbezogene Einstellungsdatenbank gespeichert.
 
+### `hamlib_update.py`
+
+Implementiert die ausschließlich manuell gestartete Hamlib-Aktualisierung. Unter Windows werden nur stabile Releases berücksichtigt. Downloadquelle, SHA-256-Prüfung, sichere ZIP-Extraktion, Funktionstest und atomarer Wechsel zwischen aktueller und vorheriger Laufzeit sind von der CAT-Prozesssteuerung getrennt. Linux und macOS verwenden weiterhin die mit dem jeweiligen Anwendungspaket gebaute Hamlib-Laufzeit.
+
 ### `dx_cluster.py`
 
 Implementiert eine manuell gestartete Telnet-Sitzung mit Aushandlung, profilbezogenen Serverdaten, DXSpider-Spot-Parser, Mode-Erkennung und explizitem DX-Spot-Versand. Empfangene Spots bleiben flüchtige UI-Daten; nur eine bewusste Übernahme füllt das QSO-Formular. CAT-Abstimmung läuft getrennt über `cat_control.py`, und kein Spot erzeugt automatisch ein ADI-QSO.

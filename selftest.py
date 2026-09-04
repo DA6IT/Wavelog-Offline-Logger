@@ -1,9 +1,12 @@
 import base64
+import io
+import json
 import os
 from pathlib import Path
 import sqlite3
 import sys
 import threading
+import zipfile
 import xmlrpc.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from tempfile import TemporaryDirectory
@@ -731,7 +734,7 @@ print("HASH MIGRATION SELFTEST OK")
 # CAT/Hamlib configuration, model parsing and logger-field mapping. These
 # tests deliberately need neither a connected radio nor a Hamlib installation.
 from cat_control import (
-    DEFAULT_FLRIG_ENDPOINT, FLRIG_MODEL_ID, CatConfig, build_rigctld_args,
+    DEFAULT_FLRIG_ENDPOINT, FLRIG_MODEL_ID, FTX1_MODEL_ID, CatConfig, build_rigctld_args,
     discover_flrig, format_frequency_mhz, hamlib_mode_for_logger,
     map_hamlib_mode, parse_network_endpoint, parse_rigctld_models, probe_flrig,
 )
@@ -916,6 +919,76 @@ with patch("cat_control._rigctld_set_command") as set_command:
 with patch("cat_control._rigctld_set_command") as set_command:
     frequency_manager.start_tuner()
     set_command.assert_called_once_with("127.0.0.1", 4550, "G TUNE")
+frequency_manager._config = CatConfig(enabled=True, model_id=FTX1_MODEL_ID, device="COM5", port=4550)
+with patch("cat_control._rigctld_extended_command", return_value="send_cmd: AC;\nReply: AC100;\x00\nRPRT 0\n") as query_command, \
+        patch("cat_control._rigctld_extended_set_command") as set_command:
+    frequency_manager.start_tuner()
+    query_command.assert_called_once_with("127.0.0.1", 4550, "+w AC;")
+    assert [(item.args, item.kwargs) for item in set_command.call_args_list] == [
+        (("127.0.0.1", 4550, "+w AC101;"), {"no_reply_ok": True}),
+        (("127.0.0.1", 4550, "+w AC103;"), {"no_reply_ok": True}),
+    ]
+
+with patch("cat_control._rigctld_extended_command", return_value="Reply: AC021;\x00\nRPRT 0\n") as query_command, \
+        patch("cat_control._rigctld_extended_set_command") as set_command:
+    frequency_manager.start_tuner()
+    set_command.assert_called_once_with(
+        "127.0.0.1", 4550, "+w AC023;", no_reply_ok=True,
+    )
+
+with patch(
+    "cat_control._rigctld_extended_command",
+    side_effect=__import__("cat_control")._RigctldResponseTimeout("no CAT write reply"),
+):
+    __import__("cat_control")._rigctld_extended_set_command(
+        "127.0.0.1", 4550, "+w AC003;", no_reply_ok=True,
+    )
+
+# A CAT poll and a tuner click originate in separate workers.  They must never
+# open concurrent clients against the single rigctld/serial command stream.
+frequency_manager._config = CatConfig(enabled=True, model_id=1, device="", port=4550)
+poll_entered = threading.Event()
+release_poll = threading.Event()
+tuner_sent = threading.Event()
+io_errors = []
+
+def simulated_read(host, port, command, expected_lines):
+    if command == "f":
+        poll_entered.set()
+        assert release_poll.wait(2.0), "test did not release the simulated CAT poll"
+        return ["14200000"]
+    assert command == "m"
+    return ["USB", "2400"]
+
+def simulated_set(host, port, command):
+    tuner_sent.set()
+
+def poll_manager():
+    try:
+        frequency_manager.read("USB")
+    except Exception as exc:
+        io_errors.append(exc)
+
+def tune_manager():
+    try:
+        frequency_manager.start_tuner()
+    except Exception as exc:
+        io_errors.append(exc)
+
+with patch("cat_control._rigctld_command", side_effect=simulated_read), \
+        patch("cat_control._rigctld_set_command", side_effect=simulated_set):
+    poll_thread = threading.Thread(target=poll_manager)
+    tune_thread = threading.Thread(target=tune_manager)
+    poll_thread.start()
+    assert poll_entered.wait(2.0)
+    tune_thread.start()
+    assert not tuner_sent.wait(0.15), "TUNE overlapped the active CAT poll"
+    release_poll.set()
+    poll_thread.join(2.0)
+    tune_thread.join(2.0)
+
+assert not poll_thread.is_alive() and not tune_thread.is_alive()
+assert tuner_sent.is_set() and not io_errors
 frequency_manager.stop()
 
 print("CAT SELFTEST OK")
@@ -1550,3 +1623,71 @@ with TemporaryDirectory() as d:
     assert first["imported"] == 1 and second["imported"] == 0 and second["skipped"] == 1
 
 print("XOTA AND ADIF IMPORT/EXPORT SELFTEST OK")
+
+# Hamlib updates are selected only from stable official Windows
+# assets with a GitHub-provided SHA-256 digest. Archive paths are flattened
+# into the isolated runtime directory and traversal is rejected.
+from hamlib_update import (
+    HamlibUpdateError, _safe_extract_runtime, find_latest_windows_release,
+)
+
+class FakeJsonResponse:
+    def __init__(self, payload): self.payload = payload
+    def __enter__(self): return self
+    def __exit__(self, *_args): return False
+    def read(self, amount=-1):
+        if not self.payload:
+            return b""
+        if amount is None or amount < 0:
+            amount = len(self.payload)
+        chunk, self.payload = self.payload[:amount], self.payload[amount:]
+        return chunk
+
+release_payload = json.dumps([
+    {
+        "tag_name": "5.0.0", "draft": False, "prerelease": False,
+        "html_url": "https://github.com/Hamlib/Hamlib/releases/tag/5.0.0",
+        "assets": [{
+            "name": "hamlib-w64-5.0.0.zip",
+            "browser_download_url": "https://github.com/Hamlib/Hamlib/releases/download/5.0.0/hamlib-w64-5.0.0.zip",
+            "digest": "sha256:" + "b" * 64,
+        }],
+    },
+    {
+        "tag_name": "4.8.0", "draft": False, "prerelease": False,
+        "html_url": "https://github.com/Hamlib/Hamlib/releases/tag/4.8.0",
+        "assets": [{
+            "name": "hamlib-w64-4.8.0.zip",
+            "browser_download_url": "https://github.com/Hamlib/Hamlib/releases/download/4.8.0/hamlib-w64-4.8.0.zip",
+            "digest": "sha256:" + "a" * 64,
+        }],
+    },
+]).encode("utf-8")
+selected = find_latest_windows_release(
+    "rigctld Hamlib 4.7.2", opener=lambda *_args, **_kwargs: FakeJsonResponse(release_payload),
+)
+assert selected and selected.version == "5.0.0" and selected.sha256 == "b" * 64
+
+with TemporaryDirectory() as d:
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w") as archive:
+        archive.writestr("hamlib-w64-4.8.0/bin/rigctld.exe", b"test executable")
+        archive.writestr("hamlib-w64-4.8.0/bin/libhamlib-4.dll", b"test dll")
+        archive.writestr("hamlib-w64-4.8.0/COPYING.txt", b"license")
+    extracted = Path(d) / "runtime"
+    _safe_extract_runtime(archive_buffer.getvalue(), extracted)
+    assert (extracted / "rigctld.exe").read_bytes() == b"test executable"
+    assert (extracted / "libhamlib-4.dll").is_file()
+
+with TemporaryDirectory() as d:
+    unsafe_buffer = io.BytesIO()
+    with zipfile.ZipFile(unsafe_buffer, "w") as archive:
+        archive.writestr("../bin/rigctld.exe", b"unsafe")
+    try:
+        _safe_extract_runtime(unsafe_buffer.getvalue(), Path(d) / "runtime")
+    except HamlibUpdateError:
+        pass
+    else:
+        raise AssertionError("Hamlib archive traversal must be rejected")
+
+print("HAMLIB UPDATE SELFTEST OK")

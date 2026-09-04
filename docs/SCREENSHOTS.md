@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/SCREENSHOTS.md)
 
-Die Bilder zeigen Version 0.19.0 mit automatisch erzeugten, isolierten Demo-Daten. Der Prozess greift weder auf echte Logger-Profile noch auf Funkgerät, Netzwerk, API-Tokens oder persönliche ADI-Dateien zu.
+Die Bilder zeigen Version 0.19.1 mit automatisch erzeugten, isolierten Demo-Daten. Der Prozess greift weder auf echte Logger-Profile noch auf Funkgerät, Netzwerk, API-Tokens oder persönliche ADI-Dateien zu.
 
 ## QSO loggen
 
