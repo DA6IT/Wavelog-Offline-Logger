@@ -2,6 +2,14 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.19.1] - 2026-09-05
+
+- Dark-Mode-Kontraste für Eingaben, Comboboxen samt Auswahlliste, Tabellen, Register, Listen und deaktivierte Bedienelemente vereinheitlicht
+- der TUNE-Knopf kann die gespeicherte CAT-Verbindung bei Bedarf selbst starten
+- FTX-1 verwendet über Hamlibs Raw-Command-Brücke `AC003`, da das aktuelle Beta-Backend den allgemeinen `vfo_op TUNE` noch fälschlich auf `AC002` abbildet
+- manuell auslösbarer Hamlib-Updater im CAT Setup für Windows mit offizieller GitHub-Quelle, SHA-256-Prüfung und Funktionstest vor der Aktivierung
+- die zuvor verwendete Hamlib-Version wird gesichert und kann im CAT Setup wiederhergestellt werden; Linux und macOS bleiben an die geprüften App-Pakete gekoppelt
+
 ## [0.19.0] - 2026-09-04
 
 ### Added

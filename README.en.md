@@ -22,7 +22,7 @@ An offline-first desktop logger for amateur radio: log contacts in the field eve
 - bidirectional Wavelog contest-session and QSO assignment synchronization
 - Wavelog or direct QRZ.com callbook data, including station photos
 - optional desktop notification after a locally saved QSO
-- bundled Hamlib CAT control including TUNE/ATU
+- bundled Hamlib CAT control including TUNE/ATU and a manual Windows Hamlib updater with rollback
 - Telnet DX Cluster, filters, worked markers and public spotting
 - WSJT-X live status and logged-contact reception over UDP
 - complete German and English UI, Light and Dark themes

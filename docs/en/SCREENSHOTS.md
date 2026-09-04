@@ -1,4 +1,4 @@
-# Screenshot gallery 0.19.0
+# Screenshot gallery 0.19.1
 
 [Deutsch](../SCREENSHOTS.md) · **English**
 

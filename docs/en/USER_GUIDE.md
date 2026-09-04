@@ -1,4 +1,4 @@
-# User guide — DA6IT.de Wavelog Offline Logger 0.19.0
+# User guide — DA6IT.de Wavelog Offline Logger 0.19.1
 
 [Deutsch](../USER_GUIDE.md) · **English**
 
@@ -61,6 +61,14 @@ Statistics are calculated only from the local ADI log. Filter by period and oper
 ![CAT Setup](../screenshots/en/cat-setup.png)
 
 Select the radio model, interface or network target, serial parameters and polling interval. Save, then start CAT or test the connection. CAT deliberately starts manually after every app launch. Frequency and safe mode information feed normal, Fast and contest logging. TUNE/ATU asks for confirmation, turns red while active and never enables PTT by itself.
+
+### Updating Hamlib
+
+On Windows, **Check for update** in CAT Setup performs an on-demand check. The app accepts stable Hamlib releases only, downloads the official Windows x64 archive from the Hamlib GitHub release, verifies GitHub's published SHA-256 digest and runs `rigctld --version` before activating it. Any active CAT connection is stopped first.
+
+The previous runtime is retained. Use **Restore previous version** to swap back if a radio works less reliably with the update. Profiles, CAT settings and QSOs are never changed by this operation.
+
+On Linux and macOS, Hamlib remains part of the platform-specific application package because it must be built and, where applicable, signed for that platform and architecture. It is therefore updated with the regular app package.
 
 ### FLRig over the network
 

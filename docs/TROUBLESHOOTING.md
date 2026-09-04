@@ -16,6 +16,8 @@ Die macOS-Pakete sind technisch ad-hoc signiert, aber noch nicht mit einem koste
 
 Prüfe unter **CAT Setup** das gewählte Funkgerätemodell, den seriellen Port, die Baudrate und die seriellen Parameter. Der Port darf nicht gleichzeitig von einer anderen CAT-Anwendung belegt sein. Hamlib ist in den Windows- und macOS-Builds bereits enthalten und muss nicht separat installiert werden; der zum Funkgerät oder USB-Adapter gehörende Treiber kann dennoch erforderlich sein.
 
+Schlägt ein manuelles Hamlib-Update unter Windows fehl, bleibt die bisherige Laufzeit aktiv. Prüfe Internetverbindung und GitHub-Erreichbarkeit und versuche es später erneut. Funktioniert CAT erst seit einem erfolgreichen Hamlib-Update schlechter, verwende im CAT Setup **Vorherige Version wiederherstellen**.
+
 Bei **FLRig** wird statt eines COM-Ports eine Adresse im Format `IP/Hostname:Port` benötigt. Lokal ist dies normalerweise `127.0.0.1:12345`. Falls **FLRig suchen** keinen Treffer liefert, prüfe den in FLRig eingestellten XML-RPC-Port und die Firewall und trage die Adresse manuell ein. Die automatische Suche bleibt bewusst auf den eigenen Rechner und begrenzte private IPv4-Netze beschränkt; andere Subnetze und IPv6-Ziele müssen manuell angegeben werden.
 
 ## DX Cluster verbindet sich nicht

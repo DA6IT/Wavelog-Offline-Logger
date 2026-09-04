@@ -19,6 +19,7 @@ from typing import Callable
 
 HAMLIB_VERSION = "4.7.2"
 FLRIG_MODEL_ID = 4
+FTX1_MODEL_ID = 1051
 DEFAULT_FLRIG_ENDPOINT = "127.0.0.1:12345"
 FLRIG_DISCOVERY_PORTS = tuple(range(12345, 12356))
 CAT_BAUD_RATES = (300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
@@ -31,6 +32,10 @@ CAT_LINE_STATES = ("Unset", "ON", "OFF")
 
 class CatError(RuntimeError):
     pass
+
+
+class _RigctldResponseTimeout(CatError):
+    """The command was delivered locally, but rigctld produced no reply."""
 
 
 @dataclass(frozen=True)
@@ -283,6 +288,12 @@ def find_hamlib_dir() -> Path:
         candidates.append(Path(override))
     here = Path(__file__).resolve().parent
     bundle_root = Path(getattr(sys, "_MEIPASS", here))
+    if sys.platform == "win32":
+        local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+        candidates.append(
+            local_app_data / "AFU-Tools" / "WavelogOfflineLogger"
+            / "hamlib-runtime" / "windows-x64" / "current"
+        )
     candidates.extend(
         [
             bundle_root / "hamlib",
@@ -531,10 +542,87 @@ def _rigctld_set_command(host: str, port: int, command: str) -> None:
         raise CatError(f"Keine Verbindung zum lokalen rigctld: {exc}") from exc
 
 
+def _rigctld_extended_command(host: str, port: int, command: str) -> str:
+    """Run an extended-protocol command and consume output through RPRT.
+
+    Raw ``send_cmd`` replies are not line-oriented and may contain a NUL byte
+    immediately before rigctld's final status.  Reading only the first line,
+    as for ordinary setters, therefore leaves the client waiting forever.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=2.0) as connection:
+            connection.settimeout(4.0)
+            connection.sendall((command.rstrip("\n") + "\n").encode("ascii"))
+            response = bytearray()
+            while len(response) < 65536:
+                chunk = connection.recv(4096)
+                if not chunk:
+                    raise CatError("rigctld hat die Verbindung unerwartet geschlossen")
+                response.extend(chunk)
+                status_match = re.search(rb"(?:^|[\r\n\x00])RPRT (-?\d+)(?:\r?\n|$)", response)
+                if status_match:
+                    status = int(status_match.group(1))
+                    if status != 0:
+                        raise CatError(f"rigctld meldet Fehler {status}")
+                    return response.decode("ascii", errors="replace")
+            raise CatError("Antwort von rigctld war unerwartet lang")
+    except CatError:
+        raise
+    except socket.timeout as exc:
+        raise _RigctldResponseTimeout(
+            "rigctld hat den TUNE-Befehl nicht rechtzeitig beantwortet"
+        ) from exc
+    except OSError as exc:
+        raise CatError(f"Keine Verbindung zum lokalen rigctld: {exc}") from exc
+
+
+def _rigctld_extended_set_command(
+    host: str, port: int, command: str, *, no_reply_ok: bool = False,
+) -> None:
+    try:
+        _rigctld_extended_command(host, port, command)
+    except _RigctldResponseTimeout:
+        # Yaesu CAT write commands intentionally have no answer.  Hamlib's raw
+        # bridge still waits for one and can therefore time out after the rig
+        # has already performed the requested operation.  This exception is
+        # safe only after a successful AC query proved the connection below.
+        if not no_reply_ok:
+            raise
+
+
+def _ftx1_tuner_command(host: str, port: int) -> None:
+    """Start the tuner selected by the FTX-1 itself.
+
+    The three AC parameters select internal/external, tuner/ATAS and the
+    requested operation.  Hard-coding ``AC003`` therefore only works for the
+    internal tuner of an Optima.  Read the current selection first, preserve
+    P1/P2 and then issue the matching ON/START sequence.
+    """
+    response = _rigctld_extended_command(host, port, "+w AC;")
+    matches = re.findall(r"AC([01])([02])([0-3]);", response)
+    if not matches:
+        raise CatError(
+            "Der am FTX-1 ausgewählte Antennentuner konnte nicht ermittelt werden. "
+            "Bitte den Tuner am Funkgerät einmal ein- und wieder ausschalten."
+        )
+    tuner_type, tuner_mode, tuner_state = matches[-1]
+    if tuner_mode == "0" and tuner_state == "0":
+        _rigctld_extended_set_command(
+            host, port, f"+w AC{tuner_type}{tuner_mode}1;", no_reply_ok=True,
+        )
+    _rigctld_extended_set_command(
+        host, port, f"+w AC{tuner_type}{tuner_mode}3;", no_reply_ok=True,
+    )
+
+
 class HamlibManager:
     def __init__(self, rigctld: Path | None = None):
         self.rigctld = Path(rigctld) if rigctld else None
         self._lock = threading.RLock()
+        # rigctld and a serial CAT connection must be treated as one ordered
+        # command stream.  Polling and user actions (for example TUNE) run in
+        # different worker threads, so serialize complete transactions here.
+        self._io_lock = threading.RLock()
         self._process: subprocess.Popen[str] | None = None
         self._config: CatConfig | None = None
         self._generation = 0
@@ -656,8 +744,9 @@ class HamlibManager:
             config = self._config
         if process is None or config is None or process.poll() is not None:
             raise CatError("CAT ist nicht gestartet")
-        frequency_line = _rigctld_command("127.0.0.1", config.port, "f", 1)[0]
-        mode_lines = _rigctld_command("127.0.0.1", config.port, "m", 2)
+        with self._io_lock:
+            frequency_line = _rigctld_command("127.0.0.1", config.port, "f", 1)[0]
+            mode_lines = _rigctld_command("127.0.0.1", config.port, "m", 2)
         try:
             frequency_hz = int(round(float(frequency_line)))
         except ValueError as exc:
@@ -681,7 +770,8 @@ class HamlibManager:
             config = self._config
         if process is None or config is None or process.poll() is not None:
             raise CatError("CAT ist nicht gestartet")
-        _rigctld_set_command("127.0.0.1", config.port, f"F {frequency_hz}")
+        with self._io_lock:
+            _rigctld_set_command("127.0.0.1", config.port, f"F {frequency_hz}")
 
 
     def set_mode(self, logger_mode: str, frequency_hz: int = 0) -> None:
@@ -694,12 +784,14 @@ class HamlibManager:
         if process is None or config is None or process.poll() is not None:
             raise CatError("CAT ist nicht gestartet")
         # Passband 0 asks Hamlib/the backend for the normal filter width.
-        _rigctld_set_command("127.0.0.1", config.port, f"M {hamlib_mode} 0")
+        with self._io_lock:
+            _rigctld_set_command("127.0.0.1", config.port, f"M {hamlib_mode} 0")
 
     def set_frequency_and_mode(self, frequency_hz: int, logger_mode: str = "") -> None:
-        self.set_frequency(frequency_hz)
-        if (logger_mode or "").strip():
-            self.set_mode(logger_mode, frequency_hz)
+        with self._io_lock:
+            self.set_frequency(frequency_hz)
+            if (logger_mode or "").strip():
+                self.set_mode(logger_mode, frequency_hz)
 
     def start_tuner(self) -> None:
         """Ask Hamlib to run the radio's one-shot automatic tuner operation."""
@@ -708,6 +800,14 @@ class HamlibManager:
             config = self._config
         if process is None or config is None or process.poll() is not None:
             raise CatError("CAT ist nicht gestartet")
-        # Hamlib's documented vfo_op command. This delegates the complete,
+        # Hamlib's documented vfo_op command delegates the complete,
         # radio-specific tune cycle to the backend and never toggles PTT here.
-        _rigctld_set_command("127.0.0.1", config.port, "G TUNE")
+        # Hamlib 4.7 advertises TUNE for the FTX-1 but its beta backend maps it
+        # to AC002.  Yaesu's CAT reference uses all three AC parameters to
+        # distinguish the internal tuner, an external tuner and ATAS.  Read
+        # that selection from the radio and preserve it for the start command.
+        with self._io_lock:
+            if config.model_id == FTX1_MODEL_ID:
+                _ftx1_tuner_command("127.0.0.1", config.port)
+            else:
+                _rigctld_set_command("127.0.0.1", config.port, "G TUNE")

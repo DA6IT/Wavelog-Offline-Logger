@@ -167,7 +167,7 @@ try {
     }
     Invoke-Checked $python @("selftest.py")
     Invoke-Checked $python @(
-        "-m", "py_compile", "app.py", "logger_core.py", "callbook.py", "cat_control.py",
+        "-m", "py_compile", "app.py", "logger_core.py", "callbook.py", "cat_control.py", "hamlib_update.py",
         "dx_cluster.py", "external_logging.py",
         "notifications.py", "ui_preferences.py", "update_check.py", "data_backup.py", "whats_new.py",
         "xota.py", "scripts\capture-doc-screenshots.py", "scripts\set-windows-icon.py"
@@ -240,6 +240,7 @@ try {
         "bootstrap_windows.go",
         "callbook.py",
         "cat_control.py",
+        "hamlib_update.py",
         "dx_cluster.py",
         "external_logging.py",
         "logger_core.py",

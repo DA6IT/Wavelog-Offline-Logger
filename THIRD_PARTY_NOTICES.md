@@ -7,6 +7,11 @@ Windows x64 binaries from the Hamlib project, currently Hamlib 4.7.2. The
 macOS and Linux builds contain `rigctld` compiled from the corresponding
 official source archive for the target architecture.
 
+On Windows, the user may explicitly install a newer stable official Hamlib
+x64 release from CAT Setup. The application verifies the GitHub release asset
+SHA-256 digest before activation and retains the license and notice files from
+that archive alongside the updated runtime.
+
 - Project: https://github.com/Hamlib/Hamlib
 - Release: https://github.com/Hamlib/Hamlib/releases/tag/4.7.2
 - Source archive and corresponding source code are available from that release.

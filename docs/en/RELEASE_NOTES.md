@@ -1,17 +1,16 @@
-# DA6IT.de Wavelog Offline Logger v0.19.0
+# DA6IT.de Wavelog Offline Logger v0.19.1
 
-Version 0.19.0 extends CAT and Wavelog integration while preserving the offline-first workflow and full bidirectional QSO synchronization.
+Version 0.19.1 improves CAT/TUNE, dark-mode presentation and maintenance of the bundled Hamlib runtime while preserving the offline-first workflow and existing Wavelog synchronization.
 
 Highlights:
 
-- FLRig accepts a freely editable `IP/hostname:port` endpoint, defaulting to `127.0.0.1:12345` locally.
-- Optional discovery checks the local computer and bounded private IPv4 networks and positively identifies the FLRig XML-RPC service.
-- Existing QSO and contest synchronization was validated against the final Wavelog 3.2.0 API v2 contract.
-- ClubLog status appears in the existing logbook and statistics QSL displays.
-- Existing profile databases gain the ClubLog field automatically without losing QRZ, LoTW, eQSL or DCL values.
-- Confirmation requests are scoped to the permitted station locations of the active logger profile.
-- Structured Wavelog API error codes and details remain visible as synchronization failure reasons.
+- Entries, combo boxes and their drop-down lists, tables, tabs, lists and disabled controls now have consistent dark-mode contrast.
+- TUNE can start the saved CAT connection when required.
+- On the FTX-1, the selected tuner type is read from the radio and started with the matching Yaesu CAT command.
+- CAT polling and user commands are serialized so that they cannot interfere with each other.
+- Windows users can manually check for and install stable Hamlib updates from CAT Setup.
+- Official Windows x64 archives are accepted only after source and SHA-256 verification and a successful local `rigctld.exe` runtime test.
+- The previously used Hamlib runtime remains available for rollback.
+- Linux and macOS continue to receive Hamlib through their platform-specific application packages.
 
-Manual FLRig entry remains available at all times. Full QSO comparison, remote edit/delete detection, conflicts, club-station protection and older contest fallbacks remain unchanged.
-
-The application contains complete German and English documentation and remains intentionally unsigned on Windows while SignPath onboarding is pending. It collects no telemetry or usage counts.
+Profiles, CAT settings and QSOs are never changed by a Hamlib update or rollback. Complete German and English documentation is included. The Windows package remains intentionally unsigned while SignPath onboarding is pending, and the application collects no telemetry or usage counts.

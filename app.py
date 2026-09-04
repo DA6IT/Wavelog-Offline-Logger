@@ -32,8 +32,14 @@ from cat_control import (
     CAT_BAUD_RATES, CAT_DATA_BITS, CAT_HANDSHAKES, CAT_LINE_STATES,
     CAT_PARITIES, CAT_STOP_BITS, DEFAULT_FLRIG_ENDPOINT, FLRIG_MODEL_ID,
     CatConfig, CatError, HamlibManager,
-    RigModel, format_frequency_mhz, hamlib_version, list_rig_models,
+    RigModel, find_hamlib_dir, format_frequency_mhz, hamlib_version, list_rig_models,
     discover_flrig, list_serial_ports, map_hamlib_mode,
+)
+from hamlib_update import (
+    HamlibRelease, backup_hamlib_dir,
+    find_latest_windows_release, install_windows_release,
+    restore_previous_windows_runtime, runtime_version, usable_hamlib_dir,
+    version_from_output,
 )
 from external_logging import (
     ExternalLogError, UdpLogConfig, UdpLogEvent, UdpLogReceiver, UdpStatusEvent,
@@ -317,7 +323,10 @@ class LoggerApp(tk.Tk):
         self.cat_generation = 0
         self.cat_poll_job = None
         self.cat_poll_busy = False
+        self.cat_starting = False
+        self.hamlib_update_busy = False
         self.tuner_busy = False
+        self.tuner_start_pending = False
         self.udp_log_receiver = UdpLogReceiver(app_version=VERSION)
         atexit.register(self.udp_log_receiver.stop)
         self.udp_log_generation = 0
@@ -1116,6 +1125,23 @@ class LoggerApp(tk.Tk):
             except Exception:
                 pass
             self._style_initialized = True
+        # Tk's option database also controls the classic widgets and the
+        # otherwise native-looking Combobox drop-down list.  Without these
+        # defaults Windows can render a white list or selection with light
+        # text while the rest of the application is dark.
+        for pattern, value in (
+            ("*Listbox.background", INPUT_BG), ("*Listbox.foreground", TEXT),
+            ("*Listbox.selectBackground", ACTIVE_BG), ("*Listbox.selectForeground", TEXT),
+            ("*Listbox.highlightBackground", BORDER), ("*Listbox.highlightColor", ACCENT),
+            ("*Text.background", INPUT_BG), ("*Text.foreground", TEXT),
+            ("*Text.insertBackground", TEXT), ("*Text.selectBackground", ACTIVE_BG),
+            ("*Text.selectForeground", TEXT),
+            ("*TCombobox*Listbox.background", INPUT_BG),
+            ("*TCombobox*Listbox.foreground", TEXT),
+            ("*TCombobox*Listbox.selectBackground", ACTIVE_BG),
+            ("*TCombobox*Listbox.selectForeground", TEXT),
+        ):
+            self.option_add(pattern, value)
         style.configure("TFrame", background=BG)
         style.configure("Card.TFrame", background=CARD, relief="flat")
         style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", size(10)))
@@ -1123,7 +1149,11 @@ class LoggerApp(tk.Tk):
         style.configure("Muted.Card.TLabel", background=CARD, foreground=MUTED, font=("Segoe UI", size(9)))
         style.configure("Title.TLabel", background=BG, foreground=TEXT, font=("Segoe UI Semibold", size(20)))
         style.configure("CardTitle.TLabel", background=CARD, foreground=TEXT, font=("Segoe UI Semibold", size(12)))
-        style.configure("Call.TEntry", font=("Segoe UI Semibold", size(18)), padding=size(8, 4), fieldbackground=INPUT_BG, foreground=TEXT)
+        style.configure(
+            "Call.TEntry", font=("Segoe UI Semibold", size(18)), padding=size(8, 4),
+            fieldbackground=INPUT_BG, foreground=TEXT, insertcolor=TEXT,
+            bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER,
+        )
         style.configure(
             "Worked.Call.TEntry", font=("Segoe UI Semibold", size(18)), padding=size(8, 4),
             fieldbackground=OK_BADGE_BG, foreground=OK,
@@ -1133,11 +1163,44 @@ class LoggerApp(tk.Tk):
             fieldbackground=[("readonly", OK_BADGE_BG), ("disabled", OK_BADGE_BG), ("focus", OK_BADGE_BG)],
             foreground=[("readonly", OK), ("disabled", OK), ("focus", OK)],
         )
-        style.configure("TEntry", padding=size(6, 3), fieldbackground=INPUT_BG, foreground=TEXT)
-        style.configure("TCombobox", padding=size(5, 3), fieldbackground=INPUT_BG, background=INPUT_BG, foreground=TEXT)
+        style.configure(
+            "TEntry", padding=size(6, 3), fieldbackground=INPUT_BG, foreground=TEXT,
+            insertcolor=TEXT, bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER,
+        )
+        style.map(
+            "TEntry",
+            fieldbackground=[("disabled", SURFACE), ("readonly", INPUT_BG), ("focus", INPUT_BG)],
+            foreground=[("disabled", MUTED), ("readonly", TEXT)],
+            bordercolor=[("focus", ACCENT), ("!focus", BORDER)],
+        )
+        style.configure(
+            "TCombobox", padding=size(5, 3), fieldbackground=INPUT_BG,
+            background=INPUT_BG, foreground=TEXT, arrowcolor=TEXT,
+            bordercolor=BORDER, lightcolor=BORDER, darkcolor=BORDER,
+            selectbackground=INPUT_BG, selectforeground=TEXT,
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("disabled", SURFACE), ("readonly", INPUT_BG), ("focus", INPUT_BG)],
+            background=[("disabled", SURFACE), ("active", ACTIVE_BG), ("readonly", INPUT_BG)],
+            foreground=[("disabled", MUTED), ("readonly", TEXT)],
+            arrowcolor=[("disabled", MUTED), ("readonly", TEXT)],
+            selectbackground=[("readonly", INPUT_BG)],
+            selectforeground=[("readonly", TEXT)],
+            bordercolor=[("focus", ACCENT), ("!focus", BORDER)],
+        )
         style.configure("Primary.TButton", background=ACCENT, foreground="white", padding=padding(14, 8), borderwidth=0, font=("Segoe UI Semibold", size(10)))
-        style.map("Primary.TButton", background=[("active", ACCENT_DARK), ("disabled", DISABLED)])
+        style.map(
+            "Primary.TButton",
+            background=[("active", ACCENT_DARK), ("disabled", DISABLED)],
+            foreground=[("disabled", MUTED), ("!disabled", "white")],
+        )
         style.configure("Secondary.TButton", padding=padding(12, 7), font=("Segoe UI", size(10)), background=CARD, foreground=TEXT)
+        style.map(
+            "Secondary.TButton",
+            background=[("disabled", SURFACE), ("active", NAV_HOVER)],
+            foreground=[("disabled", MUTED), ("!disabled", TEXT)],
+        )
         style.configure("Tuning.TButton", padding=padding(12, 7), font=("Segoe UI Semibold", size(10)), background=ERR, foreground="white")
         style.map("Tuning.TButton", background=[("disabled", ERR), ("active", ERR)], foreground=[("disabled", "white")])
         style.configure("Nav.TButton", background=SIDEBAR, foreground=SIDEBAR_TEXT, padding=padding(12, 9), anchor="w", borderwidth=0, font=("Segoe UI", size(9)))
@@ -1147,20 +1210,23 @@ class LoggerApp(tk.Tk):
         style.configure("Treeview", rowheight=size(30, 20), font=("Segoe UI", size(9)), background=INPUT_BG, fieldbackground=INPUT_BG, foreground=TEXT, bordercolor=BORDER)
         style.map("Treeview", background=[("selected", ACTIVE_BG)], foreground=[("selected", TEXT)])
         style.configure("Treeview.Heading", font=("Segoe UI Semibold", size(9)), padding=size(5, 3), background=CARD, foreground=TEXT)
+        style.map("Treeview.Heading", background=[("active", NAV_HOVER)], foreground=[("active", TEXT)])
         style.configure("Stats.Horizontal.TProgressbar", troughcolor=PROGRESS_BG, background=ACCENT, borderwidth=0, thickness=size(10, 6))
         style.configure("TLabelframe", background=CARD, bordercolor=BORDER, relief="solid")
         style.configure("TLabelframe.Label", background=CARD, foreground=TEXT, font=("Segoe UI Semibold", size(10)))
         style.configure("TRadiobutton", background=CARD, foreground=TEXT)
+        style.map("TRadiobutton", background=[("active", CARD), ("disabled", CARD)], foreground=[("disabled", MUTED)])
         style.configure("TCheckbutton", background=CARD, foreground=TEXT)
+        style.map("TCheckbutton", background=[("active", CARD), ("disabled", CARD)], foreground=[("disabled", MUTED)])
         style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", padding=padding(16, 9), font=("Segoe UI", size(10)))
-        style.map("TNotebook.Tab", foreground=[("selected", ACCENT)], background=[("selected", CARD)])
+        style.configure("TNotebook.Tab", padding=padding(16, 9), font=("Segoe UI", size(10)), background=SURFACE, foreground=TEXT)
+        style.map("TNotebook.Tab", foreground=[("selected", ACCENT), ("!selected", TEXT)], background=[("selected", CARD), ("active", NAV_HOVER), ("!selected", SURFACE)])
         style.configure("Settings.TNotebook", background=BG, borderwidth=0)
-        style.configure("Settings.TNotebook.Tab", padding=padding(10, 6), font=("Segoe UI", size(9)))
+        style.configure("Settings.TNotebook.Tab", padding=padding(10, 6), font=("Segoe UI", size(9)), background=SURFACE, foreground=TEXT)
         style.map(
             "Settings.TNotebook.Tab",
-            foreground=[("selected", ACCENT)],
-            background=[("selected", ACTIVE_BG), ("active", NAV_HOVER)],
+            foreground=[("selected", ACCENT), ("!selected", TEXT)],
+            background=[("selected", ACTIVE_BG), ("active", NAV_HOVER), ("!selected", SURFACE)],
         )
 
     def _load_brand_logo(self):
@@ -3992,8 +4058,34 @@ class LoggerApp(tk.Tk):
         )
         self.cat_hamlib_info.grid(row=1, column=0, sticky="ew", pady=(4, 12))
 
+        self.hamlib_update_frame = ttk.LabelFrame(right, text="Hamlib-Updates", padding=10)
+        self.hamlib_update_frame.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        self.hamlib_update_frame.columnconfigure(0, weight=1)
+        self.hamlib_update_status = ttk.Label(
+            self.hamlib_update_frame,
+            text="Die Update-Prüfung wird nur von Hand gestartet.",
+            style="Muted.Card.TLabel",
+            wraplength=450,
+        )
+        self.hamlib_update_status.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        update_actions = ttk.Frame(self.hamlib_update_frame, style="Card.TFrame")
+        update_actions.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.hamlib_update_button = ttk.Button(
+            update_actions, text="Nach Update suchen", style="Secondary.TButton",
+            command=self._check_hamlib_update,
+        )
+        self.hamlib_update_button.pack(side="left")
+        self.hamlib_restore_button = ttk.Button(
+            update_actions, text="Vorherige Version wiederherstellen", style="Secondary.TButton",
+            command=self._restore_previous_hamlib,
+        )
+        self.hamlib_restore_button.pack(side="left", padx=(8, 0))
+        self.hamlib_update_progress = ttk.Progressbar(
+            self.hamlib_update_frame, mode="indeterminate", length=120,
+        )
+
         advanced = ttk.LabelFrame(right, text="Erweitert", padding=10)
-        advanced.grid(row=2, column=0, sticky="ew")
+        advanced.grid(row=3, column=0, sticky="ew")
         advanced.columnconfigure(1, weight=1)
         self.cat_port_var = tk.StringVar(value="4532")
         self.cat_poll_var = tk.StringVar(value="1000")
@@ -4013,8 +4105,8 @@ class LoggerApp(tk.Tk):
                 widget = ttk.Entry(advanced, textvariable=variable)
             widget.grid(row=row, column=1, sticky="ew", pady=5)
 
-        ttk.Separator(right).grid(row=3, column=0, sticky="ew", pady=16)
-        ttk.Label(right, text="CAT-Status", style="CardTitle.TLabel").grid(row=4, column=0, sticky="w")
+        ttk.Separator(right).grid(row=4, column=0, sticky="ew", pady=16)
+        ttk.Label(right, text="CAT-Status", style="CardTitle.TLabel").grid(row=5, column=0, sticky="w")
         self.cat_status_label = tk.Label(
             right,
             text="CAT ist deaktiviert.",
@@ -4025,10 +4117,10 @@ class LoggerApp(tk.Tk):
             anchor="nw",
             wraplength=470,
         )
-        self.cat_status_label.grid(row=5, column=0, sticky="ew", pady=(6, 12))
+        self.cat_status_label.grid(row=6, column=0, sticky="ew", pady=(6, 12))
 
         buttons = ttk.Frame(right, style="Card.TFrame")
-        buttons.grid(row=6, column=0, sticky="ew")
+        buttons.grid(row=7, column=0, sticky="ew")
         ttk.Button(buttons, text="Einstellungen speichern", style="Secondary.TButton", command=self.save_cat_settings).pack(side="left")
         self.cat_start_button = ttk.Button(buttons, text="CAT starten", style="Primary.TButton", command=self.start_cat)
         self.cat_start_button.pack(side="left", padx=8)
@@ -4047,7 +4139,8 @@ class LoggerApp(tk.Tk):
             justify="left",
             wraplength=470,
         )
-        hint.grid(row=7, column=0, sticky="w", pady=(16, 0))
+        hint.grid(row=8, column=0, sticky="w", pady=(16, 0))
+        self._refresh_hamlib_update_controls()
         self.after(50, self._load_cat_runtime_info)
 
     def _load_cat_runtime_info(self):
@@ -4055,8 +4148,15 @@ class LoggerApp(tk.Tk):
             try:
                 models = list_rig_models()
                 version = hamlib_version()
+                backup_version = ""
+                backup = backup_hamlib_dir(self.data_dir)
+                if sys.platform == "win32" and usable_hamlib_dir(backup):
+                    try:
+                        backup_version = runtime_version(backup)
+                    except Exception:
+                        backup_version = "unlesbar"
                 if not self.closing:
-                    self.after(0, lambda: self._cat_runtime_loaded(models, version))
+                    self.after(0, lambda: self._cat_runtime_loaded(models, version, backup_version))
             except Exception as exc:
                 if not self.closing:
                     error_message = str(exc)
@@ -4064,7 +4164,7 @@ class LoggerApp(tk.Tk):
 
         threading.Thread(target=worker, name="cat-runtime-info", daemon=True).start()
 
-    def _cat_runtime_loaded(self, models: list[RigModel], version: str):
+    def _cat_runtime_loaded(self, models: list[RigModel], version: str, backup_version: str = ""):
         self.cat_models = models
         self.cat_hamlib_info.configure(
             text=f"✓ {version}\n{len(models)} Funkgerätemodelle · vollständig lokal gebündelt · keine separate Installation",
@@ -4073,10 +4173,232 @@ class LoggerApp(tk.Tk):
         self._filter_cat_models()
         self._select_cat_model_id(self.cat_saved_model_id)
         self._update_cat_device_controls()
+        if sys.platform == "win32" and not self.hamlib_update_busy:
+            active = version_from_output(version) or version
+            backup = version_from_output(backup_version) or backup_version or "noch keine"
+            if self.language == "en":
+                backup = "none yet" if not backup_version else backup
+                self.hamlib_update_status.configure(
+                    text=f"In use: Hamlib {active} · Backed up: {backup}. Update checks are manual only."
+                )
+            else:
+                self.hamlib_update_status.configure(
+                    text=f"Aktiv: Hamlib {active} · Sicherung: {backup}. Die Update-Prüfung startet nur von Hand."
+                )
+        self._refresh_hamlib_update_controls()
 
     def _cat_runtime_failed(self, message: str):
         self.cat_hamlib_info.configure(text="✕ " + message, fg=ERR)
         self.cat_status_label.configure(text="Hamlib ist nicht verfügbar.", fg=ERR)
+
+    def _refresh_hamlib_update_controls(self):
+        if not hasattr(self, "hamlib_update_button"):
+            return
+        is_windows = sys.platform == "win32"
+        backup_available = is_windows and usable_hamlib_dir(backup_hamlib_dir(self.data_dir))
+        state = "disabled" if self.hamlib_update_busy else "normal"
+        self.hamlib_update_button.configure(state=state)
+        self.hamlib_restore_button.configure(
+            state=("normal" if backup_available and not self.hamlib_update_busy else "disabled")
+        )
+        if not is_windows and not self.hamlib_update_busy:
+            self.hamlib_update_status.configure(
+                text="Linux und macOS erhalten Hamlib zusammen mit einem App-Update."
+            )
+
+    def _set_hamlib_update_busy(self, busy: bool, text: str = ""):
+        self.hamlib_update_busy = busy
+        if text:
+            self.hamlib_update_status.configure(text=text)
+        if busy:
+            self.hamlib_update_progress.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+            self.hamlib_update_progress.start(12)
+        else:
+            self.hamlib_update_progress.stop()
+            self.hamlib_update_progress.grid_remove()
+        self._refresh_hamlib_update_controls()
+
+    def _check_hamlib_update(self):
+        if self.hamlib_update_busy or self.closing:
+            return
+        if sys.platform != "win32":
+            if self.language == "en":
+                messagebox.showinfo(
+                    "Hamlib updates",
+                    "On Linux and macOS, Hamlib is updated together with the signed application package. "
+                    "A separate binary download is therefore not installed.", parent=self,
+                )
+            else:
+                messagebox.showinfo(
+                    "Hamlib-Updates",
+                    "Unter Linux und macOS wird Hamlib zusammen mit dem signierten Anwendungspaket aktualisiert. "
+                    "Ein separates Binärpaket wird deshalb nicht installiert.", parent=self,
+                )
+            return
+        self._set_hamlib_update_busy(True, (
+            "Checking the latest stable Hamlib version …" if self.language == "en" else
+            "Neueste stabile Hamlib-Version wird geprüft …"
+        ))
+
+        def worker():
+            try:
+                current_output = hamlib_version()
+                release = find_latest_windows_release(
+                    current_output, opener=lambda request, timeout=20: secure_urlopen(request, timeout=timeout),
+                )
+                current = version_from_output(current_output)
+                if not self.closing:
+                    self.after(0, lambda: self._hamlib_update_checked(current, release))
+            except Exception as exc:
+                if not self.closing:
+                    message = str(exc)
+                    self.after(0, lambda: self._hamlib_update_failed(message))
+
+        threading.Thread(target=worker, name="hamlib-update-check", daemon=True).start()
+
+    def _hamlib_update_checked(self, current: str, release: HamlibRelease | None):
+        self._set_hamlib_update_busy(False)
+        if release is None:
+            status = (
+                f"Hamlib {current}: latest stable version."
+                if self.language == "en" else
+                f"Hamlib {current}: aktuellste stabile Version."
+            )
+            self.hamlib_update_status.configure(text=status)
+            messagebox.showinfo(
+                "Hamlib updates" if self.language == "en" else "Hamlib-Updates",
+                f"Hamlib {current} is already up to date." if self.language == "en" else
+                f"Hamlib {current} ist bereits aktuell.", parent=self,
+            )
+            return
+        if self.language == "en":
+            prompt = (
+                f"Hamlib {release.version} is available (installed: {current}).\n\n"
+                "Download it from the official Hamlib GitHub release, verify its SHA-256 checksum and install it? "
+                "CAT will be stopped first. The previous version remains available for rollback."
+            )
+        else:
+            prompt = (
+                f"Hamlib {release.version} ist verfügbar (installiert: {current}).\n\n"
+                "Soll das Paket aus dem offiziellen Hamlib-GitHub-Release heruntergeladen, per SHA-256 geprüft "
+                "und installiert werden? CAT wird vorher gestoppt. Die vorige Version bleibt zur Wiederherstellung erhalten."
+            )
+        if messagebox.askyesno("Hamlib-Update", prompt, parent=self):
+            self._install_hamlib_release(release)
+        else:
+            self.hamlib_update_status.configure(text=(
+                f"Hamlib {current} · Update not installed." if self.language == "en" else
+                f"Hamlib {current} · Update nicht installiert."
+            ))
+
+    def _install_hamlib_release(self, release: HamlibRelease):
+        try:
+            active_runtime = find_hamlib_dir()
+        except Exception as exc:
+            self._hamlib_update_failed(str(exc))
+            return
+        self._stop_cat_runtime()
+        self._set_hamlib_update_busy(True, (
+            f"Downloading, verifying and installing Hamlib {release.version} …"
+            if self.language == "en" else
+            f"Hamlib {release.version} wird geladen, geprüft und installiert …"
+        ))
+
+        def worker():
+            try:
+                version = install_windows_release(
+                    release, self.data_dir, active_runtime,
+                    opener=lambda request, timeout=180: secure_urlopen(request, timeout=timeout),
+                )
+                if not self.closing:
+                    self.after(0, lambda: self._hamlib_update_installed(version))
+            except Exception as exc:
+                if not self.closing:
+                    message = str(exc)
+                    self.after(0, lambda: self._hamlib_update_failed(message))
+
+        threading.Thread(target=worker, name="hamlib-update-install", daemon=True).start()
+
+    def _hamlib_update_installed(self, version: str):
+        success = (
+            f"✓ Hamlib {version} was installed. CAT can now be started again."
+            if self.language == "en" else
+            f"✓ Hamlib {version} wurde installiert. CAT kann wieder gestartet werden."
+        )
+        self._set_hamlib_update_busy(False, success)
+        self.status_var.set(
+            f"Hamlib {version} installed" if self.language == "en" else f"Hamlib {version} installiert"
+        )
+        self._load_cat_runtime_info()
+        messagebox.showinfo(
+            "Hamlib update" if self.language == "en" else "Hamlib-Update",
+            (f"Hamlib {version} was installed and verified successfully.\n\nCAT can now be started again."
+             if self.language == "en" else
+             f"Hamlib {version} wurde erfolgreich installiert und geprüft.\n\n"
+             "Die CAT-Verbindung kann jetzt wieder gestartet werden."), parent=self,
+        )
+
+    def _hamlib_update_failed(self, message: str):
+        message = self._tr(message)
+        failure = (
+            "✕ Hamlib update failed: " + message if self.language == "en" else
+            "✕ Hamlib-Update fehlgeschlagen: " + message
+        )
+        self._set_hamlib_update_busy(False, failure)
+        messagebox.showerror(
+            "Hamlib update" if self.language == "en" else "Hamlib-Update",
+            (("The Hamlib update was not installed.\n\n" if self.language == "en" else
+              "Das Hamlib-Update wurde nicht installiert.\n\n") + message), parent=self,
+        )
+
+    def _restore_previous_hamlib(self):
+        if self.hamlib_update_busy or self.closing:
+            return
+        restore_prompt = (
+            "The active Hamlib version will be swapped with the previously backed-up version. "
+            "CAT will be stopped first. Continue?"
+            if self.language == "en" else
+            "Die aktuell verwendete Hamlib-Version wird mit der zuvor gesicherten Version getauscht. "
+            "CAT wird vorher gestoppt. Fortfahren?"
+        )
+        if not messagebox.askyesno(
+            "Restore Hamlib" if self.language == "en" else "Hamlib wiederherstellen",
+            restore_prompt, parent=self,
+        ):
+            return
+        self._stop_cat_runtime()
+        self._set_hamlib_update_busy(True, (
+            "Restoring the previous Hamlib version …" if self.language == "en" else
+            "Vorherige Hamlib-Version wird wiederhergestellt …"
+        ))
+
+        def worker():
+            try:
+                version = restore_previous_windows_runtime(self.data_dir)
+                if not self.closing:
+                    self.after(0, lambda: self._hamlib_restore_finished(version))
+            except Exception as exc:
+                if not self.closing:
+                    message = str(exc)
+                    self.after(0, lambda: self._hamlib_update_failed(message))
+
+        threading.Thread(target=worker, name="hamlib-update-restore", daemon=True).start()
+
+    def _hamlib_restore_finished(self, version: str):
+        self._set_hamlib_update_busy(False, (
+            f"✓ Hamlib {version} was restored." if self.language == "en" else
+            f"✓ Hamlib {version} wurde wiederhergestellt."
+        ))
+        self.status_var.set(
+            f"Hamlib {version} restored" if self.language == "en" else
+            f"Hamlib {version} wiederhergestellt"
+        )
+        self._load_cat_runtime_info()
+        messagebox.showinfo(
+            "Restore Hamlib" if self.language == "en" else "Hamlib wiederherstellen",
+            f"Hamlib {version} is now in use." if self.language == "en" else
+            f"Hamlib {version} wird jetzt verwendet.", parent=self,
+        )
 
     def _filter_cat_models(self):
         query = self.cat_model_search_var.get().strip().casefold()
@@ -4297,7 +4619,7 @@ class LoggerApp(tk.Tk):
 
     def _set_tune_button_state(self):
         if hasattr(self, "tune_button"):
-            enabled = self.cat_manager.running and not self.tuner_busy and not self.closing
+            enabled = not self.tuner_busy and not self.cat_starting and not self.closing
             self.tune_button.configure(
                 state="normal" if enabled else "disabled",
                 style="Tuning.TButton" if self.tuner_busy else "Secondary.TButton",
@@ -4305,15 +4627,7 @@ class LoggerApp(tk.Tk):
             )
 
     def start_tuner_from_qso(self):
-        if self.tuner_busy:
-            return
-        if not self.cat_manager.running:
-            messagebox.showwarning(
-                "Tuner starten",
-                "CAT ist nicht gestartet. Bitte zuerst im CAT Setup verbinden.",
-                parent=self,
-            )
-            self._set_tune_button_state()
+        if self.tuner_busy or self.cat_starting:
             return
         confirmed = messagebox.askyesno(
             "TUNE / Antennentuner",
@@ -4323,7 +4637,27 @@ class LoggerApp(tk.Tk):
         )
         if not confirmed:
             return
+        if not self.cat_manager.running:
+            try:
+                config = self._cat_config_from_ui(enabled=True)
+                config.validate()
+            except Exception as exc:
+                messagebox.showerror("TUNE / Antennentuner", str(exc), parent=self)
+                return
+            self.tuner_busy = True
+            self.tuner_start_pending = True
+            self._set_tune_button_state()
+            self.status_var.set("CAT wird für den Antennentuner gestartet …")
+            self._start_cat_runtime(config, notify=False)
+            return
+        self._begin_tuner_operation()
+
+    def _begin_tuner_operation(self):
+        # Do not let the periodic frequency/mode poll open another rigctld
+        # connection while the tuner command is being issued.
+        self._cancel_cat_poll()
         self.tuner_busy = True
+        self.tuner_start_pending = False
         self.tuner_started_monotonic = time.monotonic()
         generation = self.cat_generation
         self._set_tune_button_state()
@@ -4351,6 +4685,12 @@ class LoggerApp(tk.Tk):
         self._set_tune_button_state()
         if generation != self.cat_generation or self.closing:
             return
+        if self.cat_manager.running:
+            try:
+                poll_interval = max(250, int(self.cat_poll_var.get()))
+            except (TypeError, ValueError, tk.TclError):
+                poll_interval = 1000
+            self._schedule_cat_poll(400, poll_interval)
         if error:
             self.status_var.set("Antennentuner konnte nicht gestartet werden")
             messagebox.showerror(
@@ -4365,7 +4705,9 @@ class LoggerApp(tk.Tk):
         self.cat_generation += 1
         generation = self.cat_generation
         self._cancel_cat_poll()
+        self.cat_starting = True
         self.cat_start_button.configure(state="disabled")
+        self._set_tune_button_state()
         self.cat_status_label.configure(text="CAT wird gestartet …", fg=MUTED)
         self.status_var.set("CAT wird gestartet …")
 
@@ -4387,22 +4729,36 @@ class LoggerApp(tk.Tk):
     def _cat_started(self, generation: int, config: CatConfig, notify: bool):
         if generation != self.cat_generation or self.closing:
             return
+        self.cat_starting = False
         self.cat_start_button.configure(state="normal")
         self.cat_status_label.configure(text="✓ CAT verbunden · warte auf Funkgerätedaten …", fg=OK)
         self.status_var.set("CAT verbunden")
         self._set_tune_button_state()
-        self._schedule_cat_poll(0, config.poll_interval_ms)
+        if self.tuner_start_pending:
+            self._begin_tuner_operation()
+        else:
+            self._schedule_cat_poll(0, config.poll_interval_ms)
         if notify:
             messagebox.showinfo("CAT Setup", "CAT wurde erfolgreich gestartet.", parent=self)
 
     def _cat_start_failed(self, generation: int, message: str, notify: bool):
         if generation != self.cat_generation or self.closing:
             return
+        tuner_was_waiting = self.tuner_start_pending
+        self.cat_starting = False
+        self.tuner_start_pending = False
+        self.tuner_busy = False
         self.cat_start_button.configure(state="normal")
         self.cat_status_label.configure(text="✕ " + message, fg=ERR)
         self.status_var.set("CAT-Verbindung fehlgeschlagen")
         self._set_tune_button_state()
-        if notify:
+        if tuner_was_waiting:
+            messagebox.showerror(
+                "TUNE / Antennentuner",
+                "CAT konnte für den Antennentuner nicht gestartet werden:\n\n" + message,
+                parent=self,
+            )
+        elif notify:
             messagebox.showerror("CAT-Verbindung", message, parent=self)
 
     def _schedule_cat_poll(self, delay_ms: int, interval_ms: int):
@@ -4467,14 +4823,16 @@ class LoggerApp(tk.Tk):
             text=f"✓ CAT verbunden\nFrequenz: {frequency or '—'} MHz\nHamlib-Modus: {reading.raw_mode} · Logger-Modus: {display_mode or 'unverändert'}",
             fg=OK,
         )
-        self._schedule_cat_poll(interval_ms, interval_ms)
+        if not self.tuner_busy:
+            self._schedule_cat_poll(interval_ms, interval_ms)
 
     def _cat_poll_failed(self, generation: int, message: str, interval_ms: int):
         self.cat_poll_busy = False
         if generation != self.cat_generation or self.closing:
             return
         self.cat_status_label.configure(text="CAT-Lesefehler: " + message, fg=WARN)
-        self._schedule_cat_poll(max(interval_ms, 1500), interval_ms)
+        if not self.tuner_busy:
+            self._schedule_cat_poll(max(interval_ms, 1500), interval_ms)
 
     def test_cat_connection(self):
         try:
@@ -4533,7 +4891,9 @@ class LoggerApp(tk.Tk):
         self.cat_generation += 1
         self._cancel_cat_poll()
         self.cat_poll_busy = False
+        self.cat_starting = False
         self.tuner_busy = False
+        self.tuner_start_pending = False
         self.cat_manager.stop()
         self._set_tune_button_state()
         if update_ui and hasattr(self, "cat_status_label"):
@@ -6497,6 +6857,15 @@ class LoggerApp(tk.Tk):
 
     def on_close(self):
         if self.close_requested:
+            return
+        if self.hamlib_update_busy:
+            messagebox.showinfo(
+                "Hamlib-Update" if self.language != "en" else "Hamlib update",
+                ("Bitte warte, bis das Hamlib-Update abgeschlossen ist."
+                 if self.language != "en" else
+                 "Please wait until the Hamlib update has finished."),
+                parent=self,
+            )
             return
         self.close_requested = True
         self._begin_close_sequence()

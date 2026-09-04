@@ -2,6 +2,11 @@ from __future__ import annotations
 
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
+    "0.19.1": (
+        "Der Dark Mode stellt Eingabefelder, Auswahllisten, Tabellen, Register und deaktivierte Bedienelemente kontrastreich dar.",
+        "TUNE startet eine konfigurierte CAT-Verbindung bei Bedarf automatisch und verwendet beim FTX-1 den korrekten Tuner-Startbefehl.",
+        "Hamlib kann unter Windows im CAT Setup sicher aktualisiert und auf die vorherige Version zurückgesetzt werden.",
+    ),
     "0.19.0": (
         "FLRig lässt sich per IP/Hostname und Port verbinden und auf Wunsch automatisch im lokalen Netzwerk finden.",
         "Der Wavelog-3.2.0-Abgleich unterstützt ClubLog-Status und fragt Bestätigungen gezielt für das gewählte Stationsprofil ab.",
@@ -30,6 +35,11 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
+    "0.19.1": (
+        "Dark mode now renders inputs, selection lists, tables, tabs and disabled controls with consistent contrast.",
+        "TUNE starts a configured CAT connection when required and uses the correct tuner-start command on the FTX-1.",
+        "On Windows, Hamlib can be securely updated and rolled back from CAT Setup.",
+    ),
     "0.19.0": (
         "FLRig can be connected by IP/hostname and port and optionally discovered on the local network.",
         "Wavelog 3.2.0 synchronization supports ClubLog status and requests confirmations for the selected station profile.",
