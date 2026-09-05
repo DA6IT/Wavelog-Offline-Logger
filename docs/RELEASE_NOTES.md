@@ -1,43 +1,51 @@
-# DA6IT.de Wavelog Offline Logger v0.19.1
+# DA6IT.de Wavelog Offline Logger v0.19.2
 
 ## Deutsch
 
-v0.19.1 verbessert CAT/TUNE, den Dark Mode und die Pflege der mitgelieferten Hamlib-Laufzeit. Der bewährte Offline-first-Ablauf und die vorhandene Wavelog-Synchronisierung bleiben unverändert: QSOs werden weiterhin zuerst lokal gespeichert.
+v0.19.2 behebt den automatischen Windows-Updater. Der Logger ersetzt und startet nach einem Update jetzt zuverlässig genau die EXE, die ursprünglich gestartet wurde – unabhängig von Dateiname und Speicherort.
 
-Neu und verbessert:
+Behoben und verbessert:
 
-- **Dark Mode:** Eingabefelder, Comboboxen samt Auswahllisten, Tabellen, Register, Listen und deaktivierte Bedienelemente besitzen nun in allen Hauptfenstern einen konsistenten Kontrast.
-- **TUNE / FTX-1:** Der TUNE-Knopf kann eine gespeicherte CAT-Verbindung bei Bedarf selbst starten. Beim FTX-1 wird die am Funkgerät ausgewählte Tunerart abgefragt und mit dem passenden Yaesu-CAT-Befehl gestartet.
-- **Saubere CAT-Kommandos:** Abfragen, Frequenz-/Mode-Änderungen und TUNE werden innerhalb einer Verbindung geordnet ausgeführt, damit paralleles Polling den Tunerbefehl nicht stört.
-- **Hamlib selbst aktualisieren:** Unter Windows kann der Benutzer im CAT Setup bewusst nach einer stabilen Hamlib-Version suchen und das offizielle x64-ZIP installieren.
-- **Geprüfte Installation:** Downloadquelle und GitHub-SHA-256 werden geprüft. Anschließend muss die neue `rigctld.exe` einen lokalen Funktionstest bestehen, bevor sie aktiv wird.
-- **Rückfall möglich:** Die zuvor verwendete Hamlib-Version bleibt gesichert und kann im CAT Setup wiederhergestellt werden. Profile, CAT-Einstellungen und QSOs werden nicht verändert.
-- **Linux und macOS:** Hamlib bleibt Bestandteil der plattformspezifisch gebauten Anwendungspakete und wird dort mit einem normalen App-Update erneuert.
+- **Zuverlässige Update-Übergabe:** Die Desktop-App lädt und prüft das Update, beendet sich anschließend sauber und übergibt die Installation an den Windows-Launcher.
+- **Kein Abbruch durch den internen Job Object:** Der PowerShell-Updateprozess wird erst nach dem Ende der Desktop-App gestartet und kann dadurch nicht mehr zusammen mit dem Python-Prozess beendet werden.
+- **Beliebiger EXE-Name und Speicherort:** Aktualisiert wird weiterhin exakt die vom Benutzer gestartete Programmdatei. Es gibt keinen fest codierten Dateinamen und keinen fest vorgegebenen Installationsordner.
+- **Windows PowerShell 5.1:** Der Update-Helper verwendet ausschließlich mit Windows PowerShell 5.1 kompatible Pfad- und Prozessoperationen.
+- **Integritätsprüfung:** Das bereits verifizierte Downloadpaket wird beim Staging und nach dem Austausch erneut per SHA-256 geprüft.
+- **Rollback:** Schlägt Austausch oder Neustart fehl, wird die vorherige EXE wiederhergestellt.
+- **Update-Log:** Der Ablauf wird unter `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\updates\update.log` protokolliert.
 
-Die vollständige deutsche und englische Dokumentation ist enthalten. eQSL bleibt weiterhin als **Coming soon** vorbereitet und führt keinen direkten Upload oder Download aus.
+### Wichtig für Benutzer von v0.19.1
 
-v0.19.1 wird weiterhin bewusst **ohne Windows-Code-Signatur** bereitgestellt, solange die geplante SignPath-Aufnahme noch nicht abgeschlossen ist. Die [Code-Signing-Richtlinie](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.1/CODE_SIGNING_POLICY.md) beschreibt den vorgesehenen Prozess.
+Da genau der automatische Updater in v0.19.1 fehlerhaft ist, kann der Sprung von **v0.19.1 auf v0.19.2 einmalig eine manuelle Installation erfordern**. Lade v0.19.2 in diesem Fall direkt aus dem GitHub-Release herunter und starte bzw. ersetze deine bisherige EXE damit. Ab v0.19.2 ist der reparierte Update-Ablauf enthalten.
 
-Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.1/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.1/docs/en/USER_GUIDE.md)
+Profile, Einstellungen, ADI-Logbücher und Wavelog-Synchronisationsdaten werden durch dieses Update nicht verändert.
+
+v0.19.2 wird weiterhin bewusst **ohne Windows-Code-Signatur** bereitgestellt, solange die geplante SignPath-Aufnahme noch nicht abgeschlossen ist. Die [Code-Signing-Richtlinie](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/CODE_SIGNING_POLICY.md) beschreibt den vorgesehenen Prozess.
+
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/docs/en/USER_GUIDE.md)
 
 ---
 
 ## English
 
-v0.19.1 improves CAT/TUNE, dark-mode presentation and maintenance of the bundled Hamlib runtime. The established offline-first workflow and existing Wavelog synchronization remain unchanged: QSOs are still stored locally first.
+v0.19.2 fixes the automatic Windows updater. After an update, the logger now reliably replaces and restarts the exact EXE that was originally launched, regardless of its filename or location.
 
-New and improved:
+Fixed and improved:
 
-- **Dark mode:** Entries, combo boxes and their drop-down lists, tables, tabs, lists and disabled controls now have consistent contrast throughout the main windows.
-- **TUNE / FTX-1:** The TUNE button can start the saved CAT connection when required. On the FTX-1, the app reads the tuner type selected on the radio and sends the matching Yaesu CAT command.
-- **Ordered CAT commands:** Polling, frequency/mode changes and TUNE are serialized so that background polling cannot interfere with the tuner command.
-- **User-triggered Hamlib updates:** On Windows, users can deliberately check for a stable Hamlib release in CAT Setup and install the official x64 ZIP package.
-- **Verified installation:** The download source and GitHub SHA-256 digest are checked. The new `rigctld.exe` must then pass a local runtime test before activation.
-- **Rollback:** The previously used Hamlib runtime is retained and can be restored from CAT Setup. Profiles, CAT settings and QSOs are not changed.
-- **Linux and macOS:** Hamlib remains part of the platform-specific application packages and is updated with the regular app package.
+- **Reliable update hand-off:** The desktop app downloads and verifies the update, exits cleanly, and hands installation over to the Windows launcher.
+- **No termination by the internal Job Object:** The PowerShell updater is started only after the desktop app has exited, so it is no longer terminated together with the Python process.
+- **Arbitrary EXE filename and location:** The updater still replaces exactly the program file launched by the user. No product filename or installation directory is hard-coded.
+- **Windows PowerShell 5.1:** The helper uses path and process operations compatible with Windows PowerShell 5.1.
+- **Integrity verification:** The already verified download package is checked again with SHA-256 after staging and after replacement.
+- **Rollback:** If replacement or restart fails, the previous EXE is restored.
+- **Update log:** The process is logged under `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\updates\update.log`.
 
-Complete German and English documentation is included. eQSL remains a **Coming soon** placeholder and performs no direct upload or download.
+### Important for users of v0.19.1
 
-v0.19.1 remains intentionally **unsigned on Windows** while the planned SignPath onboarding is pending. The [code-signing policy](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.1/CODE_SIGNING_POLICY.md) documents the intended process.
+Because the automatic updater itself is broken in v0.19.1, moving from **v0.19.1 to v0.19.2 may require one manual installation**. In that case, download v0.19.2 directly from the GitHub release and start or replace your existing EXE with it. From v0.19.2 onward, the repaired update flow is included.
 
-Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.1/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.1/docs/en/USER_GUIDE.md)
+Profiles, settings, ADI logbooks and Wavelog synchronization data are not changed by this update.
+
+v0.19.2 remains intentionally **unsigned on Windows** while the planned SignPath onboarding is pending. The [code-signing policy](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/CODE_SIGNING_POLICY.md) documents the intended process.
+
+Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/docs/en/USER_GUIDE.md)

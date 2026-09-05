@@ -1,6 +1,6 @@
 # Maintainer: DA6IT <opensource@da6it.de>
 pkgname=wavelog-offline-logger
-pkgver=0.19.1
+pkgver=0.19.2
 pkgrel=1
 pkgdesc='Offline-first amateur-radio logger with manual Wavelog sync'
 arch=('x86_64' 'aarch64')

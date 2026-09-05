@@ -2,6 +2,15 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.19.2] - 2026-09-05
+
+- automatischen Windows-Updater repariert: Update-Übergabe erfolgt erst nach dem Ende der Desktop-App über den Go-Launcher
+- exakt die ursprünglich gestartete EXE wird unabhängig von Dateiname und Speicherort ersetzt und neu gestartet
+- PowerShell-Helper auf Windows PowerShell 5.1 kompatible Pfad- und Prozessoperationen umgestellt
+- zusätzliche SHA-256-Prüfung beim Staging und nach dem Austausch sowie Rollback bei Fehlern
+- Update-Ablauf wird ausführlich unter `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\updates\update.log` protokolliert
+- Hinweis ergänzt, dass der Sprung von v0.19.1 auf v0.19.2 wegen des defekten v0.19.1-Updaters einmalig manuell erfolgen kann
+
 ## [0.19.1] - 2026-09-05
 
 - Dark-Mode-Kontraste für Eingaben, Comboboxen samt Auswahlliste, Tabellen, Register, Listen und deaktivierte Bedienelemente vereinheitlicht
