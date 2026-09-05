@@ -2,6 +2,11 @@ from __future__ import annotations
 
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
+    "0.19.2": (
+        "Der automatische Windows-Updater ersetzt und startet jetzt zuverlässig genau die ursprünglich gestartete EXE – unabhängig von Dateiname und Speicherort.",
+        "Die Update-Übergabe erfolgt erst nach dem Beenden der Desktop-App über den Windows-Launcher, sodass der Update-Prozess nicht mehr vom internen Job Object beendet wird.",
+        "Der Update-Helper ist vollständig mit Windows PowerShell 5.1 kompatibel und protokolliert den Ablauf inklusive Integritätsprüfung und Rollback.",
+    ),
     "0.19.1": (
         "Der Dark Mode stellt Eingabefelder, Auswahllisten, Tabellen, Register und deaktivierte Bedienelemente kontrastreich dar.",
         "TUNE startet eine konfigurierte CAT-Verbindung bei Bedarf automatisch und verwendet beim FTX-1 den korrekten Tuner-Startbefehl.",
@@ -35,6 +40,11 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
+    "0.19.2": (
+        "The automatic Windows updater now reliably replaces and restarts the exact EXE that was originally launched, regardless of its filename or location.",
+        "The update hand-off now happens through the Windows launcher after the desktop app exits, preventing the updater process from being terminated by the internal Job Object.",
+        "The update helper is fully compatible with Windows PowerShell 5.1 and logs the process including integrity verification and rollback.",
+    ),
     "0.19.1": (
         "Dark mode now renders inputs, selection lists, tables, tabs and disabled controls with consistent contrast.",
         "TUNE starts a configured CAT connection when required and uses the correct tuner-start command on the FTX-1.",

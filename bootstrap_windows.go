@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.19.1"
+	appVersion   = "0.19.2"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -474,7 +474,7 @@ func main() {
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
 	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v0191")
+	appDir := filepath.Join(base, "app-v0192")
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)
@@ -509,29 +509,117 @@ func main() {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	job := createKillJob()
-	launcherInJob := false
-	if job != 0 {
-		// Assign the launcher before starting Python. Windows then places Python
-		// and rigctld in the same kill-on-close job by inheritance, eliminating
-		// the gap between starting a child and assigning it afterwards.
-		launcherInJob = assignCurrentProcessToJob(job)
-		defer procCloseHandle.Call(job)
-	}
 
 	if err := cmd.Start(); err != nil {
+		if job != 0 {
+			procCloseHandle.Call(job)
+		}
 		messageBox("DA6IT.de Logger - Startfehler", "Desktop-App konnte nicht gestartet werden:\n"+err.Error(), 0x10)
 		return
 	}
-	if job != 0 && !launcherInJob {
-		// Fallback for environments in which the launcher cannot join a nested
-		// job object (for example when an outer job restricts assignment).
+
+	// Keep only Python and its normal children in the kill-on-close job.
+	// The Go launcher itself deliberately stays outside the job so it can
+	// perform the update hand-off after Python has exited.
+	if job != 0 {
 		_ = assignPidToJob(job, cmd.Process.Pid)
 	}
 
-	// Keep the invisible launcher alive while the desktop application runs.
-	// Closing the app ends pythonw; closing/crashing the launcher closes the
-	// job and kills pythonw plus any remaining rigctld child process.
 	err = cmd.Wait()
+
+	// Python is gone now. Closing the job terminates any leftover children
+	// such as rigctld while the Go launcher remains alive.
+	if job != 0 {
+		procCloseHandle.Call(job)
+		job = 0
+	}
+
+	updatesDir := filepath.Join(base, "updates")
+	pendingPath := filepath.Join(updatesDir, "pending-update.txt")
+	if pendingData, readErr := os.ReadFile(pendingPath); readErr == nil {
+		packagePath := strings.TrimSpace(string(pendingData))
+		_ = os.Remove(pendingPath)
+
+		if packagePath == "" {
+			messageBox("DA6IT.de Logger - Updatefehler", "Das vorbereitete Update-Paket ist leer.", 0x10)
+			return
+		}
+		if info, statErr := os.Stat(packagePath); statErr != nil || info.IsDir() || info.Size() <= 0 {
+			messageBox("DA6IT.de Logger - Updatefehler", "Das vorbereitete Update-Paket fehlt:\n"+packagePath, 0x10)
+			return
+		}
+
+		helperPath := filepath.Join(updatesDir, "apply-update.ps1")
+		if info, statErr := os.Stat(helperPath); statErr != nil || info.IsDir() || info.Size() <= 0 {
+			messageBox("DA6IT.de Logger - Updatefehler", "Der Update-Helper fehlt:\n"+helperPath, 0x10)
+			return
+		}
+
+		windowsRoot := os.Getenv("SystemRoot")
+		if windowsRoot == "" {
+			windowsRoot = os.Getenv("WINDIR")
+		}
+		if windowsRoot == "" {
+			windowsRoot = `C:\Windows`
+		}
+		powershellPath := filepath.Join(
+			windowsRoot,
+			"System32",
+			"WindowsPowerShell",
+			"v1.0",
+			"powershell.exe",
+		)
+		if info, statErr := os.Stat(powershellPath); statErr != nil || info.IsDir() {
+			messageBox("DA6IT.de Logger - Updatefehler", "Windows PowerShell wurde nicht gefunden:\n"+powershellPath, 0x10)
+			return
+		}
+
+		logPath := filepath.Join(updatesDir, "update.log")
+		if logFile, logErr := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); logErr == nil {
+			fmt.Fprintf(
+				logFile,
+				"%s Launcher starting updater | LauncherPID=%d | Target=%s | Package=%s\n",
+				time.Now().Format(time.RFC3339Nano),
+				os.Getpid(),
+				launcherPath,
+				packagePath,
+			)
+			_ = logFile.Close()
+		}
+
+		updateCmd := exec.Command(
+			powershellPath,
+			"-NoProfile",
+			"-ExecutionPolicy", "Bypass",
+			"-File", helperPath,
+			"-ProcessId", fmt.Sprintf("%d", os.Getpid()),
+			"-Target", launcherPath,
+			"-Package", packagePath,
+			"-Log", logPath,
+		)
+		updateCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
+		if startErr := updateCmd.Start(); startErr != nil {
+			messageBox("DA6IT.de Logger - Updatefehler", "Der Update-Helper konnte nicht gestartet werden:\n"+startErr.Error(), 0x10)
+			return
+		}
+
+		if logFile, logErr := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); logErr == nil {
+			fmt.Fprintf(
+				logFile,
+				"%s Launcher started updater | HelperPID=%d\n",
+				time.Now().Format(time.RFC3339Nano),
+				updateCmd.Process.Pid,
+			)
+			_ = logFile.Close()
+		}
+
+		return
+	} else if !os.IsNotExist(readErr) {
+		messageBox("DA6IT.de Logger - Updatefehler", "Update-Uebergabe konnte nicht gelesen werden:\n"+readErr.Error(), 0x10)
+		return
+	}
+
 	if err != nil {
 		logPath := filepath.Join(base, "startup.log")
 		messageBox("DA6IT.de Logger", "Die Anwendung wurde unerwartet beendet.\n\nDetails stehen ggf. in:\n"+logPath, 0x10)

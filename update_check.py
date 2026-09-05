@@ -242,45 +242,201 @@ def current_windows_launcher(environ: dict[str, str] | None = None) -> Path | No
 
 
 def windows_update_helper_script() -> str:
-    """PowerShell helper that atomically replaces the exact launched EXE."""
-    return (
-        "param([int]$ProcessId,[string]$Target,[string]$Package,[string]$Log)\n"
-        "$ErrorActionPreference = 'Stop'\n"
-        "$targetFull = [System.IO.Path]::GetFullPath($Target)\n"
-        "$packageFull = [System.IO.Path]::GetFullPath($Package)\n"
-        "if ([System.IO.Path]::GetExtension($targetFull) -ine '.exe') { throw 'Update target is not an EXE.' }\n"
-        "if (-not (Test-Path -LiteralPath $targetFull -PathType Leaf)) { throw 'Started EXE no longer exists.' }\n"
-        "if (-not (Test-Path -LiteralPath $packageFull -PathType Leaf)) { throw 'Downloaded package is missing.' }\n"
-        "if ($targetFull -ieq $packageFull) { throw 'Target and package must be different files.' }\n"
-        "$backup = $targetFull + '.previous'\n"
-        "$staged = $targetFull + '.update-new'\n"
-        "$targetDir = Split-Path -LiteralPath $targetFull -Parent\n"
-        "$archivedBackup = Join-Path (Split-Path -LiteralPath $packageFull -Parent) ((Split-Path -Leaf $targetFull) + '.previous')\n"
-        "try { Wait-Process -Id $ProcessId -Timeout 180 -ErrorAction SilentlyContinue } catch {}\n"
-        "if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) { throw 'The running launcher did not exit in time.' }\n"
-        "for ($i=0; $i -lt 60; $i++) {\n"
-        "  try {\n"
-        "    Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue\n"
-        "    Copy-Item -LiteralPath $packageFull -Destination $staged -Force\n"
-        "    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue\n"
-        "    Move-Item -LiteralPath $targetFull -Destination $backup -Force\n"
-        "    try { Move-Item -LiteralPath $staged -Destination $targetFull -Force }\n"
-        "    catch { Move-Item -LiteralPath $backup -Destination $targetFull -Force; throw }\n"
-        "    try { Start-Process -FilePath $targetFull -WorkingDirectory $targetDir }\n"
-        "    catch { Remove-Item -LiteralPath $targetFull -Force -ErrorAction SilentlyContinue; Move-Item -LiteralPath $backup -Destination $targetFull -Force; throw }\n"
-        "    Move-Item -LiteralPath $backup -Destination $archivedBackup -Force -ErrorAction SilentlyContinue\n"
-        "    Remove-Item -LiteralPath $packageFull -Force -ErrorAction SilentlyContinue\n"
-        "    if ($Log) { Add-Content -LiteralPath $Log -Value ((Get-Date -Format o) + ' Updated and restarted: ' + $targetFull) -ErrorAction SilentlyContinue }\n"
-        "    exit 0\n"
-        "  } catch {\n"
-        "    if (-not (Test-Path -LiteralPath $targetFull) -and (Test-Path -LiteralPath $backup)) {\n"
-        "      Move-Item -LiteralPath $backup -Destination $targetFull -Force -ErrorAction SilentlyContinue\n"
-        "    }\n"
-        "    if ($Log) { Add-Content -LiteralPath $Log -Value ((Get-Date -Format o) + ' Retry ' + $i + ': ' + $_.Exception.Message) -ErrorAction SilentlyContinue }\n"
-        "    Start-Sleep -Milliseconds 500\n"
-        "  }\n"
-        "}\n"
-        "Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue\n"
-        "if (-not (Test-Path -LiteralPath $targetFull) -and (Test-Path -LiteralPath $backup)) { Move-Item -LiteralPath $backup -Destination $targetFull -Force }\n"
-        "exit 1\n"
-    )
+    """PowerShell helper that safely replaces the exact user-started EXE.
+
+    The helper deliberately makes no assumptions about the executable's name
+    or location.  It waits for the old Go launcher to exit, verifies that a
+    stubborn PID still belongs to the exact target before force-stopping it,
+    stages the downloaded package beside the target, verifies SHA-256 before
+    and after replacement, rolls back on failure and finally starts the same
+    path again.  The script is compatible with Windows PowerShell 5.1.
+    """
+    return r'''param([int]$ProcessId,[string]$Target,[string]$Package,[string]$Log)
+$ErrorActionPreference = 'Stop'
+
+function Write-UpdateLog {
+    param([string]$Message)
+    if ([string]::IsNullOrWhiteSpace($Log)) { return }
+    try {
+        $logFull = [System.IO.Path]::GetFullPath($Log)
+        $logDir = [System.IO.Path]::GetDirectoryName($logFull)
+        if ($logDir -and -not (Test-Path -LiteralPath $logDir)) {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        }
+        Add-Content -LiteralPath $logFull -Value ((Get-Date -Format o) + ' ' + $Message) -Encoding UTF8
+    } catch {
+        # Logging must never prevent the updater from doing its job.
+    }
+}
+
+try {
+    Write-UpdateLog 'Updater started.'
+
+    $targetFull = [System.IO.Path]::GetFullPath($Target)
+    $packageFull = [System.IO.Path]::GetFullPath($Package)
+
+    Write-UpdateLog ('Target: ' + $targetFull)
+    Write-UpdateLog ('Package: ' + $packageFull)
+    Write-UpdateLog ('Old launcher PID: ' + $ProcessId)
+
+    if ([System.IO.Path]::GetExtension($targetFull) -ine '.exe') {
+        throw 'Update target is not an EXE.'
+    }
+    if (-not (Test-Path -LiteralPath $targetFull -PathType Leaf)) {
+        throw 'Started EXE no longer exists.'
+    }
+    if (-not (Test-Path -LiteralPath $packageFull -PathType Leaf)) {
+        throw 'Downloaded package is missing.'
+    }
+    if ($targetFull -ieq $packageFull) {
+        throw 'Target and package must be different files.'
+    }
+
+    # The Python downloader already verified the published checksum.  Keep a
+    # local reference hash as well, so copying/replacing can be verified again
+    # without needing another network request or an extra app.py parameter.
+    $packageHash = (Get-FileHash -LiteralPath $packageFull -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($packageHash -notmatch '^[0-9a-f]{64}$') {
+        throw 'Downloaded package SHA-256 could not be determined.'
+    }
+    Write-UpdateLog ('Package SHA-256: ' + $packageHash)
+
+    $backup = $targetFull + '.previous'
+    $staged = $targetFull + '.update-new'
+    $targetDir = [System.IO.Path]::GetDirectoryName($targetFull)
+    $packageDir = [System.IO.Path]::GetDirectoryName($packageFull)
+    $targetName = [System.IO.Path]::GetFileName($targetFull)
+    $archivedBackup = [System.IO.Path]::Combine($packageDir, ($targetName + '.previous'))
+
+    # Do not use Wait-Process -Timeout here.  A simple polling loop works on
+    # Windows PowerShell 5.1 and, importantly, lets us log what is happening.
+    # The normal app shutdown may include a final Wavelog sync and therefore
+    # can legitimately need some time.
+    Write-UpdateLog 'Waiting for the old launcher to exit.'
+    $deadline = (Get-Date).AddMinutes(10)
+
+    while ($true) {
+        $running = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        if ($null -eq $running) { break }
+        if ((Get-Date) -ge $deadline) { break }
+        Start-Sleep -Milliseconds 250
+    }
+
+    $running = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -ne $running) {
+        # Never kill a PID merely because its number matches.  Verify that it
+        # still belongs to the exact EXE the bootstrapper told us was started.
+        $runningPath = $null
+        try { $runningPath = $running.Path } catch {}
+        if ([string]::IsNullOrWhiteSpace($runningPath)) {
+            try { $runningPath = $running.MainModule.FileName } catch {}
+        }
+        if ([string]::IsNullOrWhiteSpace($runningPath)) {
+            throw 'Old launcher did not exit and its executable path could not be verified.'
+        }
+
+        $runningFull = [System.IO.Path]::GetFullPath($runningPath)
+        if ($runningFull -ine $targetFull) {
+            throw 'Old launcher PID now belongs to a different executable. Update aborted.'
+        }
+
+        Write-UpdateLog 'Old launcher did not exit normally. Force-stopping the verified target process.'
+        Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+
+        $forceDeadline = (Get-Date).AddSeconds(10)
+        while ((Get-Date) -lt $forceDeadline) {
+            if ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { break }
+            Start-Sleep -Milliseconds 200
+        }
+        if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+            throw 'Old launcher could not be stopped.'
+        }
+    }
+
+    Write-UpdateLog 'Old launcher is gone. Starting executable replacement.'
+
+    # Antivirus/indexers can briefly keep an EXE open after the process exits.
+    # Retry for roughly 30 seconds and roll back after every failed attempt.
+    for ($i = 0; $i -lt 60; $i++) {
+        $oldMoved = $false
+        try {
+            Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
+
+            # Stage beside the ORIGINAL target.  The final rename therefore
+            # stays on the same filesystem and preserves any arbitrary name.
+            Copy-Item -LiteralPath $packageFull -Destination $staged -Force
+            $stagedHash = (Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($stagedHash -ine $packageHash) {
+                throw 'Staged update SHA-256 mismatch.'
+            }
+
+            Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+            Move-Item -LiteralPath $targetFull -Destination $backup -Force
+            $oldMoved = $true
+
+            try {
+                Move-Item -LiteralPath $staged -Destination $targetFull -Force
+            } catch {
+                Move-Item -LiteralPath $backup -Destination $targetFull -Force
+                $oldMoved = $false
+                throw
+            }
+
+            $installedHash = (Get-FileHash -LiteralPath $targetFull -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($installedHash -ine $packageHash) {
+                throw 'Installed update SHA-256 mismatch.'
+            }
+
+            Write-UpdateLog ('Replacement verified. SHA-256: ' + $installedHash)
+
+            try {
+                $newProcess = Start-Process -FilePath $targetFull -WorkingDirectory $targetDir -PassThru
+                Start-Sleep -Milliseconds 1500
+                if ($newProcess.HasExited) {
+                    throw ('New launcher exited immediately with code ' + $newProcess.ExitCode + '.')
+                }
+            } catch {
+                Remove-Item -LiteralPath $targetFull -Force -ErrorAction SilentlyContinue
+                Move-Item -LiteralPath $backup -Destination $targetFull -Force
+                $oldMoved = $false
+                throw
+            }
+
+            Write-UpdateLog ('New launcher started. PID: ' + $newProcess.Id)
+
+            # Keep one safety copy internally instead of cluttering whatever
+            # folder/name the user chose for the actual launcher.
+            Remove-Item -LiteralPath $archivedBackup -Force -ErrorAction SilentlyContinue
+            Move-Item -LiteralPath $backup -Destination $archivedBackup -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $packageFull -Force -ErrorAction SilentlyContinue
+
+            Write-UpdateLog ('SUCCESS: updated and restarted: ' + $targetFull)
+            exit 0
+        } catch {
+            $errorText = $_.Exception.Message
+
+            if ($oldMoved -and (Test-Path -LiteralPath $backup -PathType Leaf)) {
+                try {
+                    Remove-Item -LiteralPath $targetFull -Force -ErrorAction SilentlyContinue
+                    Move-Item -LiteralPath $backup -Destination $targetFull -Force
+                    Write-UpdateLog 'Rollback to the previous launcher completed.'
+                } catch {
+                    Write-UpdateLog ('ROLLBACK FAILED: ' + $_.Exception.Message)
+                }
+            }
+
+            Write-UpdateLog ('Retry ' + ($i + 1) + '/60: ' + $errorText)
+            Start-Sleep -Milliseconds 500
+        }
+    }
+
+    Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $targetFull) -and (Test-Path -LiteralPath $backup)) {
+        Move-Item -LiteralPath $backup -Destination $targetFull -Force
+    }
+    throw 'Executable replacement failed after 60 attempts.'
+} catch {
+    Write-UpdateLog ('FATAL: ' + $_.Exception.Message)
+    exit 1
+}
+'''

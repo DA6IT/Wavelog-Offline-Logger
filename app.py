@@ -875,26 +875,37 @@ class LoggerApp(tk.Tk):
         updates_dir = self.data_dir / "updates"
         updates_dir.mkdir(parents=True, exist_ok=True)
         helper = updates_dir / "apply-update.ps1"
-        # Test the real launcher directory before closing the application. A
-        # custom filename or location is preserved; only that exact file is
-        # replaced after the launcher process has exited.
+        update_log = updates_dir / "update.log"
+        pending = updates_dir / "pending-update.txt"
+        pending_tmp = updates_dir / "pending-update.txt.tmp"
+
         probe = launcher.parent / f".wavelog-update-write-test-{os.getpid()}.tmp"
         try:
             probe.write_bytes(b"write-test")
         finally:
             probe.unlink(missing_ok=True)
+
+        package_full = package.resolve()
+        if not package_full.is_file() or package_full.stat().st_size <= 0:
+            raise RuntimeError("Das heruntergeladene Update-Paket fehlt.")
+
         helper.write_text(windows_update_helper_script(), encoding="utf-8-sig")
-        update_log = updates_dir / "update.log"
-        flags = 0x00000008 | 0x00000200 | 0x01000000  # detached, new group, break away from launcher job
-        subprocess.Popen(
-            [
-                "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-                "-File", str(helper), "-ProcessId", str(launcher_pid), "-Target", str(launcher),
-                "-Package", str(package), "-Log", str(update_log),
-            ],
-            close_fds=True,
-            creationflags=flags,
-        )
+
+        with update_log.open("a", encoding="utf-8") as log_file:
+            log_file.write(
+                datetime.now().astimezone().isoformat()
+                + " Python prepared updater hand-off"
+                + " | LauncherPID="
+                + str(launcher_pid)
+                + " | Target="
+                + str(launcher)
+                + " | Package="
+                + str(package_full)
+                + "\n"
+            )
+
+        pending_tmp.write_text(str(package_full), encoding="utf-8")
+        pending_tmp.replace(pending)
 
     # ---------- Wavelog online mode ----------
     def _wavelog_online_settings(self) -> WavelogOnlineSettings:
