@@ -1,16 +1,17 @@
-# DA6IT.de Wavelog Offline Logger v0.19.1
+# DA6IT.de Wavelog Offline Logger v0.19.2
 
-Version 0.19.1 improves CAT/TUNE, dark-mode presentation and maintenance of the bundled Hamlib runtime while preserving the offline-first workflow and existing Wavelog synchronization.
+Version 0.19.2 fixes the automatic Windows updater while preserving the existing offline-first workflow and Wavelog synchronization.
 
 Highlights:
 
-- Entries, combo boxes and their drop-down lists, tables, tabs, lists and disabled controls now have consistent dark-mode contrast.
-- TUNE can start the saved CAT connection when required.
-- On the FTX-1, the selected tuner type is read from the radio and started with the matching Yaesu CAT command.
-- CAT polling and user commands are serialized so that they cannot interfere with each other.
-- Windows users can manually check for and install stable Hamlib updates from CAT Setup.
-- Official Windows x64 archives are accepted only after source and SHA-256 verification and a successful local `rigctld.exe` runtime test.
-- The previously used Hamlib runtime remains available for rollback.
-- Linux and macOS continue to receive Hamlib through their platform-specific application packages.
+- the desktop app now hands the update over to the Windows launcher only after the Python process exits
+- the updater is no longer terminated by the launcher's internal Windows Job Object
+- the exact EXE originally launched by the user is replaced and restarted, regardless of filename or location
+- the PowerShell helper is compatible with Windows PowerShell 5.1
+- staged and installed executables are verified again with SHA-256
+- failed replacements or restarts roll back to the previous launcher
+- the update process is logged under `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\updates\update.log`
 
-Profiles, CAT settings and QSOs are never changed by a Hamlib update or rollback. Complete German and English documentation is included. The Windows package remains intentionally unsigned while SignPath onboarding is pending, and the application collects no telemetry or usage counts.
+Important: because the updater itself is broken in v0.19.1, upgrading from v0.19.1 to v0.19.2 may require one manual download and replacement of the existing EXE. From v0.19.2 onward, the repaired update flow is included.
+
+Profiles, settings, ADI logbooks and Wavelog synchronization data are not changed by this update. The Windows package remains intentionally unsigned while SignPath onboarding is pending.
