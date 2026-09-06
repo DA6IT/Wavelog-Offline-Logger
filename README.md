@@ -24,6 +24,7 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - Callbook-Daten über Wavelog oder direkt über QRZ.com, einschließlich Stationsfoto
 - optionale Desktop-Benachrichtigung nach einem lokal gespeicherten QSO
 - CAT über mitgeliefertes Hamlib, inklusive TUNE/ATU und manuellem Windows-Hamlib-Updater mit Rückfallversion
+- Rotorsteuerung über Hamlib `rotctld` mit Live-Position, Kompass, Peilungsübernahme, STOP und Dummy-Test ohne Hardware
 - Telnet-DX-Cluster, Filter, Worked-Markierung und Spotversand
 - bidirektionaler WSJT-X-Dateisync über `wsjtx_log.adi` mit Backup, Dublettenschutz und optionalem Abgleich bei Start/Beenden
 - WSJT-X-Live-Status und geloggte QSOs weiterhin zusätzlich über UDP
@@ -31,7 +32,7 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - verifizierter In-App-Updater; unter Windows wird die bestätigte neue Version automatisch installiert
 - vollständiges ZIP-Backup und Restore von Profilen, Einstellungen, ADI-Logbüchern und Metadaten
 - einmalige „Was ist neu?“-Übersicht nach dem ersten Start einer neuen Version
-- responsive Oberfläche ohne Scrollleisten; Felder, Aktionen und Abstände passen sich gemeinsam an und werden vor jedem Release in mehreren Fenstergrößen geprüft
+- responsive Oberfläche mit gezieltem Scrollen bei langen Geräteeinstellungen; Felder, Aktionen und Abstände passen sich gemeinsam an und werden vor jedem Release in mehreren Fenstergrößen geprüft
 - Builds für Windows x64, macOS Apple Silicon/Intel und Linux x64/ARM64
 
 ## WSJT-X Sync

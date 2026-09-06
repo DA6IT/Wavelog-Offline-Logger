@@ -10,7 +10,9 @@ import subprocess
 import sys
 import threading
 import time
-import xmlrpc.client
+# xmlrpc.client is retained for FLRig compatibility; untrusted responses are
+# bounded and DTD/entity declarations are rejected before loads().
+import xmlrpc.client  # nosec B411
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +23,7 @@ HAMLIB_VERSION = "4.7.2"
 FLRIG_MODEL_ID = 4
 FTX1_MODEL_ID = 1051
 DEFAULT_FLRIG_ENDPOINT = "127.0.0.1:12345"
+MAX_FLRIG_XML_BYTES = 64 * 1024
 FLRIG_DISCOVERY_PORTS = tuple(range(12345, 12356))
 CAT_BAUD_RATES = (300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200)
 CAT_DATA_BITS = (7, 8)
@@ -173,6 +176,23 @@ def parse_network_endpoint(endpoint: str) -> tuple[str, int]:
     return host, port
 
 
+def _validated_flrig_xml(payload: bytes) -> bytes:
+    """Reject oversized or entity-capable XML-RPC responses before parsing."""
+    if not isinstance(payload, (bytes, bytearray)):
+        raise ValueError("FLRig XML-RPC response is not bytes")
+    data = bytes(payload)
+    if len(data) > MAX_FLRIG_XML_BYTES:
+        raise ValueError("FLRig XML-RPC response is too large")
+    # FLRig XML-RPC is ASCII/UTF-8 compatible. Reject multibyte XML so
+    # DTD/entity checks cannot be bypassed with UTF-16/32 markup.
+    if b"\x00" in data:
+        raise ValueError("FLRig XML-RPC response uses a forbidden XML encoding")
+    upper = data.upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise ValueError("FLRig XML-RPC response contains forbidden XML declarations")
+    return data
+
+
 def probe_flrig(endpoint: str, timeout: float = 0.35) -> str | None:
     """Return the FLRig version only when its XML-RPC service answers."""
     host, port = parse_network_endpoint(endpoint)
@@ -186,7 +206,9 @@ def probe_flrig(endpoint: str, timeout: float = 0.35) -> str | None:
         response = connection.getresponse()
         if response.status != 200:
             return None
-        values, _method = xmlrpc.client.loads(response.read(65536))
+        payload = response.read(MAX_FLRIG_XML_BYTES + 1)
+        payload = _validated_flrig_xml(payload)
+        values, _method = xmlrpc.client.loads(payload)
         version = str(values[0] if values else "").strip()
         return version or "FLRig"
     except (OSError, http.client.HTTPException, ValueError, xmlrpc.client.Error):

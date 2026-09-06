@@ -55,6 +55,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $prefix = "hamlib-w64-$hamlibVersion/"
 $files = @(
     @{ Source = $prefix + 'bin/rigctld.exe'; Destination = 'rigctld.exe' },
+    @{ Source = $prefix + 'bin/rotctld.exe'; Destination = 'rotctld.exe' },
     @{ Source = $prefix + 'bin/libhamlib-4.dll'; Destination = 'libhamlib-4.dll' },
     @{ Source = $prefix + 'bin/libusb-1.0.dll'; Destination = 'libusb-1.0.dll' },
     @{ Source = $prefix + 'bin/libgcc_s_seh-1.dll'; Destination = 'libgcc_s_seh-1.dll' },
@@ -103,6 +104,10 @@ Hamlib is distributed under the license terms included in this directory.
 & (Join-Path $embeddedRoot 'rigctld.exe') --version
 if ($LASTEXITCODE -ne 0) {
     throw 'Die vorbereitete rigctld.exe konnte nicht ausgefuehrt werden.'
+}
+& (Join-Path $embeddedRoot 'rotctld.exe') --version
+if ($LASTEXITCODE -ne 0) {
+    throw 'Die vorbereitete rotctld.exe konnte nicht ausgefuehrt werden.'
 }
 
 Write-Host "Hamlib $hamlibVersion vorbereitet: $embeddedRoot"

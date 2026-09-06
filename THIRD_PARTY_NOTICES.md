@@ -4,7 +4,7 @@
 
 The Windows build of DA6IT.de Wavelog Offline Logger contains unmodified
 Windows x64 binaries from the Hamlib project, currently Hamlib 4.7.2. The
-macOS and Linux builds contain `rigctld` compiled from the corresponding
+macOS and Linux builds contain `rigctld` and `rotctld` compiled from the corresponding
 official source archive for the target architecture.
 
 On Windows, the user may explicitly install a newer stable official Hamlib
@@ -24,8 +24,8 @@ macOS/Linux build commands and the pinned source archive checksum are provided
 in `scripts/prepare-hamlib-macos.sh` and `scripts/prepare-hamlib-linux.sh`.
 
 The main DA6IT.de Wavelog Offline Logger source remains licensed under the MIT
-License. Hamlib runs as a separate `rigctld` process and is accessed through
-its documented local TCP protocol.
+License. Hamlib runs as separate `rigctld` and `rotctld` processes and is accessed through
+their documented local TCP protocols.
 
 ## Python
 

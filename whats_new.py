@@ -2,6 +2,11 @@ from __future__ import annotations
 
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
+    "0.19.4": (
+        "Neu: Rotorsteuerung über Hamlib rotctld mit Live-Position, kompaktem Kompass und bewusster Peilungsübernahme aus dem QSO-Log.",
+        "Hamlib Dummy ermöglicht einen vollständigen Test ohne echte Rotorhardware; STOP ist direkt im QSO-Log erreichbar.",
+        "Netzwerk- und XML-Verarbeitung wurden weiter gehärtet, während CAT Setup und Callbook-Seitenleiste auf kleineren Fenstern kompakter bedienbar bleiben.",
+    ),
     "0.19.3": (
         "Der neue WSJT-X Sync gleicht wsjtx_log.adi bidirektional mit dem lokalen Logbuch ab und kann gemeinsam mit Wavelog als sicherer Drei-Wege-Abgleich genutzt werden.",
         "Logbuch, Fast Log und Statistiken reagieren bei großen ADI-Logbüchern deutlich schneller; neue QSOs werden append-only mit Recovery-Journal gespeichert.",
@@ -44,6 +49,11 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
+    "0.19.4": (
+        "New Hamlib rotctld rotor control with live position, compact compass and explicit bearing control from the QSO form.",
+        "Hamlib Dummy provides a complete hardware-free test path, with STOP available directly in the QSO form.",
+        "Network and XML handling have been hardened further while CAT Setup and the callbook sidebar remain compact and usable on smaller windows.",
+    ),
     "0.19.3": (
         "The new WSJT-X Sync merges wsjtx_log.adi bidirectionally with the local logbook and can participate in a safe three-way workflow with Wavelog.",
         "Logbook, Fast Log and Statistics remain responsive with large ADI logs, while new QSOs use append-only storage with recovery journaling.",

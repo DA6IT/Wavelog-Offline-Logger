@@ -19,6 +19,7 @@ from feature_fastlog import FastLogFeatureMixin
 from feature_lifecycle import LifecycleFeatureMixin
 from feature_logbook import LogbookFeatureMixin
 from feature_profiles import ProfilesFeatureMixin
+from feature_rotor import RotorFeatureMixin
 from feature_qso_sync import QsoSyncFeatureMixin
 from feature_settings import SettingsFeatureMixin
 from feature_stats import StatsFeatureMixin
@@ -45,6 +46,7 @@ class LoggerApp(
     QsoSyncFeatureMixin,
     StatsFeatureMixin,
     CatFeatureMixin,
+    RotorFeatureMixin,
     DxClusterFeatureMixin,
     UdpFeatureMixin,
     BackupFeatureMixin,
@@ -91,6 +93,7 @@ class LoggerApp(
         self._init_wavelog_online_feature()
         self._init_settings_feature()
         self._init_cat_feature()
+        self._init_rotor_feature()
         self._init_udp_feature()
         self._init_dxcluster_feature()
         self._init_fastlog_feature()

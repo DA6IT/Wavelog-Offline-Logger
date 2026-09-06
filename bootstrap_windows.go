@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.19.3"
+	appVersion   = "0.19.4"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -40,6 +40,9 @@ var coreSource []byte
 
 //go:embed cat_control.py
 var catSource []byte
+
+//go:embed rotor_control.py
+var rotorControlSource []byte
 
 //go:embed hamlib_update.py
 var hamlibUpdateSource []byte
@@ -109,6 +112,7 @@ var pythonPackagesFS embed.FS
 
 var hamlibFileNames = []string{
 	"rigctld.exe",
+	"rotctld.exe",
 	"libhamlib-4.dll",
 	"libusb-1.0.dll",
 	"libgcc_s_seh-1.dll",
@@ -295,6 +299,9 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "cat_control.py"), catSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "rotor_control.py"), rotorControlSource, 0644); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "hamlib_update.py"), hamlibUpdateSource, 0644); err != nil {
 		return err
 	}
@@ -415,6 +422,7 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "app.py"),
 		filepath.Join(appDir, "logger_core.py"),
 		filepath.Join(appDir, "cat_control.py"),
+		filepath.Join(appDir, "rotor_control.py"),
 		filepath.Join(appDir, "hamlib_update.py"),
 		filepath.Join(appDir, "update_check.py"),
 		filepath.Join(appDir, "external_logging.py"),
@@ -460,6 +468,7 @@ func embeddedAppFilesMatch(appDir string) bool {
 		"app.py":              appSource,
 		"logger_core.py":      coreSource,
 		"cat_control.py":      catSource,
+		"rotor_control.py":    rotorControlSource,
 		"hamlib_update.py":    hamlibUpdateSource,
 		"update_check.py":     updateCheckSource,
 		"external_logging.py": externalLoggingSource,

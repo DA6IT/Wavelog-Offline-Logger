@@ -369,6 +369,7 @@ class SettingsFeatureMixin:
         self._update_profile_summary()
         self._set_current_qso_time()
         self._load_cat_settings_to_ui()
+        self._load_rotor_settings_to_ui()
         self._load_dx_cluster_settings_to_ui()
         self._load_dx_spotter_settings_to_ui()
         self._load_udp_log_settings_to_ui()

@@ -45,7 +45,8 @@ class UdpFeatureMixin:
         ttk.Combobox(
             left,
             textvariable=self.udp_log_host_var,
-            values=("127.0.0.1", "0.0.0.0"),
+            # 0.0.0.0 is an explicit user opt-in; the default remains loopback-only.
+            values=("127.0.0.1", "0.0.0.0"),  # nosec B104
             state="readonly",
         ).grid(row=3, column=0, sticky="ew")
         ttk.Label(

@@ -1,6 +1,6 @@
 # Wavelog Offline Logger — architecture and developer notes
 
-> Version: 0.19.3
+> Version: 0.19.4
 > Goal: keep large functional areas independently maintainable without growing `app.py` back into a monolith.
 
 ## Overview
@@ -22,6 +22,7 @@ app.py
 ├── feature_qso_sync.py
 ├── feature_stats.py
 ├── feature_cat.py
+├── feature_rotor.py
 ├── feature_dxcluster.py
 ├── feature_udp.py
 ├── feature_backup.py
@@ -33,6 +34,7 @@ dialogs.py
 
 logger_core.py
 cat_control.py
+rotor_control.py
 dx_cluster.py
 external_logging.py
 callbook.py
@@ -59,6 +61,7 @@ wsjtx_sync.py
 | `feature_qso_sync.py` | QSO view, Wavelog sync and WSJT-X sync orchestration |
 | `feature_stats.py` | statistics |
 | `feature_cat.py` | CAT, Hamlib, FLRig and TUNE |
+| `feature_rotor.py` | rotor UI, `rotctld` lifecycle, live position and QSO bearing control |
 | `feature_dxcluster.py` | DX Cluster and spotting |
 | `feature_udp.py` | UDP and WSJT-X live logging |
 | `feature_backup.py` | backup and restore |
@@ -107,12 +110,12 @@ At minimum these values must match:
 
 ```python
 # logger_core.py
-VERSION = "0.19.3"
+VERSION = "0.19.4"
 ```
 
 ```go
 // bootstrap_windows.go
-appVersion = "0.19.3"
+appVersion = "0.19.4"
 ```
 
 The Windows build script verifies this relationship. `whats_new.py`, changelogs, user guides and release notes should be updated for every published version.

@@ -2,6 +2,34 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.19.4 — 2026-09-06
+
+### Added
+
+- Hamlib `rotctld` rotor control with profile-specific model, interface, baud rate, local port and live position polling
+- compact rotor compass in the QSO form; the bearing calculated from station grids can be sent with **Turn rotor** and stopped immediately with **STOP**
+- Hamlib Dummy [ID 1] as a hardware-free test path for movement, position display and STOP
+- `rotctld` is shipped alongside `rigctld` in Windows, macOS and Linux packages
+
+### Changed
+
+- CAT Setup remains vertically scrollable on smaller windows and supports scrollbar, mouse wheel and trackpad input
+- the callbook photo area uses a smaller fixed maximum size
+- Hamlib update and rollback handle CAT and rotor control together
+- on Az/El rotors, **Turn rotor** changes azimuth while preserving the last known elevation
+
+### Security
+
+- QRZ and FLRig XML responses are size-bounded and validated before parsing
+- URL access is restricted to HTTP(S); HTTPS redirect downgrades are blocked and sensitive headers are removed on cross-origin redirects
+- opening the local log directory no longer uses shell interpolation
+- `rotctld` listens on `127.0.0.1` only
+
+### Safety
+
+- callsign lookup and bearing calculation never move the rotor automatically; movement begins only after an explicit click
+- profile changes, Hamlib replacement and application shutdown stop the app-managed rotor runtime cleanly
+
 ## 0.19.3 — 2026-09-06
 
 ### Added

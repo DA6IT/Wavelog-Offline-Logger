@@ -1,6 +1,6 @@
 # Wavelog Offline Logger – Architektur & Entwicklerhinweise
 
-> Stand: 0.19.3
+> Stand: 0.19.4
 > Ziel: große Funktionsbereiche getrennt entwickeln, ohne die zentrale `app.py` wieder wachsen zu lassen.
 
 ## Überblick
@@ -34,6 +34,7 @@ app.py
 ├── feature_qso_sync.py
 ├── feature_stats.py
 ├── feature_cat.py
+├── feature_rotor.py
 ├── feature_dxcluster.py
 ├── feature_udp.py
 ├── feature_backup.py
@@ -45,6 +46,7 @@ dialogs.py
 
 logger_core.py
 cat_control.py
+rotor_control.py
 dx_cluster.py
 external_logging.py
 callbook.py
@@ -74,6 +76,7 @@ wsjtx_sync.py
 | `feature_qso_sync.py` | QSO-Liste, Wavelog- und WSJT-X-Sync-Orchestrierung |
 | `feature_stats.py` | Statistiken |
 | `feature_cat.py` | CAT/Hamlib/FLRig/TUNE-UI |
+| `feature_rotor.py` | Rotor-UI, `rotctld`-Lifecycle, Live-Position und QSO-Peilungssteuerung |
 | `feature_dxcluster.py` | DX-Cluster und Spots |
 | `feature_udp.py` | UDP-/WSJT-X-Live-Logging |
 | `feature_backup.py` | Backup/Restore |
@@ -355,7 +358,7 @@ Der Verzeichnisname wird aus `appVersion` erzeugt.
 Beispiel:
 
 ```go
-appVersion = "0.19.3"
+appVersion = "0.19.4"
 ```
 
 ergibt:
@@ -395,13 +398,13 @@ Mindestens diese beiden Werte müssen übereinstimmen:
 `logger_core.py`:
 
 ```python
-VERSION = "0.19.3"
+VERSION = "0.19.4"
 ```
 
 `bootstrap_windows.go`:
 
 ```go
-appVersion = "0.19.3"
+appVersion = "0.19.4"
 ```
 
 Das Windows-Buildscript prüft diesen Zustand absichtlich und bricht bei einem Konflikt ab.

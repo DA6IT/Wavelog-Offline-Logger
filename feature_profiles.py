@@ -86,6 +86,7 @@ class ProfilesFeatureMixin:
                     setattr(self, job_name, None)
             self.wavelog_check_busy = False
             self._stop_cat_runtime(update_ui=False)
+            self._stop_rotor_runtime(update_ui=False)
             self._stop_dx_cluster_runtime(update_ui=False)
             self._stop_dx_spotter_runtime(update_ui=False)
             self._stop_udp_log_runtime(update_ui=False)

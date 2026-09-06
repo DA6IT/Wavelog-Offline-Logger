@@ -2,6 +2,34 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.19.4] - 2026-09-06
+
+### Added
+
+- Rotorsteuerung über Hamlib `rotctld` mit profilspezifischem Modell, Schnittstelle, Baudrate, lokalem Port und Live-Positionsabfrage
+- kompakter Rotor-Kompass im QSO-Log; die aus den Locators berechnete Peilung kann mit **Rotor drehen** bewusst angefahren und mit **STOP** jederzeit angehalten werden
+- Hamlib Dummy [ID 1] als hardwarefreier Testpfad für Bewegung, Positionsanzeige und STOP
+- `rotctld` wird gemeinsam mit `rigctld` in Windows-, macOS- und Linux-Paketen bereitgestellt
+
+### Changed
+
+- CAT Setup bleibt auf kleineren Fenstern vertikal scrollbar und unterstützt Scrollbar, Mausrad und Trackpad
+- der Callbook-Fotobereich verwendet eine kompaktere feste Maximalgröße
+- Hamlib-Update und Rollback berücksichtigen CAT und Rotorsteuerung gemeinsam
+- bei Az/El-Rotoren ändert **Rotor drehen** nur den Azimut und behält die zuletzt gelesene Elevation bei
+
+### Security
+
+- QRZ- und FLRig-XML-Antworten werden größenbegrenzt gelesen und vor dem Parsen gegen problematische DTD-/Entity-Deklarationen geprüft
+- URL-Zugriffe sind auf HTTP(S) beschränkt; HTTPS-Downgrades per Redirect werden blockiert und sensible Header bei Cross-Origin-Redirects entfernt
+- das Öffnen des lokalen Logordners verwendet keine Shell-Interpolation mehr
+- `rotctld` wird ausschließlich an `127.0.0.1` gebunden
+
+### Safety
+
+- Callbook-Lookup und Peilungsberechnung bewegen den Rotor niemals automatisch; eine Bewegung beginnt nur nach einem ausdrücklichen Klick
+- Profilwechsel, Hamlib-Wechsel und Programmende stoppen die von der App gestartete Rotorsteuerung kontrolliert
+
 ## [0.19.3] - 2026-09-06
 
 ### Added
