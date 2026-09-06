@@ -1,51 +1,47 @@
-# DA6IT.de Wavelog Offline Logger v0.19.2
+# DA6IT.de Wavelog Offline Logger v0.19.3
 
 ## Deutsch
 
-v0.19.2 behebt den automatischen Windows-Updater. Der Logger ersetzt und startet nach einem Update jetzt zuverlässig genau die EXE, die ursprünglich gestartet wurde – unabhängig von Dateiname und Speicherort.
+v0.19.3 bringt einen bidirektionalen WSJT-X-Dateisync, eine große interne Modularisierung und deutliche Performance-Verbesserungen bei großen lokalen Logbüchern.
 
-Behoben und verbessert:
+### Highlights
 
-- **Zuverlässige Update-Übergabe:** Die Desktop-App lädt und prüft das Update, beendet sich anschließend sauber und übergibt die Installation an den Windows-Launcher.
-- **Kein Abbruch durch den internen Job Object:** Der PowerShell-Updateprozess wird erst nach dem Ende der Desktop-App gestartet und kann dadurch nicht mehr zusammen mit dem Python-Prozess beendet werden.
-- **Beliebiger EXE-Name und Speicherort:** Aktualisiert wird weiterhin exakt die vom Benutzer gestartete Programmdatei. Es gibt keinen fest codierten Dateinamen und keinen fest vorgegebenen Installationsordner.
-- **Windows PowerShell 5.1:** Der Update-Helper verwendet ausschließlich mit Windows PowerShell 5.1 kompatible Pfad- und Prozessoperationen.
-- **Integritätsprüfung:** Das bereits verifizierte Downloadpaket wird beim Staging und nach dem Austausch erneut per SHA-256 geprüft.
-- **Rollback:** Schlägt Austausch oder Neustart fehl, wird die vorherige EXE wiederhergestellt.
-- **Update-Log:** Der Ablauf wird unter `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\updates\update.log` protokolliert.
+- **WSJT-X ↔ Offline Logger ↔ Wavelog:** `wsjtx_log.adi` kann bidirektional mit dem lokalen Logger abgeglichen werden. Bei konfiguriertem Wavelog lässt sich der Dateiabgleich mit dem vorhandenen Vollsync kombinieren.
+- **Eigener WSJT-X-Sync-Tab:** Standardprofil, `--rig-name`-Profile oder ein manueller Pfad können pro Logger-Profil gewählt werden. Start-, Beenden- und manueller Sync sind getrennt schaltbar.
+- **Sicherer Merge:** Vor Änderungen an der WSJT-X-Datei entsteht ein Backup. Dubletten werden tolerant erkannt, eindeutig profilfremde Stationsrufzeichen werden nicht in das aktive Profil übernommen und es gibt keine automatischen Löschungen.
+- **Schnellere Oberfläche:** Logbuch & Sync, Fast Log/DXpedition und Statistiken verwenden gemeinsame QSO-Caches und Hintergrundverarbeitung statt bei jedem Seitenwechsel das komplette ADI-Logbuch synchron neu einzulesen.
+- **Schnelleres Speichern:** Neue QSOs werden in bestehende ADI-Logbücher append-only geschrieben. Ein Recovery-Journal schützt vor einem abgebrochenen oder partiellen Append.
+- **Modulare Architektur:** Die frühere große `app.py` wurde in fachliche `feature_*.py`-Module, `dialogs.py`, `app_common.py` und `ui_theme.py` aufgeteilt. Abhängigkeiten werden explizit importiert und Architekturtests schützen die Trennung.
+- **Windows-Build:** Feature-Module werden automatisch eingebettet; der Runtime-Ordner wird aus der Programmversion erzeugt und die Build-Prüfung berücksichtigt diesen dynamischen Pfad.
 
-### Wichtig für Benutzer von v0.19.1
+### Daten- und Sync-Sicherheit
 
-Da genau der automatische Updater in v0.19.1 fehlerhaft ist, kann der Sprung von **v0.19.1 auf v0.19.2 einmalig eine manuelle Installation erfordern**. Lade v0.19.2 in diesem Fall direkt aus dem GitHub-Release herunter und starte bzw. ersetze deine bisherige EXE damit. Ab v0.19.2 ist der reparierte Update-Ablauf enthalten.
+ADI bleibt die maßgebliche lokale QSO-Quelle. SQLite speichert weiterhin Einstellungen, Sync-Metadaten, Zuordnungen und Caches. Editieren, Löschen, ADIF-Import und Migration verwenden weiterhin den vollständigen verifizierten Rewrite. Weder Wavelog- noch WSJT-X-Sync leiten aus einem fehlenden lokalen Datensatz automatisch eine Remote-Löschung ab.
 
-Profile, Einstellungen, ADI-Logbücher und Wavelog-Synchronisationsdaten werden durch dieses Update nicht verändert.
+Profile, vorhandene ADI-Logbücher und Wavelog-Daten werden durch das Update nicht automatisch gelöscht oder zurückgesetzt.
 
-v0.19.2 wird weiterhin bewusst **ohne Windows-Code-Signatur** bereitgestellt, solange die geplante SignPath-Aufnahme noch nicht abgeschlossen ist. Die [Code-Signing-Richtlinie](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/CODE_SIGNING_POLICY.md) beschreibt den vorgesehenen Prozess.
-
-Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/docs/en/USER_GUIDE.md)
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.3/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.3/docs/en/USER_GUIDE.md)
 
 ---
 
 ## English
 
-v0.19.2 fixes the automatic Windows updater. After an update, the logger now reliably replaces and restarts the exact EXE that was originally launched, regardless of its filename or location.
+v0.19.3 adds bidirectional WSJT-X file synchronization, a major internal modularization and substantial performance improvements for large local logbooks.
 
-Fixed and improved:
+### Highlights
 
-- **Reliable update hand-off:** The desktop app downloads and verifies the update, exits cleanly, and hands installation over to the Windows launcher.
-- **No termination by the internal Job Object:** The PowerShell updater is started only after the desktop app has exited, so it is no longer terminated together with the Python process.
-- **Arbitrary EXE filename and location:** The updater still replaces exactly the program file launched by the user. No product filename or installation directory is hard-coded.
-- **Windows PowerShell 5.1:** The helper uses path and process operations compatible with Windows PowerShell 5.1.
-- **Integrity verification:** The already verified download package is checked again with SHA-256 after staging and after replacement.
-- **Rollback:** If replacement or restart fails, the previous EXE is restored.
-- **Update log:** The process is logged under `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\updates\update.log`.
+- **WSJT-X ↔ Offline Logger ↔ Wavelog:** `wsjtx_log.adi` can be merged bidirectionally with the local logger and combined with the existing Wavelog full synchronization.
+- **Dedicated WSJT-X Sync tab:** select the standard profile, a `--rig-name` profile or a manual path per Logger profile, with independent startup, shutdown and manual synchronization.
+- **Safe merge behavior:** the WSJT-X file is backed up before changes, duplicates are matched tolerantly, clearly foreign station callsigns are not imported into the active profile, and no automatic deletions are performed.
+- **Responsive UI:** Logbook & Sync, Fast Log/DXpedition and Statistics reuse shared QSO caches and background processing instead of synchronously rescanning the full ADI log during navigation.
+- **Faster saves:** normal new QSOs use append-only writes to existing ADI logs with a recovery journal for interrupted or partial appends.
+- **Modular architecture:** the former large `app.py` is split into focused `feature_*.py` modules plus `dialogs.py`, `app_common.py` and `ui_theme.py`, protected by architecture tests.
+- **Windows build:** feature modules are packaged automatically and the versioned runtime directory is derived dynamically from the application version.
 
-### Important for users of v0.19.1
+### Data and synchronization safety
 
-Because the automatic updater itself is broken in v0.19.1, moving from **v0.19.1 to v0.19.2 may require one manual installation**. In that case, download v0.19.2 directly from the GitHub release and start or replace your existing EXE with it. From v0.19.2 onward, the repaired update flow is included.
+ADI remains the authoritative local QSO source. SQLite continues to hold settings, synchronization metadata, mappings and caches. Editing, deletion, ADIF import and migration retain the full verified rewrite path. Neither Wavelog nor WSJT-X synchronization interprets a missing local record as an automatic remote deletion.
 
-Profiles, settings, ADI logbooks and Wavelog synchronization data are not changed by this update.
+Profiles, existing ADI logbooks and Wavelog data are not automatically deleted or reset by this update.
 
-v0.19.2 remains intentionally **unsigned on Windows** while the planned SignPath onboarding is pending. The [code-signing policy](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/CODE_SIGNING_POLICY.md) documents the intended process.
-
-Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.2/docs/en/USER_GUIDE.md)
+Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.3/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.19.3/docs/en/USER_GUIDE.md)

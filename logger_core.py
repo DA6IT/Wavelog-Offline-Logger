@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.19.2"
+VERSION = "0.19.3"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -844,6 +844,8 @@ class LogStore:
         self.profile_key = re.sub(r"[^A-Za-z0-9_-]", "", str(profile_key or ""))[:12]
         self.lock = threading.RLock()
         self.migration_report: dict[str, Any] | None = None
+        self._append_ready_paths: set[str] = set()
+        self._recover_pending_append(self.canonical_path)
         self._consolidate_existing_files()
 
     @property
@@ -857,6 +859,8 @@ class LogStore:
             self.log_dir.mkdir(parents=True, exist_ok=True)
             if profile_key is not None:
                 self.profile_key = re.sub(r"[^A-Za-z0-9_-]", "", str(profile_key or ""))[:12]
+            self._append_ready_paths.clear()
+            self._recover_pending_append(self.canonical_path)
             self._consolidate_existing_files()
 
     def file_for(self, qso: dict[str, Any]) -> Path:
@@ -865,10 +869,15 @@ class LogStore:
         return self.canonical_path
 
     @staticmethod
-    def _decode_adif(path: Path) -> str:
+    def _append_key(path: Path) -> str:
+        return str(Path(path).resolve(strict=False))
+
+    def _decode_adif(self, path: Path) -> str:
         raw = path.read_bytes()
         try:
-            return raw.decode("utf-8-sig")
+            text = raw.decode("utf-8-sig")
+            self._append_ready_paths.add(self._append_key(path))
+            return text
         except UnicodeDecodeError:
             return raw.decode("iso-8859-1")
 
@@ -898,14 +907,164 @@ class LogStore:
 
     def _write_file(self, path: Path, records: Iterable[dict[str, Any]]):
         recs = list(records)
+        key = self._append_key(path)
+        journal = self._append_journal_path(path)
         if not recs:
             if path.exists():
                 path.unlink()
+            journal.unlink(missing_ok=True)
+            self._append_ready_paths.discard(key)
             return
         tmp = path.with_suffix(path.suffix + ".tmp")
         data = adif_header() + "".join(qso_to_adif_record(q) for q in recs)
         tmp.write_text(data, encoding="utf-8", newline="\n")
         os.replace(tmp, path)
+        journal.unlink(missing_ok=True)
+        self._append_ready_paths.add(key)
+
+    @staticmethod
+    def _append_journal_path(path: Path) -> Path:
+        return path.with_suffix(path.suffix + ".append-journal")
+
+    def _ensure_append_ready(self, path: Path) -> None:
+        """Ensure the existing canonical ADIF can safely receive UTF-8 appends."""
+        key = self._append_key(path)
+        if key in self._append_ready_paths:
+            return
+        if not path.exists() or path.stat().st_size == 0:
+            return
+
+        raw = path.read_bytes()
+        try:
+            raw.decode("utf-8-sig")
+            self._append_ready_paths.add(key)
+            return
+        except UnicodeDecodeError:
+            pass
+
+        # Legacy ISO-8859-1 logs are rewritten once to UTF-8 before the first
+        # append. Afterwards normal QSO saves stay append-only.
+        records = self._read_file_strict(path)
+        self._write_file(path, records)
+
+    @staticmethod
+    def _write_binary_file_fsynced(path: Path, payload: bytes) -> None:
+        with path.open("wb", buffering=0) as handle:
+            view = memoryview(payload)
+            while view:
+                written = handle.write(view)
+                if not written:
+                    raise OSError("Datei konnte nicht vollständig geschrieben werden")
+                view = view[written:]
+            os.fsync(handle.fileno())
+
+    def _write_append_journal(self, path: Path, original_size: int, payload: bytes) -> None:
+        journal = self._append_journal_path(path)
+        tmp = journal.with_suffix(journal.suffix + ".tmp")
+        header = b"WAVELOG-OFFLINE-LOGGER-APPEND-V1\n" + str(int(original_size)).encode("ascii") + b"\n"
+        self._write_binary_file_fsynced(tmp, header + payload)
+        os.replace(tmp, journal)
+
+    def _read_append_journal(self, path: Path) -> tuple[int, bytes]:
+        journal = self._append_journal_path(path)
+        raw = journal.read_bytes()
+        try:
+            magic, size_raw, payload = raw.split(b"\n", 2)
+            if magic != b"WAVELOG-OFFLINE-LOGGER-APPEND-V1":
+                raise ValueError("unbekanntes Journalformat")
+            original_size = int(size_raw.decode("ascii"))
+        except Exception as exc:
+            raise RuntimeError(f"Append-Journal ist beschädigt: {journal.name}") from exc
+        if original_size < 0 or not payload:
+            raise RuntimeError(f"Append-Journal ist unvollständig: {journal.name}")
+        return original_size, payload
+
+    @staticmethod
+    def _truncate_fsynced(path: Path, size: int) -> None:
+        with path.open("r+b", buffering=0) as handle:
+            handle.truncate(size)
+            os.fsync(handle.fileno())
+
+    @staticmethod
+    def _append_payload_fsynced(path: Path, payload: bytes) -> None:
+        with path.open("ab", buffering=0) as handle:
+            view = memoryview(payload)
+            while view:
+                written = handle.write(view)
+                if not written:
+                    raise OSError("QSO konnte nicht vollständig angehängt werden")
+                view = view[written:]
+            os.fsync(handle.fileno())
+
+    @staticmethod
+    def _read_tail(path: Path, start: int) -> bytes:
+        with path.open("rb") as handle:
+            handle.seek(start)
+            return handle.read()
+
+    def _recover_pending_append(self, path: Path) -> None:
+        """Finish or validate an interrupted append without losing old QSOs."""
+        journal = self._append_journal_path(path)
+        if not journal.exists():
+            return
+
+        original_size, payload = self._read_append_journal(path)
+        if not path.exists():
+            raise RuntimeError(
+                f"Append-Journal vorhanden, aber ADIF-Datei fehlt: {path.name}"
+            )
+
+        current_size = path.stat().st_size
+        if current_size < original_size:
+            raise RuntimeError(
+                f"ADIF-Datei ist kleiner als ihr Append-Journal erwartet: {path.name}"
+            )
+
+        tail = self._read_tail(path, original_size)
+        if tail == payload:
+            journal.unlink(missing_ok=True)
+            self._append_ready_paths.add(self._append_key(path))
+            return
+
+        if tail and not payload.startswith(tail):
+            raise RuntimeError(
+                f"ADIF-Datei und Append-Journal widersprechen sich: {path.name}"
+            )
+
+        if tail:
+            self._truncate_fsynced(path, original_size)
+
+        self._append_payload_fsynced(path, payload)
+        if self._read_tail(path, original_size) != payload:
+            raise RuntimeError(f"Angehängtes QSO konnte nicht verifiziert werden: {path.name}")
+
+        journal.unlink(missing_ok=True)
+        self._append_ready_paths.add(self._append_key(path))
+
+    def _append_record(self, path: Path, qso: dict[str, Any]) -> None:
+        # Creating a new log remains an atomic full-file write.
+        if not path.exists() or path.stat().st_size == 0:
+            self._write_file(path, [qso])
+            return
+
+        self._recover_pending_append(path)
+        self._ensure_append_ready(path)
+
+        original_size = path.stat().st_size
+        prefix = b""
+        with path.open("rb") as handle:
+            handle.seek(-1, os.SEEK_END)
+            if handle.read(1) not in (b"\n", b"\r"):
+                prefix = b"\n"
+
+        payload = prefix + qso_to_adif_record(qso).encode("utf-8")
+
+        # The sidecar journal preserves the previous file size and complete
+        # record before touching the ADIF. A hard crash can therefore be
+        # completed safely on the next scan/start instead of leaving a partial
+        # QSO at the end of the log.
+        self._write_append_journal(path, original_size, payload)
+        self._recover_pending_append(path)
 
     @staticmethod
     def _record_signature(qso: dict[str, Any]) -> str:
@@ -975,6 +1134,7 @@ class LogStore:
 
     def scan(self) -> list[dict[str, Any]]:
         with self.lock:
+            self._recover_pending_append(self.canonical_path)
             out = self._read_file(self.canonical_path)
             out.sort(key=lambda q: (q.get("qso_date", ""), q.get("time_on", "")), reverse=True)
             return out
@@ -991,9 +1151,7 @@ class LogStore:
             q = dict(qso)
             q["local_id"] = q.get("local_id") or str(uuid.uuid4())
             path = self.file_for(q)
-            records = self._read_file(path)
-            records.append(q)
-            self._write_file(path, records)
+            self._append_record(path, q)
             q["_file"] = str(path)
             return q
 

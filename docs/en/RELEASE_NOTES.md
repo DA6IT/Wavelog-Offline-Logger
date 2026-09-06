@@ -1,17 +1,19 @@
-# DA6IT.de Wavelog Offline Logger v0.19.2
+# DA6IT.de Wavelog Offline Logger v0.19.3
 
-Version 0.19.2 fixes the automatic Windows updater while preserving the existing offline-first workflow and Wavelog synchronization.
+Version 0.19.3 adds bidirectional WSJT-X file synchronization, a major internal modularization and substantial performance improvements for large local ADI logbooks.
 
-Highlights:
+## Highlights
 
-- the desktop app now hands the update over to the Windows launcher only after the Python process exits
-- the updater is no longer terminated by the launcher's internal Windows Job Object
-- the exact EXE originally launched by the user is replaced and restarted, regardless of filename or location
-- the PowerShell helper is compatible with Windows PowerShell 5.1
-- staged and installed executables are verified again with SHA-256
-- failed replacements or restarts roll back to the previous launcher
-- the update process is logged under `%LOCALAPPDATA%\AFU-Tools\WavelogOfflineLogger\updates\update.log`
+- **WSJT-X ↔ Offline Logger ↔ Wavelog:** `wsjtx_log.adi` can be merged bidirectionally with the local logger and combined with the normal Wavelog full synchronization.
+- **Dedicated WSJT-X Sync settings:** select the standard WSJT-X profile, a `--rig-name` profile or a manual log path, with independent startup, shutdown and manual synchronization.
+- **Safe file merge:** timestamped backup before changing the WSJT-X log, tolerant duplicate matching, station-profile protection and no automatic deletions.
+- **Responsive navigation:** Logbook & Sync, Fast Log/DXpedition and Statistics reuse shared QSO caches and perform expensive work outside the Tk main thread.
+- **Append-only QSO saves:** new contacts no longer require a full rewrite of an existing canonical ADI file; a small recovery journal protects interrupted writes.
+- **Modular application structure:** `app.py` is now primarily composition and startup, while functional areas live in focused `feature_*.py` modules with explicit dependencies.
+- **Improved Windows packaging:** `feature_*.py` files are embedded automatically and the versioned runtime directory is derived dynamically from `appVersion`.
 
-Important: because the updater itself is broken in v0.19.1, upgrading from v0.19.1 to v0.19.2 may require one manual download and replacement of the existing EXE. From v0.19.2 onward, the repaired update flow is included.
+## Safety and compatibility
 
-Profiles, settings, ADI logbooks and Wavelog synchronization data are not changed by this update. The Windows package remains intentionally unsigned while SignPath onboarding is pending.
+ADI remains the authoritative local QSO source. Editing, deletion, ADIF import and migration continue to use the full verified rewrite path. WSJT-X synchronization only adds missing contacts and never derives deletion intent from absence.
+
+Existing Logger profiles, ADI files and Wavelog data are not automatically removed or reset by this update.

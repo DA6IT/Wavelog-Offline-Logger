@@ -54,3 +54,7 @@ AGENTS.md
 # Superseded local documentation captures (the scripted full set replaces them)
 docs/screenshots/local-only-status.png
 docs/screenshots/settings-sections.png
+# Local development patches
+own_patches/
+.wsjtx-sync-backup/
+*.before-*
