@@ -59,9 +59,12 @@ APP_BINARY="wavelog-offline-logger"
 APP_BUNDLE="${BUILD_DIR}/dist/${APP_BINARY}"
 test -x "${APP_BUNDLE}/${APP_BINARY}"
 BUNDLED_RIGCTLD="$(find "${APP_BUNDLE}" -path '*/hamlib/rigctld' -type f -print -quit)"
+BUNDLED_ROTCTLD="$(find "${APP_BUNDLE}" -path '*/hamlib/rotctld' -type f -print -quit)"
 test -n "${BUNDLED_RIGCTLD}"
-chmod 755 "${BUNDLED_RIGCTLD}"
+test -n "${BUNDLED_ROTCTLD}"
+chmod 755 "${BUNDLED_RIGCTLD}" "${BUNDLED_ROTCTLD}"
 "${BUNDLED_RIGCTLD}" --version
+"${BUNDLED_ROTCTLD}" --version
 
 # Debian/Ubuntu package
 DEB_ROOT="${BUILD_DIR}/deb-root"

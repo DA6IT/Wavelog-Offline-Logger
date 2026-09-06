@@ -37,8 +37,11 @@ make install
 popd >/dev/null
 
 RIGCTLD="${INSTALL_DIR}/bin/rigctld"
+ROTCTLD="${INSTALL_DIR}/bin/rotctld"
 test -x "${RIGCTLD}"
+test -x "${ROTCTLD}"
 "${RIGCTLD}" --version
+"${ROTCTLD}" --version
 
 # A release binary must not depend on a Homebrew/MacPorts path on the build
 # machine. Static Hamlib plus Apple system libraries keeps the bundle portable.
@@ -55,12 +58,13 @@ fi
 rm -rf "${OUTPUT_DIR}"
 mkdir -p "${OUTPUT_DIR}"
 cp "${RIGCTLD}" "${OUTPUT_DIR}/rigctld"
+cp "${ROTCTLD}" "${OUTPUT_DIR}/rotctld"
 cp "${SOURCE_DIR}/LICENSE" "${OUTPUT_DIR}/LICENSE.txt"
 cp "${SOURCE_DIR}/COPYING" "${OUTPUT_DIR}/COPYING.txt"
 cp "${SOURCE_DIR}/COPYING.LIB" "${OUTPUT_DIR}/COPYING.LIB.txt"
 printf 'Hamlib %s (macOS %s)\nSource: %s\n' \
   "${HAMLIB_VERSION}" "$(uname -m)" "${ARCHIVE_URL}" \
   > "${OUTPUT_DIR}/HAMLIB_VERSION.txt"
-chmod 755 "${OUTPUT_DIR}/rigctld"
+chmod 755 "${OUTPUT_DIR}/rigctld" "${OUTPUT_DIR}/rotctld"
 
 echo "Hamlib wurde vorbereitet: ${OUTPUT_DIR}"

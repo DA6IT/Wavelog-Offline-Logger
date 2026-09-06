@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/USER_GUIDE.md)
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.19.3. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.19.4. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -73,13 +73,13 @@ Die linke Navigation öffnet:
 - **Logbuch & Sync** – lokale QSOs, Sync- und QSL-Status
 - **Statistiken** – lokale Auswertungen
 - **DX Cluster** – Spots empfangen, filtern und übernehmen
-- **CAT Setup** – Funkgerät über Hamlib verbinden
+- **CAT Setup** – Funkgerät und Rotor über Hamlib verbinden
 - **UDP Logging** – QSOs von WSJT-X oder anderen Programmen empfangen
 - **Einstellungen** – App, Station, Online-Dienste und Speicherorte
 
 Das DA6IT.de-Logo oben links ist anklickbar und öffnet `https://da6it.de/`. Der Status unten und links zeigt `LOCAL ONLY` oder `WAVELOG ONLINE`.
 
-Die Oberfläche passt Schrift, Karten, Tabellenzeilen, Abstände und Aktionsleisten gemeinsam an die Fenstergröße an. Bei geringer Höhe werden in den Einstellungen ausschließlich zusätzliche Erklärungstexte ausgeblendet; Eingabefelder und Schaltflächen bleiben erreichbar. Unterstützt werden Fenster ab 900 × 580 Pixel. Der Release-Prozess kontrolliert alle Hauptseiten und Einstellungs-Tabs automatisch in mehreren Größen.
+Die Oberfläche passt Schrift, Karten, Tabellenzeilen, Abstände und Aktionsleisten gemeinsam an die Fenstergröße an. Bei geringer Höhe werden in den Einstellungen zusätzliche Erklärungstexte ausgeblendet; lange Geräteeinstellungen wie das CAT Setup können zusätzlich vertikal gescrollt werden, damit Eingabefelder und Schaltflächen erreichbar bleiben. Unterstützt werden Fenster ab 900 × 580 Pixel. Der Release-Prozess kontrolliert alle Hauptseiten und Einstellungs-Tabs automatisch in mehreren Größen.
 
 ## 4. Profile und Einstellungen
 
@@ -284,7 +284,7 @@ Ab Version 0.17.0 verwendet jedes Profil genau eine fortlaufende ADI-Datei. Beim
 
 Statistiken werden ausschließlich aus dem lokalen Logbuch berechnet. Filterbar sind Zeitraum und Operator. Angezeigt werden unter anderem QSO-Anzahl, DXCC-Entities, Bänder, Modes, Länder, häufige Rufzeichen sowie Sync- und QSL-Status.
 
-## 11. CAT und Hamlib
+## 11. CAT, Rotor und Hamlib
 
 ![CAT Setup](screenshots/cat-setup.png)
 
@@ -297,9 +297,20 @@ CAT startet nach jedem App-Start bewusst ausgeschaltet. Der Logger übernimmt Fr
 
 Beim Stoppen von CAT, Profilwechsel und Programmende wird der von der App gestartete `rigctld`-Prozess beendet.
 
+
+### Rotorsteuerung
+
+Unter **Rotorsteuerung** im CAT Setup wird der Rotor separat über Hamlib `rotctld` verbunden. Zur Auswahl stehen die von Hamlib gelieferten Rotormodelle, eine Schnittstelle beziehungsweise ein COM-Port, Baudrate, lokaler `rotctld`-Port und Abfrageintervall. Der von der App gestartete Dienst lauscht nur auf `127.0.0.1`.
+
+Zum Testen ohne Hardware kann **Hamlib Dummy [ID 1]** gewählt werden. Der Dummy simuliert Bewegung, sodass Live-Position, Ziel, Kompass und STOP geprüft werden können.
+
+Sind eigener und fremder Locator bekannt, verwendet das QSO-Log die berechnete Peilung als Ziel. **Rotor drehen** startet die Bewegung erst nach einem ausdrücklichen Klick; **STOP** hält sie an. Ein Callbook-Lookup oder eine neu berechnete Peilung bewegt die Antenne niemals automatisch. Bei Az/El-Rotoren bleibt die zuletzt gelesene Elevation erhalten.
+
+Beim Profilwechsel, Hamlib-Wechsel und Programmende wird die von der App gestartete Rotorsteuerung beendet.
+
 ### Hamlib aktualisieren
 
-Unter Windows kann **Nach Update suchen** im CAT Setup jederzeit von Hand ausgeführt werden. Die App berücksichtigt ausschließlich stabile Hamlib-Versionen, lädt das offizielle Windows-x64-Paket aus dem Hamlib-GitHub-Release und prüft die von GitHub veröffentlichte SHA-256-Summe. Erst danach wird `rigctld --version` als Funktionstest ausgeführt und die neue Laufzeit aktiviert. Eine laufende CAT-Verbindung wird vorher beendet.
+Unter Windows kann **Nach Update suchen** im CAT Setup jederzeit von Hand ausgeführt werden. Die App berücksichtigt ausschließlich stabile Hamlib-Versionen, lädt das offizielle Windows-x64-Paket aus dem Hamlib-GitHub-Release und prüft die von GitHub veröffentlichte SHA-256-Summe. Erst danach wird `rigctld --version` als Funktionstest ausgeführt und die neue Laufzeit aktiviert. Laufende CAT- und Rotorverbindungen werden vorher beendet.
 
 Die zuvor verwendete Laufzeit bleibt als Rückfallkopie erhalten. Mit **Vorherige Version wiederherstellen** lassen sich aktuelle und vorige Version wieder tauschen, falls ein Funkgerät mit der neuen Hamlib-Version schlechter arbeitet. Logger-Profile, CAT-Einstellungen und QSOs werden dabei nicht verändert.
 

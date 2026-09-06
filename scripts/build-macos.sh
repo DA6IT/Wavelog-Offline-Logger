@@ -64,16 +64,19 @@ test -d "${APP_BUNDLE}"
 test -x "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
 
 BUNDLED_RIGCTLD="$(find "${APP_BUNDLE}/Contents" -path '*/hamlib/rigctld' -type f -print -quit)"
-if [[ -z "${BUNDLED_RIGCTLD}" ]]; then
-  echo "rigctld fehlt im App-Bundle." >&2
+BUNDLED_ROTCTLD="$(find "${APP_BUNDLE}/Contents" -path '*/hamlib/rotctld' -type f -print -quit)"
+if [[ -z "${BUNDLED_RIGCTLD}" || -z "${BUNDLED_ROTCTLD}" ]]; then
+  echo "rigctld oder rotctld fehlt im App-Bundle." >&2
   exit 1
 fi
-chmod 755 "${BUNDLED_RIGCTLD}"
+chmod 755 "${BUNDLED_RIGCTLD}" "${BUNDLED_ROTCTLD}"
 "${BUNDLED_RIGCTLD}" --version
+"${BUNDLED_ROTCTLD}" --version
 
 # PyInstaller performs an ad-hoc signature. Sign the embedded CAT binary and
 # the complete bundle again after setting its executable bit.
 codesign --force --sign - --timestamp=none "${BUNDLED_RIGCTLD}"
+codesign --force --sign - --timestamp=none "${BUNDLED_ROTCTLD}"
 codesign --force --deep --sign - --timestamp=none "${APP_BUNDLE}"
 codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
 

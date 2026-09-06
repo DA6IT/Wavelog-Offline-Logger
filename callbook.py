@@ -6,7 +6,8 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
+# Untrusted QRZ XML is size-bounded and rejects DTD/entity declarations before parsing.
+import xml.etree.ElementTree as ET  # nosec B405
 
 from logger_core import secure_urlopen
 from dataclasses import asdict, dataclass, fields
@@ -14,6 +15,7 @@ from typing import Any, Callable
 
 
 QRZ_XML_URL = "https://xmldata.qrz.com/xml/current/"
+MAX_QRZ_XML_BYTES = 1024 * 1024
 CALLBOOK_SOURCE_WAVELOG = "wavelog"
 CALLBOOK_SOURCE_QRZ = "qrz"
 CALLBOOK_SOURCE_DISABLED = "disabled"
@@ -143,6 +145,23 @@ def normalize_wavelog_result(payload: dict[str, Any], requested_call: str = "") 
     )
 
 
+def _validated_qrz_xml(xml_bytes: bytes) -> bytes:
+    """Return bounded QRZ XML after rejecting declarations used for entity attacks."""
+    if not isinstance(xml_bytes, (bytes, bytearray)):
+        raise CallbookError("QRZ.com hat keine gültige XML-Antwort geliefert")
+    data = bytes(xml_bytes)
+    if len(data) > MAX_QRZ_XML_BYTES:
+        raise CallbookError("QRZ.com XML-Antwort ist unerwartet groß")
+    # QRZ XML is expected to be ASCII/UTF-8 compatible. Reject multibyte
+    # encodings so markup checks below cannot be bypassed with UTF-16/32.
+    if b"\x00" in data:
+        raise CallbookError("QRZ.com XML-Antwort verwendet eine nicht erlaubte XML-Codierung")
+    upper = data.upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise CallbookError("QRZ.com XML-Antwort enthält nicht erlaubte XML-Deklarationen")
+    return data
+
+
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
@@ -155,7 +174,8 @@ def _children(element: ET.Element | None) -> dict[str, str]:
 
 def parse_qrz_xml(xml_bytes: bytes, requested_call: str = "") -> tuple[CallbookResult | None, dict[str, str]]:
     try:
-        root = ET.fromstring(xml_bytes)
+        # Payload was bounded and DTD/entity declarations were rejected above.
+        root = ET.fromstring(_validated_qrz_xml(xml_bytes))  # nosec B314
     except ET.ParseError as exc:
         raise CallbookError("QRZ.com hat keine gültige XML-Antwort geliefert") from exc
     callsign_node = next((node for node in root.iter() if _local_name(node.tag).lower() == "callsign"), None)
@@ -214,7 +234,10 @@ class QrzClient:
         try:
             open_request = self.opener or secure_urlopen
             with open_request(request, timeout=self.timeout) as response:
-                return response.read()
+                payload = response.read(MAX_QRZ_XML_BYTES + 1)
+                if len(payload) > MAX_QRZ_XML_BYTES:
+                    raise CallbookError("QRZ.com XML-Antwort ist unerwartet groß")
+                return payload
         except urllib.error.HTTPError as exc:
             raise CallbookError(f"QRZ.com HTTP {exc.code}") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:

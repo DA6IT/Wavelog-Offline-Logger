@@ -1,4 +1,4 @@
-# User guide — DA6IT.de Wavelog Offline Logger 0.19.3
+# User guide — DA6IT.de Wavelog Offline Logger 0.19.4
 
 [Deutsch](../USER_GUIDE.md) · **English**
 
@@ -56,15 +56,26 @@ ADIF import validates records, creates a ZIP backup, skips duplicates and verifi
 
 Statistics are calculated only from the local ADI log. Filter by period and operator to inspect QSO count, entities, bands, modes, countries, callsigns, synchronization and confirmation status.
 
-## 8. CAT / Hamlib
+## 8. CAT / Rotor / Hamlib
 
 ![CAT Setup](../screenshots/en/cat-setup.png)
 
 Select the radio model, interface or network target, serial parameters and polling interval. Save, then start CAT or test the connection. CAT deliberately starts manually after every app launch. Frequency and safe mode information feed normal, Fast and contest logging. TUNE/ATU asks for confirmation, turns red while active and never enables PTT by itself.
 
+
+### Rotor control
+
+The **Rotor control** area in CAT Setup uses Hamlib `rotctld` independently from radio CAT. Choose the Hamlib rotor model, interface/COM port, baud rate, local `rotctld` port and polling interval. The app-managed daemon listens on `127.0.0.1` only.
+
+**Hamlib Dummy [ID 1]** provides hardware-free testing and simulates movement so live position, target, compass and STOP can be verified.
+
+When both station grids are known, the QSO form uses the calculated bearing as the target. **Turn rotor** starts movement only after an explicit click; **STOP** halts it. Callsign lookup and bearing calculation never move hardware automatically. On Az/El rotors the last known elevation is preserved.
+
+Profile changes, Hamlib replacement and application shutdown stop the app-managed rotor runtime.
+
 ### Updating Hamlib
 
-On Windows, **Check for update** in CAT Setup performs an on-demand check. The app accepts stable Hamlib releases only, downloads the official Windows x64 archive from the Hamlib GitHub release, verifies GitHub's published SHA-256 digest and runs `rigctld --version` before activating it. Any active CAT connection is stopped first.
+On Windows, **Check for update** in CAT Setup performs an on-demand check. The app accepts stable Hamlib releases only, downloads the official Windows x64 archive from the Hamlib GitHub release, verifies GitHub's published SHA-256 digest and runs `rigctld --version` before activating it. Any active CAT and rotor connections are stopped first.
 
 The previous runtime is retained. Use **Restore previous version** to swap back if a radio works less reliably with the update. Profiles, CAT settings and QSOs are never changed by this operation.
 

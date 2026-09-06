@@ -7,13 +7,14 @@ import sqlite3
 import sys
 import threading
 import zipfile
-import xmlrpc.client
+# xmlrpc.client is used only for deterministic local FLRig test fixtures.
+import xmlrpc.client  # nosec B411
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from tempfile import TemporaryDirectory
 from logger_core import (
     LogStore, MetadataDB, SyncEngine, ContestSyncEngine, WavelogClient,
     WavelogOnlineSettings, WavelogError,
-    build_fast_log_qso, qso_hash, remote_qsos_for_station, secure_tls_context,
+    build_fast_log_qso, qso_hash, remote_qsos_for_station, secure_tls_context, secure_urlopen,
     service_statuses_from_adif,
 )
 from xota import (
@@ -21,6 +22,39 @@ from xota import (
     initial_bearing_degrees, maidenhead_coordinates, maidenhead_locator,
     merge_candidate_references, parse_reference_csv, station_match_score,
 )
+
+# secure_urlopen keeps backwards-compatible HTTP(S) support but rejects
+# file:/ftp:/custom schemes before any network request is attempted.
+for blocked_url in ("file:///tmp/test", "ftp://example.invalid/test"):
+    try:
+        secure_urlopen(blocked_url)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f"unsafe URL scheme accepted: {blocked_url}")
+
+# Redirects must not leak a Wavelog bearer token to another origin and an
+# HTTPS request must never be redirected down to clear-text HTTP.
+from logger_core import _SafeRedirectHandler
+redirect_handler = _SafeRedirectHandler()
+auth_request = __import__("urllib.request", fromlist=["Request"]).Request(
+    "https://wavelog.example.test/api",
+    headers={"Authorization": "Bearer secret", "Cookie": "session=test"},
+)
+redirected = redirect_handler.redirect_request(
+    auth_request, None, 302, "Found", {}, "https://other.example.test/api"
+)
+assert redirected is not None
+assert redirected.get_header("Authorization") is None
+assert redirected.get_header("Cookie") is None
+try:
+    redirect_handler.redirect_request(
+        auth_request, None, 302, "Found", {}, "http://wavelog.example.test/api"
+    )
+except __import__("urllib.error", fromlist=["HTTPError"]).HTTPError:
+    pass
+else:
+    raise AssertionError("HTTPS-to-HTTP redirect downgrade must be rejected")
 
 class FakeClient:
     def __init__(self):
@@ -759,6 +793,7 @@ from cat_control import (
     DEFAULT_FLRIG_ENDPOINT, FLRIG_MODEL_ID, FTX1_MODEL_ID, CatConfig, build_rigctld_args,
     discover_flrig, format_frequency_mhz, hamlib_mode_for_logger,
     map_hamlib_mode, parse_network_endpoint, parse_rigctld_models, probe_flrig,
+    _validated_flrig_xml,
 )
 
 model_output = """\
@@ -801,6 +836,15 @@ flrig_args = build_rigctld_args(flrig_config)
 assert flrig_args == ["-m", "4", "-r", "192.168.10.25:12346", "-T", "127.0.0.1", "-t", "4540"]
 assert parse_network_endpoint(DEFAULT_FLRIG_ENDPOINT) == ("127.0.0.1", 12345)
 assert parse_network_endpoint("flrig-shack.local:12349") == ("flrig-shack.local", 12349)
+try:
+    _validated_flrig_xml(
+        ('<?xml version="1.0" encoding="utf-16"?><!DOCTYPE methodResponse>'
+         '<methodResponse></methodResponse>').encode("utf-16")
+    )
+except ValueError:
+    pass
+else:
+    raise AssertionError("UTF-16 FLRig XML must not bypass validation")
 
 probed_flrig = []
 def fake_flrig_probe(endpoint, timeout):
@@ -814,12 +858,22 @@ assert found_flrig == [("127.0.0.1:12347", "2.0.04")]
 assert any(endpoint == "127.0.0.1:12345" for endpoint, _timeout in probed_flrig)
 
 class FlrigProbeHandler(BaseHTTPRequestHandler):
+    unsafe_response = False
+
     def do_POST(self):
         request_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         assert self.path == "/RPC2"
         _params, method = xmlrpc.client.loads(request_body)
         assert method == "main.get_version"
-        response_body = xmlrpc.client.dumps(("2.0.04",), methodresponse=True).encode("utf-8")
+        if self.__class__.unsafe_response:
+            response_body = (
+                b'<?xml version="1.0"?>'
+                b'<!DOCTYPE methodResponse [<!ENTITY x "2.0.04">]>'
+                b'<methodResponse><params><param><value><string>&x;</string></value>'
+                b'</param></params></methodResponse>'
+            )
+        else:
+            response_body = xmlrpc.client.dumps(("2.0.04",), methodresponse=True).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/xml")
         self.send_header("Content-Length", str(len(response_body)))
@@ -834,7 +888,10 @@ probe_thread = threading.Thread(target=probe_server.serve_forever, daemon=True)
 probe_thread.start()
 try:
     assert probe_flrig(f"127.0.0.1:{probe_server.server_port}", timeout=1.0) == "2.0.04"
+    FlrigProbeHandler.unsafe_response = True
+    assert probe_flrig(f"127.0.0.1:{probe_server.server_port}", timeout=1.0) is None
 finally:
+    FlrigProbeHandler.unsafe_response = False
     probe_server.shutdown()
     probe_server.server_close()
     probe_thread.join(timeout=2)
@@ -1524,19 +1581,44 @@ print("DX CLUSTER SELFTEST OK")
 
 # Callbook normalization, QRZ session handling and the offline cache must work
 # without performing a real network request.
-from callbook import CallbookResult, QrzClient, enrich_qso_from_callbook, normalize_wavelog_result, parse_qrz_xml
+from callbook import CallbookError, CallbookResult, QrzClient, enrich_qso_from_callbook, normalize_wavelog_result, parse_qrz_xml
 
 qrz_login = b'''<?xml version="1.0"?><QRZDatabase xmlns="http://www.qrz.com"><Session><Key>abc123</Key></Session></QRZDatabase>'''
 qrz_lookup = b'''<?xml version="1.0"?><QRZDatabase xmlns="http://www.qrz.com"><Callsign><call>DL1ABC</call><fname>Ada</fname><addr2>Bonn</addr2><grid>JO30AA12</grid><land>Germany</land><image>https://files.qrz.com/test.jpg</image><cqzone>14</cqzone><ituzone>28</ituzone></Callsign><Session><Key>abc123</Key></Session></QRZDatabase>'''
 parsed, session = parse_qrz_xml(qrz_lookup, "DL1ABC")
 assert session["key"] == "abc123"
 assert parsed and parsed.name == "Ada" and parsed.grid == "JO30AA12" and parsed.qth == "Bonn"
+unsafe_qrz = (
+    b'<?xml version="1.0"?>'
+    b'<!DOCTYPE QRZDatabase [<!ENTITY x "unsafe">]>'
+    b'<QRZDatabase><Callsign><call>DL1ABC</call><fname>&x;</fname></Callsign></QRZDatabase>'
+)
+try:
+    parse_qrz_xml(unsafe_qrz, "DL1ABC")
+except CallbookError:
+    pass
+else:
+    raise AssertionError("QRZ XML with DTD/entity declaration must be rejected")
+unsafe_qrz_utf16 = (
+    '<?xml version="1.0" encoding="utf-16"?>'
+    '<!DOCTYPE QRZDatabase [<!ENTITY x "unsafe">]>'
+    '<QRZDatabase><Callsign><call>DL1ABC</call><fname>&x;</fname></Callsign></QRZDatabase>'
+).encode("utf-16")
+try:
+    parse_qrz_xml(unsafe_qrz_utf16, "DL1ABC")
+except CallbookError:
+    pass
+else:
+    raise AssertionError("UTF-16 QRZ XML must not bypass DTD/entity validation")
 
 class FakeXmlResponse:
     def __init__(self, payload): self.payload = payload
     def __enter__(self): return self
     def __exit__(self, *_args): return False
-    def read(self): return self.payload
+    def read(self, amount=-1):
+        if amount is None or amount < 0:
+            return self.payload
+        return self.payload[:amount]
 
 responses = iter((qrz_login, qrz_lookup))
 requests = []
@@ -1694,11 +1776,13 @@ with TemporaryDirectory() as d:
     archive_buffer = io.BytesIO()
     with zipfile.ZipFile(archive_buffer, "w") as archive:
         archive.writestr("hamlib-w64-4.8.0/bin/rigctld.exe", b"test executable")
+        archive.writestr("hamlib-w64-4.8.0/bin/rotctld.exe", b"test rotor executable")
         archive.writestr("hamlib-w64-4.8.0/bin/libhamlib-4.dll", b"test dll")
         archive.writestr("hamlib-w64-4.8.0/COPYING.txt", b"license")
     extracted = Path(d) / "runtime"
     _safe_extract_runtime(archive_buffer.getvalue(), extracted)
     assert (extracted / "rigctld.exe").read_bytes() == b"test executable"
+    assert (extracted / "rotctld.exe").read_bytes() == b"test rotor executable"
     assert (extracted / "libhamlib-4.dll").is_file()
 
 with TemporaryDirectory() as d:

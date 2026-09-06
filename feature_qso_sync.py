@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import sys
 import threading
 from datetime import datetime
@@ -969,9 +971,17 @@ class QsoSyncFeatureMixin:
         try:
             if sys.platform == "win32":
                 os.startfile(p)
-            elif sys.platform == "darwin":
-                os.system(f'open "{p}"')
             else:
-                os.system(f'xdg-open "{p}" >/dev/null 2>&1 &')
+                command = "open" if sys.platform == "darwin" else "xdg-open"
+                executable = shutil.which(command)
+                if not executable:
+                    raise RuntimeError(f"{command} wurde auf diesem System nicht gefunden")
+                subprocess.Popen(
+                    [executable, p],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
         except Exception as e:
             messagebox.showerror("Ordner öffnen", str(e), parent=self)

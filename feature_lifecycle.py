@@ -21,6 +21,7 @@ class LifecycleFeatureMixin:
             # Freeze external input before the final sync so UDP cannot append
             # another QSO while the completion dialog is waiting for OK.
             self._stop_cat_runtime(update_ui=False)
+            self._stop_rotor_runtime(update_ui=False)
             self._stop_dx_cluster_runtime(update_ui=False)
             self._stop_dx_spotter_runtime(update_ui=False)
             self._stop_udp_log_runtime(update_ui=False)
@@ -81,6 +82,7 @@ class LifecycleFeatureMixin:
         try:
             write_startup_log("Programm wird geschlossen")
             self._stop_cat_runtime(update_ui=False)
+            self._stop_rotor_runtime(update_ui=False)
             self._stop_dx_cluster_runtime(update_ui=False)
             self._stop_dx_spotter_runtime(update_ui=False)
             self._stop_udp_log_runtime(update_ui=False)

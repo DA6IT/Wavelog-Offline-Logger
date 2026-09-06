@@ -23,13 +23,14 @@ An offline-first desktop logger for amateur radio: log contacts in the field eve
 - Wavelog or direct QRZ.com callbook data, including station photos
 - optional desktop notification after a locally saved QSO
 - bundled Hamlib CAT control including TUNE/ATU and a manual Windows Hamlib updater with rollback
+- Hamlib `rotctld` rotor control with live position, compass, bearing target, STOP and hardware-free Dummy testing
 - Telnet DX Cluster, filters, worked markers and public spotting
 - bidirectional WSJT-X file synchronization through `wsjtx_log.adi` with backup, duplicate protection and optional startup/shutdown synchronization
 - WSJT-X live status and logged-contact reception remain available over UDP
 - complete German and English UI, Light and Dark themes
 - verified in-app updater; confirmed Windows updates install automatically
 - ZIP backup and restore for profiles, settings, ADI logs and metadata
-- responsive layouts checked at several window sizes before release
+- responsive layouts with scrollable long device settings on small windows and release checks at several window sizes
 - Windows x64, macOS Apple Silicon/Intel, Debian/Ubuntu, AppImage and Arch packages
 
 ## WSJT-X Sync

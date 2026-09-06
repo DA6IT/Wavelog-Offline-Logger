@@ -32,12 +32,80 @@ class CatFeatureMixin:
         self.tuner_start_pending = False
 
     def _build_cat_page(self):
-        p = self._new_page("cat")
+        root = self._new_page("cat")
+        root.columnconfigure(0, weight=1)
+        root.rowconfigure(0, weight=1)
+
+        cat_canvas = tk.Canvas(
+            root, bg=theme.BG, highlightthickness=0, borderwidth=0,
+        )
+        cat_scrollbar = ttk.Scrollbar(
+            root, orient="vertical", command=cat_canvas.yview,
+        )
+        cat_canvas.configure(yscrollcommand=cat_scrollbar.set)
+        cat_canvas.grid(row=0, column=0, sticky="nsew")
+        cat_scrollbar.grid(row=0, column=1, sticky="ns")
+
+        p = ttk.Frame(cat_canvas, style="TFrame")
+        cat_window = cat_canvas.create_window((0, 0), window=p, anchor="nw")
+
+        def _cat_inner_configured(_event=None):
+            try:
+                cat_canvas.configure(scrollregion=cat_canvas.bbox("all"))
+            except tk.TclError:
+                pass
+
+        def _cat_canvas_configured(event):
+            try:
+                cat_canvas.itemconfigure(cat_window, width=event.width)
+                cat_canvas.configure(scrollregion=cat_canvas.bbox("all"))
+            except tk.TclError:
+                pass
+
+        p.bind("<Configure>", _cat_inner_configured, add="+")
+        cat_canvas.bind("<Configure>", _cat_canvas_configured, add="+")
+        self.cat_scroll_canvas = cat_canvas
+
+        def _cat_mousewheel(event):
+            # Tkinter connects the scrollbar itself, but mouse-wheel events do
+            # not automatically scroll a Canvas. Handle the wheel globally and
+            # act only while the pointer is actually over the visible CAT page.
+            if getattr(self, "current_page", "") != "cat":
+                return None
+            try:
+                x = event.x_root - cat_canvas.winfo_rootx()
+                y = event.y_root - cat_canvas.winfo_rooty()
+                if not (0 <= x < cat_canvas.winfo_width() and 0 <= y < cat_canvas.winfo_height()):
+                    return None
+                bbox = cat_canvas.bbox("all")
+                if not bbox or (bbox[3] - bbox[1]) <= cat_canvas.winfo_height():
+                    return None
+            except tk.TclError:
+                return None
+
+            if getattr(event, "num", None) == 4:
+                steps = -1
+            elif getattr(event, "num", None) == 5:
+                steps = 1
+            else:
+                delta = int(getattr(event, "delta", 0) or 0)
+                if delta == 0:
+                    return None
+                steps = -int(delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1)
+                steps = max(-3, min(3, steps))
+
+            cat_canvas.yview_scroll(steps, "units")
+            return "break"
+
+        # Windows/macOS use <MouseWheel>; X11/Linux commonly uses buttons 4/5.
+        self.bind_all("<MouseWheel>", _cat_mousewheel, add="+")
+        self.bind_all("<Button-4>", _cat_mousewheel, add="+")
+        self.bind_all("<Button-5>", _cat_mousewheel, add="+")
+
         p.columnconfigure(0, weight=1)
         p.columnconfigure(1, weight=1)
-        p.rowconfigure(0, weight=1)
 
-        left = self._card(p, row=0, column=0, sticky="nsew", padx=(0, 8))
+        left = self._card(p, row=0, column=0, sticky="new", padx=(0, 8))
         left.columnconfigure(0, weight=1)
         ttk.Label(left, text="Funkgerät & Schnittstelle", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
@@ -113,7 +181,7 @@ class CatFeatureMixin:
             ttk.Label(serial, text=label, style="Card.TLabel").grid(row=row * 2, column=column, sticky="w", padx=(0, 8), pady=(0 if row == 0 else 8, 3))
             ttk.Combobox(serial, textvariable=variable, values=values, state="readonly", width=16).grid(row=row * 2 + 1, column=column, sticky="ew", padx=(0, 8))
 
-        right = self._card(p, row=0, column=1, sticky="nsew", padx=(8, 0))
+        right = self._card(p, row=0, column=1, sticky="new", padx=(8, 0))
         right.columnconfigure(0, weight=1)
         ttk.Label(right, text="Interne Hamlib-Steuerung", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.cat_hamlib_info = tk.Label(
@@ -210,6 +278,7 @@ class CatFeatureMixin:
             wraplength=470,
         )
         hint.grid(row=8, column=0, sticky="w", pady=(16, 0))
+        self._build_rotor_cat_controls(right, row=9)
         self._refresh_hamlib_update_controls()
         self.after(50, self._load_cat_runtime_info)
 
@@ -368,6 +437,7 @@ class CatFeatureMixin:
             self._hamlib_update_failed(str(exc))
             return
         self._stop_cat_runtime()
+        self._stop_rotor_runtime(update_ui=False)
         self._set_hamlib_update_busy(True, (
             f"Downloading, verifying and installing Hamlib {release.version} …"
             if self.language == "en" else
@@ -400,6 +470,7 @@ class CatFeatureMixin:
             f"Hamlib {version} installed" if self.language == "en" else f"Hamlib {version} installiert"
         )
         self._load_cat_runtime_info()
+        self._load_rotor_runtime_info()
         messagebox.showinfo(
             "Hamlib update" if self.language == "en" else "Hamlib-Update",
             (f"Hamlib {version} was installed and verified successfully.\n\nCAT can now be started again."
@@ -437,6 +508,7 @@ class CatFeatureMixin:
         ):
             return
         self._stop_cat_runtime()
+        self._stop_rotor_runtime(update_ui=False)
         self._set_hamlib_update_busy(True, (
             "Restoring the previous Hamlib version …" if self.language == "en" else
             "Vorherige Hamlib-Version wird wiederhergestellt …"
@@ -464,6 +536,7 @@ class CatFeatureMixin:
             f"Hamlib {version} wiederhergestellt"
         )
         self._load_cat_runtime_info()
+        self._load_rotor_runtime_info()
         messagebox.showinfo(
             "Restore Hamlib" if self.language == "en" else "Hamlib wiederherstellen",
             f"Hamlib {version} is now in use." if self.language == "en" else

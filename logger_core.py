@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.19.3"
+VERSION = "0.19.4"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -61,9 +61,64 @@ def secure_tls_context():
         return context
 
 
+def _url_origin(parts: urllib.parse.SplitResult) -> tuple[str, str, int]:
+    scheme = (parts.scheme or "").lower()
+    host = (parts.hostname or "").lower().rstrip(".")
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise ValueError("Ungültiger URL-Port") from exc
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return scheme, host, port
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Keep redirects on HTTP(S), prevent TLS downgrade and avoid credential leaks."""
+
+    _SENSITIVE_HEADERS = ("Authorization", "Proxy-Authorization", "Cookie")
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        resolved = urllib.parse.urljoin(req.full_url, newurl)
+        old_parts = urllib.parse.urlsplit(req.full_url)
+        new_parts = urllib.parse.urlsplit(resolved)
+        old_scheme, _old_host, _old_port = _url_origin(old_parts)
+        new_scheme, new_host, _new_port = _url_origin(new_parts)
+
+        if new_scheme not in {"http", "https"} or not new_host:
+            raise urllib.error.HTTPError(
+                resolved, code, "Unsicheres Redirect-Ziel", headers, fp
+            )
+        if old_scheme == "https" and new_scheme != "https":
+            raise urllib.error.HTTPError(
+                resolved, code, "HTTPS-Downgrade per Redirect blockiert", headers, fp
+            )
+
+        redirected = super().redirect_request(req, fp, code, msg, headers, resolved)
+        if redirected is None:
+            return None
+
+        if _url_origin(old_parts) != _url_origin(new_parts):
+            for name in self._SENSITIVE_HEADERS:
+                redirected.remove_header(name)
+        return redirected
+
+
 def secure_urlopen(request, *, timeout: int = 15):
-    """Open HTTPS with certificate verification; never silently downgrade."""
-    return urllib.request.urlopen(request, timeout=timeout, context=secure_tls_context())
+    """Open only HTTP(S); HTTPS uses verified TLS and redirects are hardened."""
+    url = request.full_url if isinstance(request, urllib.request.Request) else str(request)
+    parsed = urllib.parse.urlsplit(url)
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if scheme not in {"http", "https"} or not host:
+        raise ValueError("Nur HTTP- und HTTPS-URLs sind erlaubt")
+    _url_origin(parsed)  # validates the explicit port, if present
+
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=secure_tls_context()),
+        _SafeRedirectHandler(),
+    )
+    return opener.open(request, timeout=timeout)
 
 BAND_RANGES = [
     (0.1357, 0.1378, "2190m"), (0.472, 0.479, "630m"),
@@ -1442,7 +1497,8 @@ class MetadataDB:
             if remote_hash is not None:
                 sets.append("remote_hash=?"); vals.append(remote_hash)
             vals.append(local_id)
-            self.conn.execute(f"UPDATE sync_meta SET {','.join(sets)} WHERE local_id=?", vals)
+            # Column fragments in sets are fixed literals above; every value remains parameterized.
+            self.conn.execute(f"UPDATE sync_meta SET {','.join(sets)} WHERE local_id=?", vals)  # nosec B608
             self.conn.commit()
 
     def delete_meta(self, local_id: str):

@@ -134,10 +134,14 @@ def _rigctld_path(directory: Path) -> Path:
     return Path(directory) / ("rigctld.exe" if sys.platform == "win32" else "rigctld")
 
 
+def _rotctld_path(directory: Path) -> Path:
+    return Path(directory) / ("rotctld.exe" if sys.platform == "win32" else "rotctld")
+
+
 def usable_hamlib_dir(directory: Path) -> bool:
     try:
-        path = _rigctld_path(directory)
-        return path.is_file() and path.stat().st_size > 0
+        paths = (_rigctld_path(directory), _rotctld_path(directory))
+        return all(path.is_file() and path.stat().st_size > 0 for path in paths)
     except OSError:
         return False
 
@@ -179,6 +183,8 @@ def _safe_extract_runtime(archive_bytes: bytes, target: Path) -> None:
                 docs.append((info, parts[-1]))
         if not any(name.lower() == "rigctld.exe" for _info, name in bin_files):
             raise HamlibUpdateError("Im Hamlib-Paket fehlt rigctld.exe")
+        if not any(name.lower() == "rotctld.exe" for _info, name in bin_files):
+            raise HamlibUpdateError("Im Hamlib-Paket fehlt rotctld.exe")
         target.mkdir(parents=True, exist_ok=False)
         seen: set[str] = set()
         for info, name in [*bin_files, *docs]:

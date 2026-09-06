@@ -42,8 +42,11 @@ make install
 popd >/dev/null
 
 RIGCTLD="${INSTALL_DIR}/bin/rigctld"
+ROTCTLD="${INSTALL_DIR}/bin/rotctld"
 test -x "${RIGCTLD}"
+test -x "${ROTCTLD}"
 "${RIGCTLD}" --version
+"${ROTCTLD}" --version
 if ldd "${RIGCTLD}" | grep -qi 'libhamlib'; then
   echo "rigctld wurde unerwartet gegen eine externe libhamlib gelinkt." >&2
   exit 1
@@ -52,12 +55,13 @@ fi
 rm -rf "${OUTPUT_DIR}"
 mkdir -p "${OUTPUT_DIR}"
 cp "${RIGCTLD}" "${OUTPUT_DIR}/rigctld"
+cp "${ROTCTLD}" "${OUTPUT_DIR}/rotctld"
 cp "${SOURCE_DIR}/LICENSE" "${OUTPUT_DIR}/LICENSE.txt"
 cp "${SOURCE_DIR}/COPYING" "${OUTPUT_DIR}/COPYING.txt"
 cp "${SOURCE_DIR}/COPYING.LIB" "${OUTPUT_DIR}/COPYING.LIB.txt"
 printf 'Hamlib %s (Linux %s)\nSource: %s\n' \
   "${HAMLIB_VERSION}" "${MACHINE_ARCH}" "${ARCHIVE_URL}" \
   > "${OUTPUT_DIR}/HAMLIB_VERSION.txt"
-chmod 755 "${OUTPUT_DIR}/rigctld"
+chmod 755 "${OUTPUT_DIR}/rigctld" "${OUTPUT_DIR}/rotctld"
 
 echo "Hamlib wurde vorbereitet: ${OUTPUT_DIR}"

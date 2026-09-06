@@ -164,7 +164,7 @@ class LogbookFeatureMixin:
         self.callbook_source_label = tk.Label(callbook_head, text="OFFLINE", bg=theme.NEUTRAL_BADGE_BG, fg=theme.MUTED, font=("Segoe UI Semibold", 8), padx=8, pady=3)
         self.callbook_source_label.grid(row=0, column=1, sticky="e")
 
-        self.callbook_image_frame = tk.Frame(right, bg=theme.PHOTO_BG, height=160, relief="flat")
+        self.callbook_image_frame = tk.Frame(right, bg=theme.PHOTO_BG, height=104, relief="flat")
         self.callbook_image_frame.grid(row=5, column=0, sticky="ew", pady=(8, 7))
         self.callbook_image_frame.grid_propagate(False)
         self.callbook_image_frame.columnconfigure(0, weight=1)
@@ -183,19 +183,24 @@ class LogbookFeatureMixin:
             justify="left", anchor="w", wraplength=350,
         )
         self.callbook_distance_label.grid(row=8, column=0, sticky="ew", pady=(3, 0))
+        self.rotor_log_frame = tk.Frame(
+            right, bg=theme.SURFACE, highlightbackground=theme.BORDER, highlightthickness=1,
+        )
+        self.rotor_log_frame.grid(row=9, column=0, sticky="ew", pady=(8, 0))
+        self._build_rotor_log_controls(self.rotor_log_frame)
         self.callbook_status_label = tk.Label(
             right, text="Online-Abfrage optional · Offline-Logging bleibt immer verfügbar.",
             bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 8), justify="left", anchor="w", wraplength=350,
         )
-        self.callbook_status_label.grid(row=9, column=0, sticky="ew", pady=(5, 0))
-        ttk.Button(right, text="Callbook neu laden", style="Secondary.TButton", command=self._manual_callbook_lookup).grid(row=10, column=0, sticky="w", pady=(7, 0))
+        self.callbook_status_label.grid(row=10, column=0, sticky="ew", pady=(5, 0))
+        ttk.Button(right, text="Callbook neu laden", style="Secondary.TButton", command=self._manual_callbook_lookup).grid(row=11, column=0, sticky="w", pady=(7, 0))
 
-        ttk.Separator(right).grid(row=11, column=0, sticky="ew", pady=12)
-        ttk.Label(right, text="DXCC · offline", style="CardTitle.TLabel").grid(row=12, column=0, sticky="w")
+        ttk.Separator(right).grid(row=12, column=0, sticky="ew", pady=12)
+        ttk.Label(right, text="DXCC · offline", style="CardTitle.TLabel").grid(row=13, column=0, sticky="w")
         self.country_summary = tk.Label(right, bg=theme.CARD, fg=theme.TEXT, font=("Segoe UI", 9), justify="left", anchor="nw", wraplength=350)
-        self.country_summary.grid(row=13, column=0, sticky="ew", pady=(5, 0))
+        self.country_summary.grid(row=14, column=0, sticky="ew", pady=(5, 0))
         self.country_source = tk.Label(right, text="CTY.DAT · keine Internetverbindung nötig", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 8), justify="left", anchor="w")
-        self.country_source.grid(row=14, column=0, sticky="ew", pady=(3, 0))
+        self.country_source.grid(row=15, column=0, sticky="ew", pady=(3, 0))
 
         # Kept for existing profile and log-file update helpers; the compact
         # footer/header now present these details instead of a second side card.
@@ -224,6 +229,7 @@ class LogbookFeatureMixin:
             remote_lat, remote_lon = maidenhead_coordinates(remote_locator)
         except ValueError:
             self.callbook_distance_label.configure(text="")
+            self._set_rotor_target(None)
             return
         kilometres = distance_m(own_lat, own_lon, remote_lat, remote_lon) / 1000.0
         bearing = initial_bearing_degrees(own_lat, own_lon, remote_lat, remote_lon)
@@ -237,6 +243,7 @@ class LogbookFeatureMixin:
         else:
             text = f"Distance: approx. {distance_text} km · bearing {bearing:.0f}° ({direction})"
         self.callbook_distance_label.configure(text=text)
+        self._set_rotor_target(bearing)
 
     def _field(self, parent, label, var, row, col, span=1, key=None):
         ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=col, columnspan=span, sticky="w", padx=(0, 8), pady=(7, 3))
@@ -537,10 +544,7 @@ class LogbookFeatureMixin:
                 if image.width * image.height > 24_000_000:
                     return
                 image.thumbnail(
-                    (
-                        max(220, int(round(330 * self._ui_scale))),
-                        max(100, int(round(150 * self._ui_scale))),
-                    ),
+                    (180, 94),
                     Image.Resampling.LANCZOS,
                 )
                 photo = ImageTk.PhotoImage(image)

@@ -196,7 +196,7 @@ class UiShellFeatureMixin:
         if hasattr(self, "log_page"):
             self.log_page.columnconfigure(1, minsize=max(255, int(round(370 * scale))))
         if hasattr(self, "callbook_image_frame"):
-            self.callbook_image_frame.configure(height=max(105, int(round(160 * scale))))
+            self.callbook_image_frame.configure(height=104)
         if hasattr(self, "qso_history_frame") and hasattr(self, "call_var"):
             self._update_qso_worked_history(self.call_var.get().strip().upper())
         self._apply_settings_responsive_layout()
