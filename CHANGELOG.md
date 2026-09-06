@@ -2,6 +2,29 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.19.3] - 2026-09-06
+
+### Added
+
+- bidirektionaler dateibasierter **WSJT-X-Sync** zwischen `wsjtx_log.adi` und dem lokalen Offline Logger; der Offline Logger bleibt dabei der zentrale Merge-Hub zwischen WSJT-X und Wavelog
+- eigener Einstellungs-Tab **WSJT-X Sync** mit Profil-/Rig-Auswahl, manuellem Pfad und getrennten Optionen für Start-, Beenden- und manuellen Abgleich
+- sichere WSJT-X-Dateisicherung vor Änderungen, Dublettenerkennung mit Zeit-/Band-/Mode-Toleranzen sowie Schutz vor dem Import eindeutig profilfremder `STATION_CALLSIGN`-Datensätze
+- Architektur- und Regressionstests für Feature-Trennung, WSJT-X-Synchronisierung und append-only QSO-Speicherung
+
+### Changed
+
+- `app.py` in klar getrennte `feature_*.py`-Module, `dialogs.py`, `app_common.py` und `ui_theme.py` aufgeteilt; neue Features deklarieren ihre Abhängigkeiten explizit
+- Logbuch, Fast Log/DXpedition und Statistiken verwenden gemeinsame QSO-Caches und Hintergrundarbeit, damit Seitenwechsel den Tk-Hauptthread nicht mehr durch vollständige ADIF-/SQLite-Auswertungen blockieren
+- normale neue QSOs werden in bestehende kanonische ADI-Dateien append-only geschrieben statt die komplette Datei bei jedem Speichern neu aufzubauen
+- Windows-Bootstrap nimmt `feature_*.py` automatisch auf und leitet sein versionsabhängiges Runtime-Verzeichnis dynamisch aus `appVersion` ab
+- Windows-Buildprüfung an den dynamisch erzeugten Runtime-Pfad angepasst
+
+### Safety
+
+- ein `.append-journal` schützt den schnellen ADI-Append vor partiellen Schreibvorgängen; beim nächsten Scan wird ein abgebrochener Append kontrolliert abgeschlossen oder bei widersprüchlichem Zustand sichtbar abgebrochen
+- Editieren, Löschen, ADIF-Import und Migration bleiben bewusst beim vollständigen, verifizierten Rewrite
+- der WSJT-X-Sync führt keine automatischen Löschungen durch; fehlende QSOs werden nur auf der jeweils anderen Seite ergänzt
+
 ## [0.19.2] - 2026-09-05
 
 - automatischen Windows-Updater repariert: Update-Übergabe erfolgt erst nach dem Ende der Desktop-App über den Go-Launcher

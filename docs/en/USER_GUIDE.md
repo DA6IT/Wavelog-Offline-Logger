@@ -1,4 +1,4 @@
-# User guide — DA6IT.de Wavelog Offline Logger 0.19.1
+# User guide — DA6IT.de Wavelog Offline Logger 0.19.3
 
 [Deutsch](../USER_GUIDE.md) · **English**
 
@@ -97,6 +97,17 @@ The receiver supports native WSJT-X status/logged-QSO packets and complete ADIF 
 
 External QSOs are saved locally first, deduplicated and optionally enriched from the selected callbook source. Existing received values are never overwritten. Autostart is profile-specific and applies at app startup and profile changes.
 
+### WSJT-X file synchronization
+
+The dedicated **WSJT-X Sync** settings tab links the active Logger profile to one WSJT-X log file. It supports the normal `%LOCALAPPDATA%\WSJT-X\wsjtx_log.adi`, `--rig-name` profiles below `%LOCALAPPDATA%\WSJT-X - <rig-name>\wsjtx_log.adi`, and a manually selected path.
+
+Startup, shutdown and manual synchronization can be enabled independently per Logger profile. **Sync now** runs the file merge immediately.
+
+The Offline Logger remains the local merge hub. Missing QSOs are added between the Offline Logger and WSJT-X; with Wavelog configured, the normal full synchronization can combine this into a controlled three-way workflow. A missing record is never treated as an automatic deletion request.
+
+Before `wsjtx_log.adi` is changed, the logger creates a timestamped backup. Duplicate matching uses callsign, band, mode and a small time tolerance. A clearly foreign `STATION_CALLSIGN` is not imported into the active Logger profile. When the WSJT-X record has no station callsign, the active Logger identity and available station defaults can be filled in.
+
+File synchronization and **UDP Logging** are complementary: UDP provides live status and `QSO Logged` events while WSJT-X is running, while file synchronization reconciles the persistent WSJT-X log.
 ## 11. Settings and online services
 
 **Station & Wavelog** stores operator/station identity, local defaults, API URL/token and selected Wavelog station profile. **Callbook & Online services** chooses Wavelog or direct QRZ.com and automatic lookup. QRZ direct lookup works independently from Wavelog but may require a QRZ XML subscription. eQSL credentials are placeholders only; no eQSL connection or upload is active yet. **Data & connections** contains local log path, xOTA source URLs, DX spotting and UDP options.

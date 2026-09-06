@@ -25,7 +25,8 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - optionale Desktop-Benachrichtigung nach einem lokal gespeicherten QSO
 - CAT über mitgeliefertes Hamlib, inklusive TUNE/ATU und manuellem Windows-Hamlib-Updater mit Rückfallversion
 - Telnet-DX-Cluster, Filter, Worked-Markierung und Spotversand
-- WSJT-X- und ADIF-Empfang über UDP
+- bidirektionaler WSJT-X-Dateisync über `wsjtx_log.adi` mit Backup, Dublettenschutz und optionalem Abgleich bei Start/Beenden
+- WSJT-X-Live-Status und geloggte QSOs weiterhin zusätzlich über UDP
 - deutsche und englische Oberfläche, Light- und Dark-Theme
 - verifizierter In-App-Updater; unter Windows wird die bestätigte neue Version automatisch installiert
 - vollständiges ZIP-Backup und Restore von Profilen, Einstellungen, ADI-Logbüchern und Metadaten
@@ -33,6 +34,16 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - responsive Oberfläche ohne Scrollleisten; Felder, Aktionen und Abstände passen sich gemeinsam an und werden vor jedem Release in mehreren Fenstergrößen geprüft
 - Builds für Windows x64, macOS Apple Silicon/Intel und Linux x64/ARM64
 
+## WSJT-X Sync
+
+Neben dem bestehenden UDP-Live-Logging kann der Logger jetzt die von WSJT-X verwendete `wsjtx_log.adi` direkt abgleichen. Der Offline Logger ist dabei der lokale Merge-Hub:
+
+```text
+Wavelog  → Offline Logger ← WSJT-X
+Wavelog  ← Offline Logger → WSJT-X
+```
+
+Der Abgleich ergänzt fehlende QSOs, führt aber keine automatischen Löschungen durch. Vor Änderungen an der WSJT-X-Datei wird eine Sicherung angelegt. Standardinstallationen und mit `--rig-name` getrennte WSJT-X-Profile werden erkannt; alternativ kann der Pfad manuell gewählt werden. Start-, Beenden- und manueller Sync sind pro Logger-Profil getrennt konfigurierbar.
 ## xOTA und ADIF
 
 ![xOTA-Aktivierung mit Mehrfachreferenzen](docs/screenshots/xota.png)

@@ -109,6 +109,28 @@ def sample(call="DL1ABC", comment="Hello"):
         "my_gridsquare":"JO31EJ","my_qth":"Wachtendonk","my_pota_ref":"","my_sota_ref":"","my_wwff_ref":""
     }
 
+
+# Performance invariant: after the canonical file exists, adding a normal QSO
+# must append one ADIF record instead of reading and rewriting the complete log.
+with TemporaryDirectory() as d:
+    store = LogStore(Path(d) / "append-only")
+    store.add(sample("DL1APP"))
+    original_read = store._read_file
+    original_write = store._write_file
+
+    def unexpected_full_read(*args, **kwargs):
+        raise AssertionError("LogStore.add() performed a full ADIF read")
+
+    def unexpected_full_write(*args, **kwargs):
+        raise AssertionError("LogStore.add() rewrote the complete ADIF")
+
+    store._read_file = unexpected_full_read
+    store._write_file = unexpected_full_write
+    store.add(sample("PA3APP"))
+    store._read_file = original_read
+    store._write_file = original_write
+    assert {q["call"] for q in store.scan()} == {"DL1APP", "PA3APP"}
+
 with TemporaryDirectory() as d:
     root = Path(d)
     store = LogStore(root/"logs")

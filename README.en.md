@@ -24,13 +24,24 @@ An offline-first desktop logger for amateur radio: log contacts in the field eve
 - optional desktop notification after a locally saved QSO
 - bundled Hamlib CAT control including TUNE/ATU and a manual Windows Hamlib updater with rollback
 - Telnet DX Cluster, filters, worked markers and public spotting
-- WSJT-X live status and logged-contact reception over UDP
+- bidirectional WSJT-X file synchronization through `wsjtx_log.adi` with backup, duplicate protection and optional startup/shutdown synchronization
+- WSJT-X live status and logged-contact reception remain available over UDP
 - complete German and English UI, Light and Dark themes
 - verified in-app updater; confirmed Windows updates install automatically
 - ZIP backup and restore for profiles, settings, ADI logs and metadata
 - responsive layouts checked at several window sizes before release
 - Windows x64, macOS Apple Silicon/Intel, Debian/Ubuntu, AppImage and Arch packages
 
+## WSJT-X Sync
+
+In addition to the existing UDP live integration, the logger can synchronize WSJT-X's `wsjtx_log.adi` directly. The Offline Logger acts as the local merge hub:
+
+```text
+Wavelog  → Offline Logger ← WSJT-X
+Wavelog  ← Offline Logger → WSJT-X
+```
+
+Synchronization adds missing QSOs but never performs automatic deletions. The WSJT-X log is backed up before it is changed. Standard installations and `--rig-name` WSJT-X profiles can be selected, or the log path can be chosen manually. Startup, shutdown and manual synchronization are configured independently per Logger profile.
 ## Choose the language
 
 Open **Settings → General → Language**, select **English** or **German**, save the settings and restart the application. The language is an application-wide preference and therefore applies to every station profile. Theme and QSO-notification settings are located on the same page.

@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/USER_GUIDE.md)
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.19.1. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.19.3. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -144,6 +144,21 @@ Die eQSL.cc-Felder sind vorbereitet und klar als **Coming soon** markiert. Versi
 - Standard: `dxcluster.afu-tools.de`, Port `7301`.
 - Das Login-Rufzeichen wird automatisch aus dem aktiven Stationsprofil übernommen.
 
+### 4.5 WSJT-X Sync
+
+Der separate Einstellungs-Tab **WSJT-X Sync** verbindet das lokale Logger-Profil mit genau einer WSJT-X-Logdatei. Unterstützt werden:
+
+- die Standarddatei `%LOCALAPPDATA%\WSJT-X\wsjtx_log.adi`
+- mit `--rig-name` gestartete Profile unter `%LOCALAPPDATA%\WSJT-X - <Rig-Name>\wsjtx_log.adi`
+- ein manuell ausgewählter Dateipfad
+
+Für jedes Logger-Profil kann getrennt festgelegt werden, ob der WSJT-X-Abgleich beim **Start**, beim **Beenden** und/oder beim **manuellen Synchronisieren** ausgeführt wird. Die Schaltfläche **Jetzt vollständig abgleichen** führt den Abgleich bewusst sofort aus.
+
+Der Offline Logger behandelt seine lokale ADI-Datei als Merge-Hub. Fehlende QSOs werden zwischen Offline Logger und WSJT-X ergänzt; zusammen mit dem Wavelog-Vollsync entsteht bei vorhandener Wavelog-Konfiguration ein kontrollierter Drei-Wege-Abgleich. Es werden **keine automatischen Löschungen** aus einem bloßen Fehlen auf einer Seite abgeleitet.
+
+Vor jeder Änderung an `wsjtx_log.adi` legt der Logger eine zeitgestempelte Sicherung an. Der Abgleich erkennt Dubletten anhand von Rufzeichen, Band, Mode und einer kleinen Zeittoleranz. Ein eindeutig fremdes `STATION_CALLSIGN` wird nicht in das aktive Logger-Profil importiert. Fehlt das Stationsrufzeichen in WSJT-X, werden Stationsdaten und verfügbare Profildefaults des aktiven Logger-Profils ergänzt.
+
+Der dateibasierte Sync ist unabhängig vom **UDP Logging**. UDP liefert Live-Status und `QSO Logged`-Ereignisse während WSJT-X läuft; der Datei-Sync gleicht dagegen den dauerhaft gespeicherten WSJT-X-Bestand ab.
 ## 5. Normales QSO loggen
 
 Beim Eingeben eines Rufzeichens prüft der Logger ausschließlich das lokale Logbuch des aktiven Profils. Wurde das Rufzeichen bereits auf demselben Band und im selben Mode gearbeitet, wird das Rufzeichenfeld grün und zeigt Anzahl, Band und Mode an. Existieren nur QSOs auf einem anderen Band oder in einem anderen Mode, erscheint stattdessen ein gelber Hinweis. Unterhalb des Formulars erscheinen zusätzlich die fünf neuesten QSOs mit diesem Rufzeichen einschließlich Datum, UTC-Zeit, Band und Mode; weitere Treffer werden als Anzahl zusammengefasst. CAT-, Frequenz-, Band- und Modeänderungen aktualisieren die Anzeige sofort. Die Markierung und Historie sind nur Hinweise und verhindern das Speichern eines weiteren QSOs nicht.

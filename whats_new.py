@@ -2,7 +2,11 @@ from __future__ import annotations
 
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
-    "0.19.2": (
+    "0.19.3": (
+        "Der neue WSJT-X Sync gleicht wsjtx_log.adi bidirektional mit dem lokalen Logbuch ab und kann gemeinsam mit Wavelog als sicherer Drei-Wege-Abgleich genutzt werden.",
+        "Logbuch, Fast Log und Statistiken reagieren bei großen ADI-Logbüchern deutlich schneller; neue QSOs werden append-only mit Recovery-Journal gespeichert.",
+        "Die Anwendung ist intern in klar getrennte Feature-Module aufgeteilt, wodurch neue Funktionen gezielter entwickelt und getestet werden können.",
+    ),    "0.19.2": (
         "Der automatische Windows-Updater ersetzt und startet jetzt zuverlässig genau die ursprünglich gestartete EXE – unabhängig von Dateiname und Speicherort.",
         "Die Update-Übergabe erfolgt erst nach dem Beenden der Desktop-App über den Windows-Launcher, sodass der Update-Prozess nicht mehr vom internen Job Object beendet wird.",
         "Der Update-Helper ist vollständig mit Windows PowerShell 5.1 kompatibel und protokolliert den Ablauf inklusive Integritätsprüfung und Rollback.",
@@ -40,7 +44,11 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
-    "0.19.2": (
+    "0.19.3": (
+        "The new WSJT-X Sync merges wsjtx_log.adi bidirectionally with the local logbook and can participate in a safe three-way workflow with Wavelog.",
+        "Logbook, Fast Log and Statistics remain responsive with large ADI logs, while new QSOs use append-only storage with recovery journaling.",
+        "The application is now split into focused feature modules so future changes can be developed and tested more independently.",
+    ),    "0.19.2": (
         "The automatic Windows updater now reliably replaces and restarts the exact EXE that was originally launched, regardless of its filename or location.",
         "The update hand-off now happens through the Windows launcher after the desktop app exits, preventing the updater process from being terminated by the internal Job Object.",
         "The update helper is fully compatible with Windows PowerShell 5.1 and logs the process including integrity verification and rollback.",

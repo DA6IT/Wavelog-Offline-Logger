@@ -2,6 +2,29 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.19.3 — 2026-09-06
+
+### Added
+
+- bidirectional file-based **WSJT-X synchronization** between `wsjtx_log.adi` and the local Offline Logger, with the Offline Logger acting as the merge hub between WSJT-X and Wavelog
+- dedicated **WSJT-X Sync** settings tab with profile/rig selection, manual path selection and independent startup, shutdown and manual synchronization options
+- backups before changing the WSJT-X log, duplicate matching with time/band/mode tolerances and protection against importing clearly foreign `STATION_CALLSIGN` records
+- architecture and regression tests for feature separation, WSJT-X synchronization and append-only QSO storage
+
+### Changed
+
+- split the former monolithic `app.py` into focused `feature_*.py` modules plus `dialogs.py`, `app_common.py` and `ui_theme.py`, with explicit feature dependencies
+- Logbook, Fast Log/DXpedition and Statistics now reuse shared QSO caches and background workers so navigation no longer performs full ADIF/SQLite work on the Tk main thread
+- normal new QSOs are appended to an existing canonical ADI log instead of rewriting the whole file for every save
+- the Windows launcher automatically packages `feature_*.py` files and derives its versioned runtime directory dynamically from `appVersion`
+- updated the Windows build validation for the dynamic runtime directory
+
+### Safety
+
+- an `.append-journal` protects fast ADI appends from partial writes and supports controlled recovery on the next scan
+- editing, deletion, ADIF import and migration intentionally keep the full verified rewrite path
+- WSJT-X synchronization never performs automatic deletions; missing QSOs are added to the other side only
+
 ## 0.19.2 — 2026-09-05
 
 - fixed the automatic Windows updater by handing installation over to the Go launcher only after the desktop app exits

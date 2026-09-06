@@ -65,9 +65,11 @@ try {
         throw "Versionskonflikt: logger_core.py=$version, bootstrap_windows.go=$($bootstrapMatch.Groups[1].Value)"
     }
 
-    $expectedAppDir = 'app-v' + $version.Replace('.', '')
-    if ($bootstrapText -notmatch [regex]::Escape('"' + $expectedAppDir + '"')) {
-        throw "Der Bootstrap-Appordner muss zur Version passen: $expectedAppDir"
+    # The runtime directory is intentionally derived dynamically from
+    # appVersion in bootstrap_windows.go, e.g. 0.19.3 -> app-v0193.
+    $runtimeDirPattern = '"app-v"\s*\+\s*strings\.ReplaceAll\(appVersion,\s*"\.",\s*""\)'
+    if ($bootstrapText -notmatch $runtimeDirPattern) {
+        throw 'Der Bootstrap-Appordner muss dynamisch aus appVersion abgeleitet werden.'
     }
 
     if ($env:GITHUB_REF_TYPE -eq 'tag') {

@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.19.2"
+	appVersion   = "0.19.3"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -71,6 +71,21 @@ var dataBackupSource []byte
 //go:embed whats_new.py
 var whatsNewSource []byte
 
+//go:embed wsjtx_sync.py
+var wsjtxSyncSource []byte
+
+//go:embed dialogs.py
+var dialogsSource []byte
+
+//go:embed app_common.py
+var appCommonSource []byte
+
+//go:embed ui_theme.py
+var uiThemeSource []byte
+
+//go:embed feature_*.py
+var featureFS embed.FS
+
 //go:embed cty.dat
 var ctyData []byte
 
@@ -105,6 +120,17 @@ var hamlibFileNames = []string{
 	"README.md.txt",
 	"README.w64-bin.txt",
 	"HAMLIB_VERSION.txt",
+}
+
+func featureFileNames() ([]string, error) {
+	names, err := fs.Glob(featureFS, "feature_*.py")
+	if err != nil {
+		return nil, fmt.Errorf("Feature-Module konnten nicht aufgelistet werden: %w", err)
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("keine feature_*.py Module im Build gefunden")
+	}
+	return names, nil
 }
 
 type IO_COUNTERS struct {
@@ -299,6 +325,31 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "whats_new.py"), whatsNewSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "wsjtx_sync.py"), wsjtxSyncSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "dialogs.py"), dialogsSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "app_common.py"), appCommonSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "ui_theme.py"), uiThemeSource, 0644); err != nil {
+		return err
+	}
+	featureNames, err := featureFileNames()
+	if err != nil {
+		return err
+	}
+	for _, name := range featureNames {
+		data, err := featureFS.ReadFile(name)
+		if err != nil {
+			return fmt.Errorf("Feature-Modul %s fehlt im Build: %w", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(appDir, name), data, 0644); err != nil {
+			return err
+		}
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "cty.dat"), ctyData, 0644); err != nil {
 		return err
 	}
@@ -374,6 +425,10 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "xota.py"),
 		filepath.Join(appDir, "data_backup.py"),
 		filepath.Join(appDir, "whats_new.py"),
+		filepath.Join(appDir, "wsjtx_sync.py"),
+		filepath.Join(appDir, "dialogs.py"),
+		filepath.Join(appDir, "app_common.py"),
+		filepath.Join(appDir, "ui_theme.py"),
 		filepath.Join(appDir, "cty.dat"),
 		filepath.Join(appDir, "assets", "da6it-logo.webp"),
 		filepath.Join(appDir, "assets", "da6it-icon.png"),
@@ -381,6 +436,13 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "truststore", "__init__.py"),
 		filepath.Join(appDir, "certifi", "__init__.py"),
 		filepath.Join(appDir, "certifi", "cacert.pem"),
+	}
+	featureNames, err := featureFileNames()
+	if err != nil {
+		return false
+	}
+	for _, name := range featureNames {
+		required = append(required, filepath.Join(appDir, name))
 	}
 	for _, name := range hamlibFileNames {
 		required = append(required, filepath.Join(hamlibDir, name))
@@ -408,11 +470,29 @@ func embeddedAppFilesMatch(appDir string) bool {
 		"xota.py":             xotaSource,
 		"data_backup.py":      dataBackupSource,
 		"whats_new.py":        whatsNewSource,
+		"wsjtx_sync.py":       wsjtxSyncSource,
+		"dialogs.py":          dialogsSource,
+		"app_common.py":       appCommonSource,
+		"ui_theme.py":         uiThemeSource,
 		"cty.dat":             ctyData,
 		filepath.Join("assets", "da6it-logo.webp"): da6itLogo,
 		filepath.Join("assets", "da6it-icon.png"):  da6itIcon,
 	}
 	for name, expected := range embeddedFiles {
+		current, err := os.ReadFile(filepath.Join(appDir, name))
+		if err != nil || !bytes.Equal(current, expected) {
+			return false
+		}
+	}
+	featureNames, err := featureFileNames()
+	if err != nil {
+		return false
+	}
+	for _, name := range featureNames {
+		expected, err := featureFS.ReadFile(name)
+		if err != nil {
+			return false
+		}
 		current, err := os.ReadFile(filepath.Join(appDir, name))
 		if err != nil || !bytes.Equal(current, expected) {
 			return false
@@ -474,7 +554,7 @@ func main() {
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
 	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v0192")
+	appDir := filepath.Join(base, "app-v"+strings.ReplaceAll(appVersion, ".", ""))
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)
