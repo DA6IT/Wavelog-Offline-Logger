@@ -10,6 +10,7 @@ from callbook import (
 )
 from dx_cluster import DEFAULT_SPOTTER_HOST, DEFAULT_SPOTTER_PORT, DxClusterConfig, DxSpotterConfig
 from logger_core import WavelogClient
+from qsl_client import QSL_API_BASE, QslClient
 from ui_preferences import UiPreferences, save_ui_preferences
 from wsjtx_sync import WsjtxSyncSettingsPanel
 from xota import ActivationReferenceService, ReverseGeocodeService
@@ -32,15 +33,17 @@ class SettingsFeatureMixin:
         general_tab = ttk.Frame(notebook, padding=(2, 12))
         station_tab = ttk.Frame(notebook, padding=(2, 12))
         online_tab = ttk.Frame(notebook, padding=(2, 12))
+        qsl_tab = ttk.Frame(notebook, padding=(2, 12))
         data_tab = ttk.Frame(notebook, padding=(2, 12))
         wsjtx_tab = ttk.Frame(notebook, padding=(2, 12))
         self.settings_wsjtx_tab = wsjtx_tab
         notebook.add(general_tab, text="Allgemein")
         notebook.add(station_tab, text="Station & Wavelog")
         notebook.add(online_tab, text="Callbook & Online-Dienste")
+        notebook.add(qsl_tab, text="QSL Card Manager")
         notebook.add(data_tab, text="Daten & Verbindungen")
         notebook.add(wsjtx_tab, text="WSJT-X Sync")
-        for tab in (general_tab, station_tab, online_tab, data_tab, wsjtx_tab):
+        for tab in (general_tab, station_tab, online_tab, qsl_tab, data_tab, wsjtx_tab):
             tab.columnconfigure(0, weight=1)
             tab.columnconfigure(1, weight=1)
             tab.rowconfigure(0, weight=1)
@@ -229,6 +232,184 @@ class SettingsFeatureMixin:
             padx=12, pady=10, anchor="w",
         ).grid(row=6, column=0, columnspan=2, sticky="ew", pady=(16, 0))
 
+        qsl_connection_card = self._card(qsl_tab, row=0, column=0, sticky="nsew", padx=(0, 8))
+        qsl_connection_card.columnconfigure(0, weight=1)
+        ttk.Label(
+            qsl_connection_card,
+            text="DA6IT.de QSL Card Manager",
+            style="CardTitle.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            qsl_connection_card,
+            text=(
+                "Der QSL Card Manager ist fester Bestandteil des Loggers. "
+                "Die Verbindung erfolgt ausschließlich zur DA6IT.de QSL API. "
+                "Es kann keine eigene oder fremde API-URL eingetragen werden."
+            ),
+            style="Muted.Card.TLabel",
+            wraplength=470,
+        ).grid(row=1, column=0, sticky="w", pady=(3, 14))
+
+        ttk.Label(
+            qsl_connection_card,
+            text="API-Endpunkt",
+            style="Card.TLabel",
+        ).grid(row=2, column=0, sticky="w", pady=(3, 3))
+
+        self.qsl_api_label = tk.Label(
+            qsl_connection_card,
+            text=QSL_API_BASE,
+            bg=theme.CARD,
+            fg=theme.MUTED,
+            font=("Segoe UI", 9),
+            justify="left",
+            anchor="w",
+            wraplength=470,
+        )
+        self.qsl_api_label.grid(row=3, column=0, sticky="ew")
+
+        self.set_qsl_connection_key = tk.StringVar()
+        ttk.Label(
+            qsl_connection_card,
+            text="Connection Key",
+            style="Card.TLabel",
+        ).grid(row=4, column=0, sticky="w", pady=(14, 3))
+        ttk.Entry(
+            qsl_connection_card,
+            textvariable=self.set_qsl_connection_key,
+            show="●",
+        ).grid(row=5, column=0, sticky="ew")
+
+        ttk.Label(
+            qsl_connection_card,
+            text=(
+                "Den Connection Key erzeugst du im QSL Card Manager auf DA6IT.de. "
+                "Es wird kein WordPress-Passwort im Logger benötigt."
+            ),
+            style="Muted.Card.TLabel",
+            wraplength=470,
+        ).grid(row=6, column=0, sticky="w", pady=(5, 12))
+
+        ttk.Button(
+            qsl_connection_card,
+            text="QSL-Verbindung testen",
+            style="Secondary.TButton",
+            command=self.test_qsl_connection,
+        ).grid(row=7, column=0, sticky="w")
+
+        self.qsl_connection_label = tk.Label(
+            qsl_connection_card,
+            text="Noch nicht geprüft.",
+            bg=theme.CARD,
+            fg=theme.MUTED,
+            font=("Segoe UI", 9),
+            justify="left",
+            anchor="w",
+            wraplength=470,
+        )
+        self.qsl_connection_label.grid(row=8, column=0, sticky="ew", pady=(10, 0))
+
+        qsl_info_card = self._card(qsl_tab, row=0, column=1, sticky="nsew", padx=(8, 0))
+        qsl_info_card.columnconfigure(0, weight=1)
+        ttk.Label(
+            qsl_info_card,
+            text="Servergesteuerte Funktionen",
+            style="CardTitle.TLabel",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            qsl_info_card,
+            text=(
+                "Vorlagen, Versandlimits, Queue-Status und verfügbare Funktionen "
+                "werden vom DA6IT.de QSL Card Manager vorgegeben. Der Logger "
+                "übernimmt diese Werte über den Bootstrap-Endpunkt und hardcodiert "
+                "keine Versandlimits."
+            ),
+            style="Muted.Card.TLabel",
+            wraplength=470,
+        ).grid(row=1, column=0, sticky="w", pady=(3, 14))
+
+        self.qsl_server_info_label = tk.Label(
+            qsl_info_card,
+            text=(
+                "Nach erfolgreichem Verbindungstest werden hier API-Version, "
+                "Core-Version und die aktuellen Mail-Limits angezeigt."
+            ),
+            bg=theme.CARD,
+            fg=theme.MUTED,
+            font=("Segoe UI", 9),
+            justify="left",
+            anchor="nw",
+            wraplength=470,
+        )
+        self.qsl_server_info_label.grid(row=2, column=0, sticky="nsew")
+
+        ttk.Separator(
+            qsl_info_card,
+            orient="horizontal",
+        ).grid(row=3, column=0, sticky="ew", pady=(18, 14))
+
+        ttk.Label(
+            qsl_info_card,
+            text="Private Kontrollkopie",
+            style="CardTitle.TLabel",
+        ).grid(row=4, column=0, sticky="w")
+
+        self.set_qsl_control_copy_enabled = tk.BooleanVar()
+        self.set_qsl_control_copy_email = tk.StringVar()
+
+        ttk.Checkbutton(
+            qsl_info_card,
+            text="Kontrollkopie an mich senden",
+            variable=self.set_qsl_control_copy_enabled,
+        ).grid(row=5, column=0, sticky="w", pady=(8, 6))
+
+        ttk.Label(
+            qsl_info_card,
+            text="E-Mail-Adresse für Kontrollkopie",
+            style="Card.TLabel",
+        ).grid(row=6, column=0, sticky="w", pady=(4, 3))
+
+        ttk.Entry(
+            qsl_info_card,
+            textvariable=self.set_qsl_control_copy_email,
+        ).grid(row=7, column=0, sticky="ew")
+
+        ttk.Label(
+            qsl_info_card,
+            text=(
+                "Die Kontrollkopie wird privat per BCC mit derselben QSL-Karte "
+                "verschickt. Die Gegenstation sieht diese Adresse nicht. "
+                "Bei einer neuen, vom QSL-Account abweichenden Adresse muss "
+                "die Änderung einmal über die Account-E-Mail freigegeben werden."
+            ),
+            style="Muted.Card.TLabel",
+            wraplength=470,
+        ).grid(row=8, column=0, sticky="w", pady=(6, 10))
+
+        ttk.Button(
+            qsl_info_card,
+            text="Kontrollkopie speichern",
+            style="Secondary.TButton",
+            command=self.save_qsl_control_copy,
+        ).grid(row=9, column=0, sticky="w")
+
+        self.qsl_control_copy_status_label = tk.Label(
+            qsl_info_card,
+            text="Noch nicht mit dem Server abgeglichen.",
+            bg=theme.CARD,
+            fg=theme.MUTED,
+            font=("Segoe UI", 9),
+            justify="left",
+            anchor="w",
+            wraplength=470,
+        )
+        self.qsl_control_copy_status_label.grid(
+            row=10,
+            column=0,
+            sticky="ew",
+            pady=(8, 0),
+        )
+
         data_left = self._card(data_tab, row=0, column=0, sticky="nsew", padx=(0, 8))
         data_left.columnconfigure(0, weight=1)
         ttk.Label(data_left, text="Lokale Logdateien", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
@@ -360,6 +541,9 @@ class SettingsFeatureMixin:
         self.set_qrz_password.set(self.db.get_secret("qrz_password"))
         self.set_eqsl_username.set(self.db.get_setting("eqsl_username", ""))
         self.set_eqsl_password.set(self.db.get_secret("eqsl_password"))
+        self.set_qsl_connection_key.set(self.db.get_secret("qsl_connection_key"))
+        self.set_qsl_control_copy_enabled.set(self.db.get_setting("qsl_control_copy_enabled", "0") == "1")
+        self.set_qsl_control_copy_email.set(self.db.get_setting("qsl_control_copy_email", ""))
         self.set_log_dir.set(self.db.get_setting("log_dir", str(self.store.log_dir)))
         self.set_xota_iota_url.set(self.db.get_setting("xota_iota_data_url", ""))
         self.set_xota_cota_url.set(self.db.get_setting("xota_cota_wca_data_url", ""))
@@ -429,6 +613,13 @@ class SettingsFeatureMixin:
             self.db.set_secret("qrz_password", self.set_qrz_password.get())
             self.db.set_setting("eqsl_username", self.set_eqsl_username.get().strip())
             self.db.set_secret("eqsl_password", self.set_eqsl_password.get())
+            self.db.set_secret("qsl_connection_key", self.set_qsl_connection_key.get().strip())
+            self._schedule_qsl_background_sync(
+                500,
+                reason="settings",
+            )
+            self.db.set_setting("qsl_control_copy_enabled", "1" if self.set_qsl_control_copy_enabled.get() else "0")
+            self.db.set_setting("qsl_control_copy_email", self.set_qsl_control_copy_email.get().strip())
             self.db.set_setting("log_dir", self.set_log_dir.get().strip())
             self.db.set_setting("xota_iota_data_url", self.set_xota_iota_url.get().strip())
             self.db.set_setting("xota_cota_wca_data_url", self.set_xota_cota_url.get().strip())
@@ -525,6 +716,202 @@ class SettingsFeatureMixin:
 
         threading.Thread(target=worker, name="callbook-test", daemon=True).start()
 
+    def _apply_qsl_control_copy_state(self, payload: dict) -> None:
+        if not isinstance(payload, dict):
+            return
+        enabled = bool(payload.get("enabled"))
+        verified = bool(payload.get("verified"))
+        pending = bool(payload.get("pending"))
+        email = str(payload.get("email") or "").strip()
+        pending_email = str(payload.get("pendingEmail") or "").strip()
+
+        if email:
+            self.set_qsl_control_copy_email.set(email)
+        self.set_qsl_control_copy_enabled.set(enabled)
+        self.db.set_setting("qsl_control_copy_enabled", "1" if enabled else "0")
+        if email:
+            self.db.set_setting("qsl_control_copy_email", email)
+
+        if pending:
+            self.qsl_control_copy_status_label.configure(
+                text=(
+                    "Freigabe ausstehend für "
+                    + (pending_email or "die neue Adresse")
+                    + ". Bitte die Bestätigungsmail am QSL-Account öffnen."
+                ),
+                fg=theme.WARN,
+            )
+        elif enabled and verified:
+            self.qsl_control_copy_status_label.configure(
+                text="✓ Private Kontrollkopie aktiv" + ((" · " + email) if email else ""),
+                fg=theme.OK,
+            )
+        elif verified and email:
+            self.qsl_control_copy_status_label.configure(
+                text="Kontrolladresse bestätigt, Kontrollkopie ist deaktiviert · " + email,
+                fg=theme.MUTED,
+            )
+        else:
+            self.qsl_control_copy_status_label.configure(
+                text="Kontrollkopie ist deaktiviert.",
+                fg=theme.MUTED,
+            )
+
+    def save_qsl_control_copy(self):
+        connection_key = self.set_qsl_connection_key.get().strip()
+        enabled = bool(self.set_qsl_control_copy_enabled.get())
+        email = self.set_qsl_control_copy_email.get().strip()
+
+        if not connection_key:
+            self.qsl_control_copy_status_label.configure(
+                text="Bitte zuerst einen Connection Key eintragen.",
+                fg=theme.WARN,
+            )
+            return
+        if enabled and (not email or "@" not in email):
+            self.qsl_control_copy_status_label.configure(
+                text="Bitte eine gültige E-Mail-Adresse eintragen.",
+                fg=theme.WARN,
+            )
+            return
+
+        self.db.set_setting("qsl_control_copy_enabled", "1" if enabled else "0")
+        self.db.set_setting("qsl_control_copy_email", email)
+        self.qsl_control_copy_status_label.configure(
+            text="Kontrollkopie wird mit DA6IT.de abgeglichen …",
+            fg=theme.MUTED,
+        )
+
+        def worker():
+            try:
+                payload = QslClient(connection_key, timeout=10).set_control_copy(enabled, email)
+                if not self.closing:
+                    self.after(0, lambda data=payload: self._apply_qsl_control_copy_state(data))
+            except Exception as exc:
+                error = str(exc)
+                if not self.closing:
+                    self.after(
+                        0,
+                        lambda message=error: self.qsl_control_copy_status_label.configure(
+                            text="✗ " + message,
+                            fg=theme.ERR,
+                        ),
+                    )
+
+        threading.Thread(
+            target=worker,
+            name="qsl-control-copy-save",
+            daemon=True,
+        ).start()
+
+    def test_qsl_connection(self):
+        connection_key = self.set_qsl_connection_key.get().strip()
+
+        if not connection_key:
+            self.qsl_connection_label.configure(
+                text="Bitte zuerst einen Connection Key eintragen.",
+                fg=theme.WARN,
+            )
+            return
+
+        self.qsl_connection_label.configure(
+            text="Verbindung wird geprüft …",
+            fg=theme.MUTED,
+        )
+        self.qsl_server_info_label.configure(
+            text="Bootstrap wird von DA6IT.de geladen …",
+            fg=theme.MUTED,
+        )
+
+        def worker():
+            try:
+                payload = QslClient(
+                    connection_key,
+                    timeout=8,
+                ).bootstrap()
+
+                if not self.closing:
+                    self.after(
+                        0,
+                        lambda data=payload: self._qsl_test_ok(data),
+                    )
+
+            except Exception as exc:
+                if not self.closing:
+                    error_message = str(exc)
+                    self.after(
+                        0,
+                        lambda message=error_message: self._qsl_test_fail(message),
+                    )
+
+        threading.Thread(
+            target=worker,
+            name="qsl-api-test",
+            daemon=True,
+        ).start()
+
+    def _qsl_test_ok(self, payload: dict):
+        core_version = str(payload.get("coreVersion") or "—")
+        api_version = str(payload.get("apiVersion") or "—")
+        mail_usage = payload.get("mailUsage")
+        mail_usage = mail_usage if isinstance(mail_usage, dict) else {}
+
+        hour_limit = mail_usage.get("hourLimit")
+        hour_remaining = mail_usage.get("hourRemaining")
+        day_limit = mail_usage.get("dayLimit")
+        day_remaining = mail_usage.get("dayRemaining")
+        queued = mail_usage.get("queued")
+        mail_enabled = mail_usage.get("mailEnabled")
+        control_copy = payload.get("controlCopy")
+        control_copy = control_copy if isinstance(control_copy, dict) else {}
+
+        self.qsl_connection_label.configure(
+            text="✓ QSL Card Manager verbunden",
+            fg=theme.OK,
+        )
+
+        lines = [
+            f"Core: {core_version} · API: {api_version}",
+        ]
+
+        if hour_limit is not None:
+            lines.append(
+                f"Stunde: {hour_remaining if hour_remaining is not None else '—'} "
+                f"von {hour_limit} verfügbar"
+            )
+
+        if day_limit is not None:
+            lines.append(
+                f"Tag: {day_remaining if day_remaining is not None else '—'} "
+                f"von {day_limit} verfügbar"
+            )
+
+        if queued is not None:
+            lines.append(f"Queue: {queued}")
+
+        if mail_enabled is not None:
+            lines.append(
+                "Mailversand: "
+                + ("aktiv" if bool(mail_enabled) else "deaktiviert")
+            )
+
+        self.qsl_server_info_label.configure(
+            text="\n".join(lines),
+            fg=theme.OK,
+        )
+
+        if control_copy:
+            self._apply_qsl_control_copy_state(control_copy)
+
+    def _qsl_test_fail(self, message: str):
+        self.qsl_connection_label.configure(
+            text="✗ " + message,
+            fg=theme.ERR,
+        )
+        self.qsl_server_info_label.configure(
+            text="Keine gültigen Serverdaten geladen.",
+            fg=theme.ERR,
+        )
     def test_wavelog(self):
         url = self.set_url.get().strip()
         token = self.set_token.get().strip()

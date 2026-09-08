@@ -21,6 +21,7 @@ from feature_logbook import LogbookFeatureMixin
 from feature_profiles import ProfilesFeatureMixin
 from feature_rotor import RotorFeatureMixin
 from feature_qso_sync import QsoSyncFeatureMixin
+from feature_qsl import QslFeatureMixin
 from feature_settings import SettingsFeatureMixin
 from feature_stats import StatsFeatureMixin
 from feature_udp import UdpFeatureMixin
@@ -44,6 +45,7 @@ class LoggerApp(
     ContestFeatureMixin,
     XotaFeatureMixin,
     QsoSyncFeatureMixin,
+    QslFeatureMixin,
     StatsFeatureMixin,
     CatFeatureMixin,
     RotorFeatureMixin,
@@ -90,6 +92,7 @@ class LoggerApp(
         self._init_ui_shell_feature()
         self._init_lifecycle_feature()
         self._init_qso_sync_feature()
+        self._init_qsl_feature()
         self._init_wavelog_online_feature()
         self._init_settings_feature()
         self._init_cat_feature()
@@ -113,6 +116,7 @@ class LoggerApp(
         self._build_contest_page()
         self._build_xota_page()
         self._build_qsos_page()
+        self._build_qsl_page()
         self._build_stats_page()
         self._build_cat_page()
         self._build_dx_cluster_page()
@@ -139,6 +143,13 @@ class LoggerApp(
         self.after(1300, self._maybe_startup_wsjtx_sync)
         self.after(1800, self._start_update_check)
         self.after(2500, self._start_wavelog_monitor)
+        self.after(
+            3200,
+            lambda: self._schedule_qsl_background_sync(
+                0,
+                reason="startup",
+            ),
+        )
 
 
 def main() -> None:

@@ -1,6 +1,6 @@
 # Wavelog Offline Logger – Architektur & Entwicklerhinweise
 
-> Stand: 0.19.4
+> Stand: 0.20.0
 > Ziel: große Funktionsbereiche getrennt entwickeln, ohne die zentrale `app.py` wieder wachsen zu lassen.
 
 ## Überblick
@@ -32,6 +32,7 @@ app.py
 ├── feature_contest.py
 ├── feature_xota.py
 ├── feature_qso_sync.py
+├── feature_qsl.py
 ├── feature_stats.py
 ├── feature_cat.py
 ├── feature_rotor.py
@@ -52,6 +53,14 @@ external_logging.py
 callbook.py
 xota.py
 wsjtx_sync.py
+qsl_client.py
+qsl_storage.py
+qsl_qso.py
+qsl_sync.py
+qsl_recipient.py
+qsl_templates.py
+qsl_renderer.py
+qsl_delivery.py
 ...
 ```
 
@@ -74,6 +83,7 @@ wsjtx_sync.py
 | `feature_contest.py` | Contest Logging |
 | `feature_xota.py` | xOTA-Oberfläche und Orchestrierung |
 | `feature_qso_sync.py` | QSO-Liste, Wavelog- und WSJT-X-Sync-Orchestrierung |
+| `feature_qsl.py` | kompakte QSL-Card-Manager-UI, Motivauswahl, Vorschau und Versand-Orchestrierung |
 | `feature_stats.py` | Statistiken |
 | `feature_cat.py` | CAT/Hamlib/FLRig/TUNE-UI |
 | `feature_rotor.py` | Rotor-UI, `rotctld`-Lifecycle, Live-Position und QSO-Peilungssteuerung |
@@ -650,3 +660,21 @@ normalisiert. Danach greift ebenfalls der schnelle Append-Pfad.
 
 Damit wächst der Aufwand eines normalen neuen QSOs nicht mehr mit der Größe des
 gesamten Logbuchs.
+
+## QSL Card Manager Integration (v0.20.0)
+
+Die QSL-Integration bleibt bewusst modular:
+
+- `feature_qsl.py` enthält die kompakte UI- und Feature-Orchestrierung.
+- `qsl_client.py` kapselt ausschließlich die feste DA6IT.de QSL Client API.
+- `qsl_storage.py` verwaltet lokale `qsoUid`-Mappings, Cache- und Statusmetadaten.
+- `qsl_sync.py` normalisiert und synchronisiert lokale QSOs per Upsert.
+- `qsl_recipient.py` verwaltet offene Empfängerprüfungen; die autoritative Empfängeradresse kommt vom Server.
+- `qsl_templates.py` verwaltet Motive und persönliche Layoutpositionen.
+- `qsl_renderer.py` rendert QSL-Karten lokal.
+- `qsl_delivery.py` kapselt Einzelversand und Queue-Vorbereitung.
+- `qsl_background.py` führt den leichten automatischen Hintergrundabgleich für neue QSOs, Status, Empfängerprüfungen und Motive aus.
+
+Der Hintergrundabgleich darf niemals selbstständig Mailversand auslösen. Der endgültige Mailtransport läuft immer über DA6IT.de/Postfix und benötigt eine ausdrückliche Benutzeraktion.
+
+ADI bleibt die primäre lokale QSO-Datenquelle; SQLite enthält nur Mapping-, Cache-, Secret- und Sync-Metadaten.

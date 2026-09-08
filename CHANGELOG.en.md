@@ -1,6 +1,80 @@
 # Changelog
 
+## [0.20.0] - 2026-09-08
+
+### Added
+
+- complete **DA6IT.de QSL Card Manager** integration in the Offline Logger
+- per-profile QSL Client API connection key stored locally as a secret and never written to logs
+- stable local mapping of synchronized QSOs through `qsoUid`; WordPress database IDs are never used as cross-system identities
+- download and local caching of community motifs, personal templates and station-profile-specific field positions
+- compact QSL preview in a separate window without making the main application unnecessarily large
+- direct single-QSL sending from the logbook plus multi-selection through the server-side mail queue
+- QSL mail status in the logbook for cards successfully handed to the configured mail transport
+- server-side QRZ.com recipient resolution; QRZ credentials are never stored in the Offline Logger
+- optional **private control copy** to a verified personal email address; the remote station never sees that address
+- automatic QSL background synchronization on application startup, profile changes and shortly after a newly logged QSO
+- automatic retries after temporary offline/server failures plus a lightweight periodic status and motif refresh
+- automatic single-QSO synchronization immediately before sending when a new QSO does not yet have a `qsoUid`
+
+### Changed
+
+- manual QSL synchronization is no longer required during normal operation and remains available only as an explicit force refresh
+- community motifs automatically use the personal field positions of the matching station profile
+- new QSOs are added to the QSL system only when required; historic QSOs are not unnecessarily re-queried against QRZ
+- QSL and queue status are refreshed in the background without introducing a permanent daemon or aggressive polling
+- QSL integration remains modular in `feature_qsl.py` and small technical QSL modules while `app.py` stays composition-only
+
+### Security
+
+- final QSL mail delivery always runs through DA6IT.de/Postfix; the Offline Logger never sends QSL mail directly through SMTP
+- the Logger cannot supply an arbitrary normal QSL recipient address; the remote recipient remains server-authoritative through QRZ.com
+- the private control copy is server-limited to a verified personal address and is hidden from the remote station
+- QSL assets are loaded only through the intended DA6IT.de endpoint and processed locally with size/image limits
+- Bandit: **0 Medium / 0 High**
+- `pip-audit`: **no known vulnerabilities**
+
+### Safety / Offline-first
+
+- local ADIF files remain the authoritative QSO data source
+- missing Internet connectivity never blocks local logging; QSL work is retried later
+- automatic background synchronization **never sends QSL email on its own**
+- sending always remains an explicit user action
+- server state `sent` still means handed to the mail transport, not delivered to or read by the recipient
+
 [Deutsch](CHANGELOG.md) · **English**
+
+## 0.20.0 — 2026-09-08
+
+### Added
+
+- optional private **QSL control copy** to an approved email address; the server sends it as BCC so the other station cannot see the copy address
+- integrated **DA6IT.de QSL Card Manager**
+- stable server-generated `qsoUid` mapping for local QSOs
+- QRZ recipient resolution with server cache and local status cache
+- community motifs, personal layouts, local preview and PNG rendering
+- direct single sending plus server-side queue for multi-selection
+- new **Email QSL** logbook column
+
+### Changed
+- personal web layout positions are honored per station profile
+- bulk sending uses the DA6IT.de mail queue for recipient resolution, limits and duplicate protection
+- QSL background assets are loaded only from `https://da6it.de` and cached locally
+
+### Security
+- Connection Keys stay in secret storage and are never logged
+- QSL API is pinned to `https://da6it.de/wp-json/da6it/v1/qsl/client/v1/`
+- the server remains authoritative for recipients, mail limits, duplicate protection and `qsoUid`
+
+### Safety
+- sending requires an explicit user action
+- no automatic bulk sending and no retroactive mass QRZ lookup
+
+### Final 0.20.0 state
+
+- automatic QSL background synchronization on app startup, profile changes and after new QSOs; offline/server failures are retried later without blocking local logging
+- optional private QSL control copy to a verified personal email address; the remote station never sees that address
+- manual QSL sync remains available as a force refresh; QSL mail is still sent only after an explicit user action
 
 ## 0.19.4 — 2026-09-06
 

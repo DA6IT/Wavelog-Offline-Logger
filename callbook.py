@@ -40,6 +40,7 @@ class CallbookResult:
     longitude: str = ""
     cq_zone: str = ""
     itu_zone: str = ""
+    email: str = ""
     source: str = ""
     cached: bool = False
 
@@ -141,6 +142,7 @@ def normalize_wavelog_result(payload: dict[str, Any], requested_call: str = "") 
         longitude=_first(combined, "lon", "long", "longitude"),
         cq_zone=_first(combined, "cqz", "cqzone", "dxcc_cqz"),
         itu_zone=_first(combined, "ituz", "ituzone", "dxcc_ituz"),
+        email=_first(combined, "email", "email_address", "mail"),
         source="Wavelog" + (f" / {_first(callbook, 'source')}" if _first(callbook, "source") else ""),
     )
 
@@ -199,6 +201,7 @@ def parse_qrz_xml(xml_bytes: bytes, requested_call: str = "") -> tuple[CallbookR
         longitude=(row.get("lon") or "").strip(),
         cq_zone=(row.get("cqzone") or "").strip(),
         itu_zone=(row.get("ituzone") or "").strip(),
+        email=(row.get("email") or "").strip(),
         source="QRZ.com",
     )
     return result, session

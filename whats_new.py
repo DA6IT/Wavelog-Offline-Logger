@@ -2,6 +2,13 @@ from __future__ import annotations
 
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
+    "0.20.0": (
+        "Neu: Der DA6IT.de QSL Card Manager ist direkt in den Offline Logger integriert – inklusive Motiven, persönlichem Layout, Vorschau und Versand aus dem Logbuch.",
+        "Neue QSOs, QSL-Status und Motive werden nach der einmaligen Einrichtung automatisch im Hintergrund abgeglichen; Offline-Logging bleibt dabei jederzeit nutzbar.",
+        "Einzelne QSLs können direkt versendet werden, mehrere ausgewählte QSOs laufen über die serverseitige Queue. Fehlende qsoUid-Zuordnungen werden vor dem Versand automatisch ergänzt.",
+        "Optional kann eine private Kontrollkopie jeder versendeten QSL an eine bestätigte eigene E-Mail-Adresse geschickt werden, ohne diese der Gegenstation anzuzeigen.",
+        "Der Logger versendet niemals selbstständig oder direkt per SMTP: QSL-Mail bleibt immer eine bewusste Benutzeraktion und läuft ausschließlich über DA6IT.de.",
+    ),
     "0.19.4": (
         "Neu: Rotorsteuerung über Hamlib rotctld mit Live-Position, kompaktem Kompass und bewusster Peilungsübernahme aus dem QSO-Log.",
         "Hamlib Dummy ermöglicht einen vollständigen Test ohne echte Rotorhardware; STOP ist direkt im QSO-Log erreichbar.",
@@ -49,6 +56,13 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
+    "0.20.0": (
+        "New: the DA6IT.de QSL Card Manager is integrated directly into the Offline Logger, including motifs, personal layouts, preview and sending from the logbook.",
+        "New QSOs, QSL status and motifs synchronize automatically in the background after the one-time setup while offline logging always remains available.",
+        "Single QSLs can be sent directly while multiple selected QSOs use the server-side queue. Missing qsoUid mappings are created automatically before sending.",
+        "An optional private control copy of each sent QSL can be delivered to a verified personal email address without exposing that address to the remote station.",
+        "The Logger never sends mail automatically or directly through SMTP: QSL delivery always remains an explicit user action and runs exclusively through DA6IT.de.",
+    ),
     "0.19.4": (
         "New Hamlib rotctld rotor control with live position, compact compass and explicit bearing control from the QSO form.",
         "Hamlib Dummy provides a complete hardware-free test path, with STOP available directly in the QSO form.",

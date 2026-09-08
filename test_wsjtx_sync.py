@@ -46,6 +46,22 @@ class WsjtxSyncTests(unittest.TestCase):
         b = qso("DL1ABC", "2026-09-06", "120045")
         self.assertIsNotNone(QsoMatcher([a]).find(b))
 
+    def test_fresh_profile_does_not_enable_wsjtx_implicitly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = MetadataDB(root / "metadata.db")
+
+            try:
+                loaded = load_wsjtx_settings(db)
+
+                self.assertFalse(loaded.enabled)
+                self.assertIsNone(loaded.log_path)
+                self.assertEqual(loaded.profile_name, "")
+                self.assertFalse(loaded.sync_on_startup)
+                self.assertFalse(loaded.sync_on_shutdown)
+                self.assertFalse(loaded.sync_on_manual)
+            finally:
+                db.close()
     def test_reason_specific_settings(self):
         settings = WsjtxSyncSettings(
             enabled=True,

@@ -408,3 +408,37 @@ Zugangsdaten und Benutzerdaten gehören nicht in Git, Screenshots oder Fehlermel
 Typische Ursachen und Diagnosepfade stehen in [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Hilfreich sind Betriebssystem, App-Version, Funkgerät, Verbindungsart und der genaue Meldungstext. API-Tokens und Passwörter vor dem Teilen immer entfernen.
 
 Die vollständige Bildübersicht steht in der [Screenshot-Galerie](SCREENSHOTS.md).
+
+## DA6IT.de QSL Card Manager
+
+Unter **Einstellungen → QSL** wird der Connection Key hinterlegt. Im **QSL Card Manager** werden QSOs synchronisiert, Motive geladen und pro Stationsprofil ausgewählt. **Vorschau** rendert die Karte lokal.
+
+Im Bereich **Logbuch & Sync** versendet **QSL E-Mail senden** ein einzelnes markiertes QSO direkt. Mehrere mit Strg/Shift markierte QSOs werden an die serverseitige DA6IT.de Mail-Queue übergeben.
+
+Die Spalte **E-Mail QSL** zeigt `✅`, wenn der Server die Mail als versendet führt. Das bedeutet nicht, dass Zustellung oder Lesen bestätigt wurden.
+
+### Private Kontrollkopie
+
+Unter **Einstellungen → QSL Card Manager** kann optional **Kontrollkopie an mich senden** aktiviert und eine E-Mail-Adresse hinterlegt werden. Die Kopie wird serverseitig privat per BCC mit derselben QSL-Karte versendet; die Gegenstation sieht die Kontrolladresse nicht.
+
+Die bereits bestätigte QSL-Account-E-Mail kann direkt verwendet werden. Bei einer anderen Adresse sendet DA6IT.de eine Freigabemail an die QSL-Account-Adresse. Erst nach dieser Freigabe wird die neue Kontrolladresse aktiv.
+
+### Automatischer QSL-Abgleich
+
+Nach der einmaligen Einrichtung verwendet der Logger den lokalen QSL-Cache sofort und gleicht neue QSOs, QSL-Status sowie Motive automatisch im Hintergrund ab. Bei einem Profilwechsel wird das passende Motiv/Layout automatisch aktualisiert. Offline-Logging bleibt unabhängig davon nutzbar.
+
+Unter **Einstellungen → QSL** kann optional eine private **Kontrollkopie** aktiviert und eine eigene bestätigte E-Mail-Adresse hinterlegt werden. Die Gegenstation sieht diese Kontrolladresse nicht.
+
+Der automatische Hintergrundabgleich versendet niemals selbstständig QSL-Mails. Der Versand benötigt weiterhin eine ausdrückliche Benutzeraktion.
+
+### QSL Card Manager – finaler 0.20.0 Workflow
+
+Nach dem einmaligen Hinterlegen des QSL-Verbindungsschlüssels arbeitet die QSL-Integration im Normalbetrieb automatisch. Vorhandene lokale QSL-Daten und Motive werden sofort aus dem Cache verwendet; anschließend aktualisiert die App neue QSO-Zuordnungen, Status und Motive im Hintergrund.
+
+Ein neu gespeichertes QSO wird automatisch zum QSL-System ergänzt und erhält seine `qsoUid`. Wird unmittelbar danach eine QSL versendet und die Zuordnung fehlt noch, synchronisiert der Logger genau dieses QSO automatisch vor dem Versand.
+
+Bei einem Profilwechsel wird das passende QSL-Motiv samt persönlicher Feldpositionen automatisch aktualisiert. Der manuelle QSL-Sync bleibt als Force-Refresh verfügbar.
+
+Optional kann unter **Einstellungen → QSL** eine private Kontrollkopie aktiviert werden. Die dort hinterlegte bestätigte eigene E-Mail-Adresse ist für die Gegenstation nicht sichtbar.
+
+Der automatische Hintergrundabgleich versendet niemals QSL-Mails. Jede QSL-Mail erfordert weiterhin eine ausdrückliche Benutzeraktion.

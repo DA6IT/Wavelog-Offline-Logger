@@ -55,7 +55,7 @@ class WsjtxSyncSettings:
     profile_name: str = ""
     sync_on_startup: bool = False
     sync_on_shutdown: bool = False
-    sync_on_manual: bool = True
+    sync_on_manual: bool = False
 
 
 @dataclass
@@ -98,9 +98,9 @@ def _read_reason_settings(db) -> tuple[bool, bool, bool]:
     if _as_bool(db.get_setting(SETTING_ENABLED, "0")):
         return True, True, True
 
-    # For a freshly configured profile, manual sync is the least surprising
-    # default. Startup/shutdown stay opt-in.
-    return False, False, True
+    # A fresh Logger profile must not implicitly enable WSJT-X integration.
+    # WSJT-X only participates after the user explicitly enables a sync reason.
+    return False, False, False
 
 
 def load_wsjtx_settings(db) -> WsjtxSyncSettings:
@@ -703,7 +703,7 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
         self.path_var = tk.StringVar()
         self.startup_var = tk.BooleanVar(value=False)
         self.shutdown_var = tk.BooleanVar(value=False)
-        self.manual_var = tk.BooleanVar(value=True)
+        self.manual_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="")
 
         self.columnconfigure(0, weight=1)
