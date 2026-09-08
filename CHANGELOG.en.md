@@ -1,6 +1,8 @@
 # Changelog
 
-## [0.20.0] - 2026-09-08
+[Deutsch](CHANGELOG.md) · **English**
+
+## 0.20.0 — 2026-09-08
 
 ### Added
 
@@ -41,40 +43,6 @@
 - automatic background synchronization **never sends QSL email on its own**
 - sending always remains an explicit user action
 - server state `sent` still means handed to the mail transport, not delivered to or read by the recipient
-
-[Deutsch](CHANGELOG.md) · **English**
-
-## 0.20.0 — 2026-09-08
-
-### Added
-
-- optional private **QSL control copy** to an approved email address; the server sends it as BCC so the other station cannot see the copy address
-- integrated **DA6IT.de QSL Card Manager**
-- stable server-generated `qsoUid` mapping for local QSOs
-- QRZ recipient resolution with server cache and local status cache
-- community motifs, personal layouts, local preview and PNG rendering
-- direct single sending plus server-side queue for multi-selection
-- new **Email QSL** logbook column
-
-### Changed
-- personal web layout positions are honored per station profile
-- bulk sending uses the DA6IT.de mail queue for recipient resolution, limits and duplicate protection
-- QSL background assets are loaded only from `https://da6it.de` and cached locally
-
-### Security
-- Connection Keys stay in secret storage and are never logged
-- QSL API is pinned to `https://da6it.de/wp-json/da6it/v1/qsl/client/v1/`
-- the server remains authoritative for recipients, mail limits, duplicate protection and `qsoUid`
-
-### Safety
-- sending requires an explicit user action
-- no automatic bulk sending and no retroactive mass QRZ lookup
-
-### Final 0.20.0 state
-
-- automatic QSL background synchronization on app startup, profile changes and after new QSOs; offline/server failures are retried later without blocking local logging
-- optional private QSL control copy to a verified personal email address; the remote station never sees that address
-- manual QSL sync remains available as a force refresh; QSL mail is still sent only after an explicit user action
 
 ## 0.19.4 — 2026-09-06
 

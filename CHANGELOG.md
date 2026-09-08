@@ -1,47 +1,5 @@
 # Changelog
 
-## [0.20.0] - 2026-09-08
-
-### Added
-
-- vollständige Integration des **DA6IT.de QSL Card Managers** in den Offline Logger
-- profilspezifischer Verbindungsschlüssel für die QSL Client API; der Schlüssel wird lokal als Secret gespeichert und niemals in Logs ausgegeben
-- stabile lokale Zuordnung jedes synchronisierten QSOs über `qsoUid`; WordPress-Datenbank-IDs werden nicht als systemübergreifende Identität verwendet
-- Abruf und lokaler Cache von Community-Motiven, persönlichen Vorlagen und profilspezifischen Feldpositionen
-- kompakte QSL-Vorschau in einem separaten Fenster, ohne die Hauptoberfläche unnötig zu vergrößern
-- direkter Versand einer einzelnen QSL aus dem Logbuch sowie Mehrfachauswahl mit serverseitiger Mail-Queue
-- QSL-Mailstatus direkt im Logbuch; erfolgreich an den Mailtransport übergebene QSLs werden mit einem Status angezeigt
-- serverseitige QRZ.com-Empfängerermittlung; QRZ-Zugangsdaten werden nicht im Offline Logger gespeichert
-- optional aktivierbare **private Kontrollkopie** an eine bestätigte eigene E-Mail-Adresse; die Gegenstation sieht diese Adresse nicht
-- automatischer QSL-Hintergrundabgleich beim Programmstart, nach Profilwechseln und kurz nach neu gespeicherten QSOs
-- automatischer Retry nach vorübergehenden Offline-/Serverfehlern sowie regelmäßiger leichter Status- und Motivabgleich
-- automatischer Einzel-QSO-Sync direkt vor einem Versand, falls ein neues QSO noch keine `qsoUid` besitzt
-
-### Changed
-
-- der bisher manuell notwendige QSL-Sync ist im Normalbetrieb nicht mehr erforderlich und bleibt nur als bewusster Force-Refresh erhalten
-- Community-Motive verwenden automatisch die persönlichen Feldpositionen des passenden Stationsprofils
-- neue QSOs werden im Hintergrund nur bei Bedarf zum QSL-System ergänzt; bestehende alte QSOs werden nicht unnötig erneut gegen QRZ geprüft
-- QSL-Status und Queue-Ergebnisse werden im Hintergrund nachgezogen, ohne einen permanenten Daemon oder aggressives Polling einzuführen
-- die QSL-Integration bleibt modular in `feature_qsl.py` und kleinen technischen QSL-Modulen; `app.py` bleibt reine Komposition
-
-### Security
-
-- der endgültige QSL-Mailversand erfolgt ausschließlich über DA6IT.de/Postfix; der Offline Logger versendet niemals direkt per SMTP
-- der Logger übergibt keine frei wählbare Empfängeradresse für normale QSL-Mails; die Gegenstationsadresse bleibt serverseitig über QRZ.com autoritativ
-- die private Kontrollkopie wird serverseitig auf eine bestätigte eigene Adresse begrenzt und ist für die Gegenstation nicht sichtbar
-- QSL-Assets werden nur über den vorgesehenen DA6IT.de-Endpunkt geladen und lokal mit Größen-/Bildgrenzen verarbeitet
-- Bandit: **0 Medium / 0 High**
-- `pip-audit`: **keine bekannten Vulnerabilities**
-
-### Safety / Offline-First
-
-- lokale ADIF-Dateien bleiben die maßgebliche QSO-Datenquelle
-- fehlende Internetverbindung blockiert das lokale Logging nicht; QSL-Aktionen werden später erneut versucht
-- der automatische Hintergrundabgleich **versendet niemals selbstständig QSL-Mails**
-- Mailversand bleibt immer eine ausdrückliche Benutzeraktion
-- ein Serverstatus `sent` bedeutet weiterhin Übergabe an den Mailtransport, nicht Zustellung oder Lesen beim Empfänger
-
 **Deutsch** · [English](CHANGELOG.en.md)
 
 ## [0.20.0] - 2026-09-08
