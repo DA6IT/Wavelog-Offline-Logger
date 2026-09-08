@@ -134,3 +134,37 @@ The app checks GitHub Releases silently. After confirmation it downloads only th
 ## 14. Privacy and troubleshooting
 
 Core logging, profiles, ADI, statistics and CTY.DAT work offline. Network is used only for explicitly configured Wavelog, QRZ, xOTA, DX Cluster/spotting, release checks and initial Windows runtime setup. The project collects no telemetry or usage counts. See [Troubleshooting](TROUBLESHOOTING.md), [Privacy](../../PRIVACY.md) and [Security](../../SECURITY.md).
+
+## DA6IT.de QSL Card Manager
+
+Store the Connection Key under **Settings → QSL**. In **QSL Card Manager**, synchronize QSOs, load motifs and select one per station profile. **Preview** renders the card locally.
+
+In **Logbook & Sync**, **Send QSL Email** sends one selected QSO directly. Multiple QSOs selected with Ctrl/Shift are handed to the DA6IT.de server-side mail queue.
+
+The **Email QSL** column shows `✅` when the server records the mail as sent. This does not confirm delivery or reading.
+
+### Private control copy
+
+Under **Settings → QSL Card Manager**, **Send a control copy to me** can optionally be enabled with an email address. The server adds the same QSL card privately by BCC; the other station cannot see the control-copy address.
+
+The already verified QSL account email can be used immediately. A different address requires approval through a message sent to the QSL account email before the new control-copy address becomes active.
+
+### Automatic QSL synchronization
+
+After the one-time setup, the logger uses the local QSL cache immediately and synchronizes new QSOs, QSL status and motifs automatically in the background. Changing profiles also refreshes the matching motif/layout. Offline logging remains independent of this.
+
+Under **Settings → QSL**, an optional private **control copy** can be enabled and sent to a verified personal email address. The remote station never sees this control address.
+
+Automatic background synchronization never sends QSL mail on its own. Sending still requires an explicit user action.
+
+### QSL Card Manager – final 0.20.0 workflow
+
+After the QSL connection key has been configured once, the QSL integration works automatically during normal operation. Existing local QSL data and motifs are used immediately from the cache, followed by background updates of new QSO mappings, status and motifs.
+
+A newly logged QSO is automatically added to the QSL system and receives its `qsoUid`. If a QSL is sent immediately and the mapping is still missing, the Logger synchronizes exactly that QSO automatically before sending.
+
+Changing the active profile automatically refreshes the matching QSL motif and personal field positions. Manual QSL synchronization remains available as a force refresh.
+
+An optional private control copy can be enabled under **Settings → QSL**. The configured verified personal email address is not visible to the remote station.
+
+Automatic background synchronization never sends QSL email. Every QSL email still requires an explicit user action.

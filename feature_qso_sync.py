@@ -13,6 +13,7 @@ from app_common import write_startup_log
 from dialogs import EditDialog, SyncProgressDialog
 from dx_cluster import normalize_worked_mode
 from logger_core import ContestSyncEngine, SyncEngine, WavelogClient, qso_hash
+from qsl_storage import QslStorage
 from wsjtx_sync import format_wsjtx_result, load_wsjtx_settings, should_wsjtx_sync_for_reason, sync_wsjtx_with_local
 from ui_theme import theme
 
@@ -61,11 +62,11 @@ class QsoSyncFeatureMixin:
         card = self._card(p, row=1, column=0, sticky="nsew")
         card.columnconfigure(0, weight=1)
         card.rowconfigure(0, weight=1)
-        cols = ("date", "time", "call", "operator", "contest", "band", "mode", "freq", "rst", "status", "qrz", "lotw", "eqsl", "clublog", "dcl")
-        self.tree = ttk.Treeview(card, columns=cols, show="headings", selectmode="browse")
-        headings = {"date":"Datum UTC", "time":"Zeit", "call":"Call", "operator":"Operator", "contest":"Contest", "band":"Band", "mode":"Mode", "freq":"MHz", "rst":"RST", "status":"Sync",
+        cols = ("date", "time", "call", "operator", "contest", "band", "mode", "freq", "rst", "status", "email_qsl", "qrz", "lotw", "eqsl", "clublog", "dcl")
+        self.tree = ttk.Treeview(card, columns=cols, show="headings", selectmode="extended")
+        headings = {"date":"Datum UTC", "time":"Zeit", "call":"Call", "operator":"Operator", "contest":"Contest", "band":"Band", "mode":"Mode", "freq":"MHz", "rst":"RST", "status":"Sync", "email_qsl":"E-Mail QSL",
                     "qrz":"QRZ", "lotw":"LoTW", "eqsl":"eQSL", "clublog":"ClubLog", "dcl":"DCL"}
-        widths = {"date":88,"time":62,"call":88,"operator":82,"contest":100,"band":52,"mode":60,"freq":80,"rst":62,"status":88,
+        widths = {"date":88,"time":62,"call":88,"operator":82,"contest":100,"band":52,"mode":60,"freq":80,"rst":62,"status":88,"email_qsl":78,
                   "qrz":52,"lotw":52,"eqsl":52,"clublog":62,"dcl":52}
         for c in cols:
             self.tree.heading(c, text=self._tr(headings[c]))
@@ -86,6 +87,13 @@ class QsoSyncFeatureMixin:
         actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(actions, text="QSO bearbeiten", style="Secondary.TButton", command=self.edit_selected_qso).pack(side="left")
         ttk.Button(actions, text="QSO löschen", style="Secondary.TButton", command=self.delete_selected_qso).pack(side="left", padx=8)
+        self.qsl_mail_button = ttk.Button(
+            actions,
+            text="QSL E-Mail senden",
+            style="Secondary.TButton",
+            command=self.send_selected_qsl_email,
+        )
+        self.qsl_mail_button.pack(side="left")
         self.take_wavelog_button = ttk.Button(actions, text="Wavelog-Version übernehmen", style="Secondary.TButton", command=lambda: self.resolve_conflict(False))
         self.take_wavelog_button.pack(side="right")
         self.force_local_button = ttk.Button(actions, text="Lokale Version erzwingen", style="Secondary.TButton", command=lambda: self.resolve_conflict(True))
@@ -97,7 +105,7 @@ class QsoSyncFeatureMixin:
         )
         self.sync_detail_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(9, 0))
 
-        legend = tk.Label(card, text="QSL-Status: ✓ bestätigt · ↑ gesendet/hochgeladen · … wartet · — kein Status · ? nicht verfügbar",
+        legend = tk.Label(card, text="QSL-Status: ✓ bestätigt · ↑ gesendet/hochgeladen · … wartet · — kein Status · ? nicht verfügbar · E-Mail QSL: ✅ versendet · — nicht versendet",
                           bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 8), anchor="w")
         legend.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         self._sync_selection_changed()
@@ -105,6 +113,30 @@ class QsoSyncFeatureMixin:
     @staticmethod
     def _display_qsl_status(value: str | None) -> str:
         return {"confirmed":"✓", "sent":"↑", "pending":"…", "none":"—", "unknown":"?"}.get((value or "unknown").lower(), "?")
+
+    @staticmethod
+    def _display_email_qsl_status(
+        payload: dict | None,
+    ) -> str:
+        if not isinstance(payload, dict):
+            return "—"
+
+        mail_status = str(
+            payload.get("mailStatus")
+            or payload.get("mail_status")
+            or ""
+        ).strip().lower()
+
+        sent_at = str(
+            payload.get("emailSentAt")
+            or payload.get("email_sent_at")
+            or ""
+        ).strip()
+
+        if mail_status == "sent" or sent_at:
+            return "✅"
+
+        return "—"
 
     @staticmethod
     def _display_sync_status(meta: dict | None) -> tuple[str, str]:
@@ -214,6 +246,12 @@ class QsoSyncFeatureMixin:
                     if wid_int not in qsl_by_wid:
                         qsl_by_wid[wid_int] = db.get_qsl_status(wid_int)
 
+                qsl_card_status_by_local = (
+                    QslStorage(
+                        db
+                    ).list_status_snapshots_by_local()
+                )
+
                 rows: list[tuple[str, str, tuple]] = []
                 fastlog_worked_keys: set[tuple[str, str, str]] = set()
                 for q in qsos:
@@ -259,6 +297,14 @@ class QsoSyncFeatureMixin:
                             q.get("freq", ""),
                             f"{q.get('rst_sent','')}/{q.get('rst_rcvd','')}",
                             status_text,
+                            self._display_email_qsl_status(
+                                (
+                                    qsl_card_status_by_local.get(
+                                        local_id
+                                    )
+                                    or {}
+                                ).get("payload")
+                            ),
                             self._display_qsl_status(qsl.get("qrz")),
                             self._display_qsl_status(qsl.get("lotw")),
                             self._display_qsl_status(qsl.get("eqsl")),

@@ -20,6 +20,7 @@ from logger_core import (
     BANDS, CountryDB, MODES, VERSION, WavelogClient, band_from_mhz, qso_hash, secure_urlopen,
 )
 from notifications import notify_qso_logged
+from qsl_background import QSL_BACKGROUND_NEW_QSO_MS
 from xota import distance_m, initial_bearing_degrees, maidenhead_coordinates, normalize_references
 from ui_theme import theme
 
@@ -456,7 +457,7 @@ class LogbookFeatureMixin:
                 result = normalize_wavelog_result(payload, callsign)
             else:
                 raise CallbookError("Callbook-Abfrage ist deaktiviert")
-            if not any((result.name, result.qth, result.grid, result.country, result.image_url)):
+            if not any((result.name, result.qth, result.grid, result.country, result.image_url, result.email)):
                 raise CallbookError("Keine Callbook-Daten gefunden")
             db.set_callbook_cache(callsign, source, result.to_json())
         return result
@@ -731,6 +732,12 @@ class LogbookFeatureMixin:
             q = self._collect_qso()
             q = self.store.add(q)
             self.db.ensure_local(q["local_id"], qso_hash(q))
+            self._remember_qsl_recipient_hint(q)
+            self._queue_qsl_recipient_check(q)
+            self._schedule_qsl_background_sync(
+                QSL_BACKGROUND_NEW_QSO_MS,
+                reason="new-qso",
+            )
             self._bind_active_xota_qso(q)
             self._notify_qso_saved(q)
             self.status_var.set(f"Gespeichert: {q['call']} · {q['band']} · {q['mode']} · {Path(q['_file']).name}")

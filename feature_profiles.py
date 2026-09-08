@@ -65,7 +65,12 @@ class ProfilesFeatureMixin:
     def switch_profile(self, profile_id: str):
         if profile_id == self.active_profile_id:
             return
-        if self.sync_busy:
+        if (
+            self.sync_busy
+            or getattr(self, "qsl_sync_busy", False)
+            or getattr(self, "qsl_mail_busy", False)
+            or getattr(self, "qsl_background_busy", False)
+        ):
             messagebox.showwarning("Profil wechseln", "Während einer Synchronisierung kann das Profil nicht gewechselt werden.", parent=self)
             self._refresh_profile_selector()
             return
@@ -85,6 +90,7 @@ class ProfilesFeatureMixin:
                         pass
                     setattr(self, job_name, None)
             self.wavelog_check_busy = False
+            self._cancel_qsl_background_sync()
             self._stop_cat_runtime(update_ui=False)
             self._stop_rotor_runtime(update_ui=False)
             self._stop_dx_cluster_runtime(update_ui=False)
@@ -107,6 +113,7 @@ class ProfilesFeatureMixin:
             self.refresh_contest_page()
             self.refresh_xota_page()
             self.refresh_qsos()
+            self.refresh_qsl_page()
             self.refresh_stats()
             self._refresh_profile_selector()
             self._reset_wavelog_monitor(delay_ms=500)
@@ -115,6 +122,10 @@ class ProfilesFeatureMixin:
             # was closed. Start the newly selected profile with its own saved
             # host, port and autostart preference once the UI is idle again.
             self.after_idle(self._autostart_udp_log)
+            self._schedule_qsl_background_sync(
+                500,
+                reason="profile",
+            )
         except Exception as e:
             messagebox.showerror("Profil wechseln", str(e), parent=self)
             self._refresh_profile_selector()

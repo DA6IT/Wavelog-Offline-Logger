@@ -2,6 +2,48 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.20.0 — 2026-09-08
+
+### Added
+
+- complete **DA6IT.de QSL Card Manager** integration in the Offline Logger
+- per-profile QSL Client API connection key stored locally as a secret and never written to logs
+- stable local mapping of synchronized QSOs through `qsoUid`; WordPress database IDs are never used as cross-system identities
+- download and local caching of community motifs, personal templates and station-profile-specific field positions
+- compact QSL preview in a separate window without making the main application unnecessarily large
+- direct single-QSL sending from the logbook plus multi-selection through the server-side mail queue
+- QSL mail status in the logbook for cards successfully handed to the configured mail transport
+- server-side QRZ.com recipient resolution; QRZ credentials are never stored in the Offline Logger
+- optional **private control copy** to a verified personal email address; the remote station never sees that address
+- automatic QSL background synchronization on application startup, profile changes and shortly after a newly logged QSO
+- automatic retries after temporary offline/server failures plus a lightweight periodic status and motif refresh
+- automatic single-QSO synchronization immediately before sending when a new QSO does not yet have a `qsoUid`
+
+### Changed
+
+- manual QSL synchronization is no longer required during normal operation and remains available only as an explicit force refresh
+- community motifs automatically use the personal field positions of the matching station profile
+- new QSOs are added to the QSL system only when required; historic QSOs are not unnecessarily re-queried against QRZ
+- QSL and queue status are refreshed in the background without introducing a permanent daemon or aggressive polling
+- QSL integration remains modular in `feature_qsl.py` and small technical QSL modules while `app.py` stays composition-only
+
+### Security
+
+- final QSL mail delivery always runs through DA6IT.de/Postfix; the Offline Logger never sends QSL mail directly through SMTP
+- the Logger cannot supply an arbitrary normal QSL recipient address; the remote recipient remains server-authoritative through QRZ.com
+- the private control copy is server-limited to a verified personal address and is hidden from the remote station
+- QSL assets are loaded only through the intended DA6IT.de endpoint and processed locally with size/image limits
+- Bandit: **0 Medium / 0 High**
+- `pip-audit`: **no known vulnerabilities**
+
+### Safety / Offline-first
+
+- local ADIF files remain the authoritative QSO data source
+- missing Internet connectivity never blocks local logging; QSL work is retried later
+- automatic background synchronization **never sends QSL email on its own**
+- sending always remains an explicit user action
+- server state `sent` still means handed to the mail transport, not delivered to or read by the recipient
+
 ## 0.19.4 — 2026-09-06
 
 ### Added

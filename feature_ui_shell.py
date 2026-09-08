@@ -484,6 +484,7 @@ class UiShellFeatureMixin:
             ("contest", "#   Contest Logging"),
             ("xota", "⌖   xOTA"),
             ("qsos", "☁   Logbuch & Sync"),
+            ("qsl", "✉   QSL Card Manager"),
             ("stats", "▤   Statistiken"),
             ("dx_cluster", "◎   DX Cluster"),
             ("cat", "⌁   CAT Setup"),
@@ -577,13 +578,14 @@ class UiShellFeatureMixin:
         return f
 
     def _show_page(self, name: str):
-        titles = {"log": "QSO loggen", "fast_log": "Fast Log / DXpedition", "contest": "Contest Logging", "xota": "xOTA", "qsos": "Logbuch & Sync", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "udp_log": "UDP Logging", "settings": "Einstellungen"}
+        titles = {"log": "QSO loggen", "fast_log": "Fast Log / DXpedition", "contest": "Contest Logging", "xota": "xOTA", "qsos": "Logbuch & Sync", "qsl": "QSL Card Manager", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "udp_log": "UDP Logging", "settings": "Einstellungen"}
         subtitles = {
             "log": "Neues QSO erfassen und sicher lokal speichern.",
             "fast_log": "Pileups zügig abarbeiten: Rufzeichen und Enter.",
             "contest": "Seriennummern und Austauschdaten effizient protokollieren.",
             "xota": "Portable Aktivierungen offline vorbereiten, kombinieren und sicher protokollieren.",
             "qsos": "Lokale QSOs prüfen und Wavelog bewusst manuell synchronisieren.",
+            "qsl": "QSL-Daten mit dem DA6IT.de QSL Card Manager abgleichen.",
             "stats": "Das lokale Logbuch auf einen Blick.",
             "cat": "Funkgerät über das eingebettete Hamlib steuern.",
             "dx_cluster": "Live-Spots empfangen, filtern und an den TRX übergeben.",
@@ -619,6 +621,8 @@ class UiShellFeatureMixin:
             # Showing the page must be instant. Reuse the cached rows if they
             # are current; otherwise the refresh runs asynchronously.
             self.refresh_qsos(force=False, immediate=True)
+        elif name == "qsl":
+            self.refresh_qsl_page()
         elif name == "stats":
             self.refresh_stats()
         elif name == "cat":

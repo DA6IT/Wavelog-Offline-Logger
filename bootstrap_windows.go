@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.19.4"
+	appVersion   = "0.20.0"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -85,6 +85,33 @@ var appCommonSource []byte
 
 //go:embed ui_theme.py
 var uiThemeSource []byte
+
+//go:embed qsl_client.py
+var qslClientSource []byte
+
+//go:embed qsl_storage.py
+var qslStorageSource []byte
+
+//go:embed qsl_qso.py
+var qslQsoSource []byte
+
+//go:embed qsl_sync.py
+var qslSyncSource []byte
+
+//go:embed qsl_recipient.py
+var qslRecipientSource []byte
+
+//go:embed qsl_templates.py
+var qslTemplatesSource []byte
+
+//go:embed qsl_renderer.py
+var qslRendererSource []byte
+
+//go:embed qsl_delivery.py
+var qslDeliverySource []byte
+
+//go:embed qsl_background.py
+var qslBackgroundSource []byte
 
 //go:embed feature_*.py
 var featureFS embed.FS
@@ -344,6 +371,33 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "ui_theme.py"), uiThemeSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "qsl_client.py"), qslClientSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "qsl_storage.py"), qslStorageSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "qsl_qso.py"), qslQsoSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "qsl_sync.py"), qslSyncSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "qsl_recipient.py"), qslRecipientSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "qsl_templates.py"), qslTemplatesSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "qsl_renderer.py"), qslRendererSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "qsl_delivery.py"), qslDeliverySource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "qsl_background.py"), qslBackgroundSource, 0644); err != nil {
+		return err
+	}
 	featureNames, err := featureFileNames()
 	if err != nil {
 		return err
@@ -437,6 +491,15 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "dialogs.py"),
 		filepath.Join(appDir, "app_common.py"),
 		filepath.Join(appDir, "ui_theme.py"),
+		filepath.Join(appDir, "qsl_client.py"),
+		filepath.Join(appDir, "qsl_storage.py"),
+		filepath.Join(appDir, "qsl_qso.py"),
+		filepath.Join(appDir, "qsl_sync.py"),
+		filepath.Join(appDir, "qsl_recipient.py"),
+		filepath.Join(appDir, "qsl_templates.py"),
+		filepath.Join(appDir, "qsl_renderer.py"),
+		filepath.Join(appDir, "qsl_delivery.py"),
+		filepath.Join(appDir, "qsl_background.py"),
 		filepath.Join(appDir, "cty.dat"),
 		filepath.Join(appDir, "assets", "da6it-logo.webp"),
 		filepath.Join(appDir, "assets", "da6it-icon.png"),
@@ -483,6 +546,14 @@ func embeddedAppFilesMatch(appDir string) bool {
 		"dialogs.py":          dialogsSource,
 		"app_common.py":       appCommonSource,
 		"ui_theme.py":         uiThemeSource,
+		"qsl_client.py":       qslClientSource,
+		"qsl_storage.py":      qslStorageSource,
+		"qsl_qso.py":          qslQsoSource,
+		"qsl_sync.py":         qslSyncSource,
+		"qsl_recipient.py":      qslRecipientSource,
+		"qsl_templates.py":       qslTemplatesSource,
+		"qsl_renderer.py":        qslRendererSource,
+		"qsl_delivery.py":        qslDeliverySource,
 		"cty.dat":             ctyData,
 		filepath.Join("assets", "da6it-logo.webp"): da6itLogo,
 		filepath.Join("assets", "da6it-icon.png"):  da6itIcon,
