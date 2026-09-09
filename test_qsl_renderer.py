@@ -145,6 +145,86 @@ class QslRendererTests(unittest.TestCase):
             (1400, 900),
         )
 
+    def test_center_alignment_preserves_full_field_box(self):
+        raw = render_qsl_png(
+            template(),
+            {
+                "qso.call": "DL1ABC",
+            },
+        )
+
+        image = Image.open(
+            io.BytesIO(raw)
+        ).convert("RGB")
+
+        background = Image.new(
+            "RGB",
+            image.size,
+            "#ffffff",
+        )
+
+        from PIL import ImageChops
+
+        bbox = ImageChops.difference(
+            image,
+            background,
+        ).getbbox()
+
+        self.assertIsNotNone(
+            bbox
+        )
+
+        center_x = (
+            bbox[0] + bbox[2]
+        ) / 2
+
+        # Field: x=10%, width=80% on a 1400px canvas.
+        self.assertGreater(
+            center_x,
+            620,
+        )
+        self.assertLess(
+            center_x,
+            780,
+        )
+
+    def test_right_alignment_preserves_full_field_box(self):
+        current = template()
+        current["fields"][0]["align"] = "right"
+
+        raw = render_qsl_png(
+            current,
+            {
+                "qso.call": "DL1ABC",
+            },
+        )
+
+        image = Image.open(
+            io.BytesIO(raw)
+        ).convert("RGB")
+
+        background = Image.new(
+            "RGB",
+            image.size,
+            "#ffffff",
+        )
+
+        from PIL import ImageChops
+
+        bbox = ImageChops.difference(
+            image,
+            background,
+        ).getbbox()
+
+        self.assertIsNotNone(
+            bbox
+        )
+
+        self.assertGreater(
+            bbox[2],
+            1150,
+        )
+
     def test_asset_cache_reuses_download(self):
         image = Image.new(
             "RGB",
@@ -192,6 +272,81 @@ class QslRendererTests(unittest.TestCase):
             self.assertEqual(
                 mocked.call_count,
                 1,
+            )
+
+    def test_asset_cache_separates_template_revisions(self):
+        first_image = Image.new(
+            "RGB",
+            (100, 80),
+            "#ffffff",
+        )
+        second_image = Image.new(
+            "RGB",
+            (100, 80),
+            "#000000",
+        )
+
+        first_buffer = io.BytesIO()
+        second_buffer = io.BytesIO()
+
+        first_image.save(
+            first_buffer,
+            format="PNG",
+        )
+        second_image.save(
+            second_buffer,
+            format="PNG",
+        )
+
+        url = (
+            "https://da6it.de/"
+            "wp-content/uploads/qsl-background.png"
+        )
+
+        responses = [
+            FakeResponse(
+                first_buffer.getvalue(),
+                url,
+            ),
+            FakeResponse(
+                second_buffer.getvalue(),
+                url,
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = QslAssetCache(
+                Path(tmp)
+            )
+
+            with patch(
+                "qsl_renderer.secure_urlopen",
+                side_effect=responses,
+            ) as mocked:
+                rev1_a = cache.get_background_bytes(
+                    url,
+                    cache_key="template:344:revision:1",
+                )
+                rev1_b = cache.get_background_bytes(
+                    url,
+                    cache_key="template:344:revision:1",
+                )
+                rev2 = cache.get_background_bytes(
+                    url,
+                    cache_key="template:344:revision:2",
+                )
+
+            self.assertEqual(
+                rev1_a,
+                rev1_b,
+            )
+            self.assertNotEqual(
+                rev1_a,
+                rev2,
+            )
+            self.assertEqual(
+                mocked.call_count,
+                2,
             )
 
     def test_asset_cache_rejects_external_url(self):

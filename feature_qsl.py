@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import io
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from PIL import ImageTk
+from PIL import Image, ImageTk
 
 from qsl_background import (
     QSL_BACKGROUND_INTERVAL_MS,
@@ -25,13 +26,12 @@ from qsl_delivery import (
     QslDeliveryResult,
     QslQueueResult,
     queue_qsl_batch,
+    render_selected_qsl,
     send_single_qsl,
 )
 from qsl_renderer import (
-    QslAssetCache,
     latest_qso,
     qso_designer_values,
-    render_qsl_image,
 )
 from qsl_storage import QslStorage
 from qsl_sync import QslSyncResult, sync_qsos
@@ -1647,54 +1647,31 @@ class QslFeatureMixin:
 
         def worker() -> None:
             try:
-                background = (
-                    template.get("canvas")
-                    or {}
-                ).get(
-                    "background"
+                # Use the exact same PNG generation path as single-send and
+                # batch preparation.  The preview therefore decodes the same
+                # bytes that would later be uploaded to the QSL Card Manager.
+                png_bytes = render_selected_qsl(
+                    template,
+                    qso,
+                    cache_root=cache_root,
                 )
 
-                background = (
-                    background
-                    if isinstance(
-                        background,
-                        dict,
+                with Image.open(
+                    io.BytesIO(
+                        png_bytes
                     )
-                    else {}
+                ) as rendered:
+                    rendered.load()
+                    preview = rendered.convert(
+                        "RGB"
+                    )
+
+                preview.thumbnail(
+                    (760, 490),
                 )
-
-                background_url = str(
-                    background.get(
-                        "url",
-                        "",
-                    )
-                    or ""
-                ).strip()
-
-                background_bytes = None
-
-                if background_url:
-                    background_bytes = (
-                        QslAssetCache(
-                            cache_root
-                        ).get_background_bytes(
-                            background_url
-                        )
-                    )
 
                 values = qso_designer_values(
                     qso
-                )
-
-                image = render_qsl_image(
-                    template,
-                    values,
-                    background_bytes=background_bytes,
-                )
-
-                preview = image.copy()
-                preview.thumbnail(
-                    (760, 490),
                 )
 
                 qso_label = (

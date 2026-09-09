@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from logger_core import MetadataDB
-from qsl_qso import qso_to_upsert_record
+from qsl_qso import qsl_upsert_fingerprint, qso_to_upsert_record
 from qsl_storage import QslStorage
 from qsl_sync import (
     QslSyncError,
@@ -99,6 +99,15 @@ class QslSyncTests(unittest.TestCase):
                 self.assertEqual(
                     result.records[0].qso["mailStatus"],
                     "not_sent",
+                )
+
+                self.assertEqual(
+                    storage.sync_fingerprint_for_local(
+                        "local-1"
+                    ),
+                    qsl_upsert_fingerprint(
+                        prepared[0]
+                    ),
                 )
 
                 snapshot = storage.get_status_snapshot(

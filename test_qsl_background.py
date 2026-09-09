@@ -5,7 +5,12 @@ import unittest
 from pathlib import Path
 
 from logger_core import MetadataDB
-from qsl_background import run_qsl_background_sync, unmapped_qsos
+from qsl_background import (
+    qso_sync_candidates,
+    run_qsl_background_sync,
+    unmapped_qsos,
+)
+from qsl_qso import qsl_upsert_fingerprint, qso_to_upsert_record
 from qsl_recipient import queue_recipient_check
 from qsl_storage import QslStorage
 
@@ -120,13 +125,94 @@ class QslBackgroundTests(unittest.TestCase):
             finally:
                 db.close()
 
+    def test_mapped_qso_without_fingerprint_is_selected_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = MetadataDB(
+                Path(tmp) / "metadata.db"
+            )
+            try:
+                storage = QslStorage(db)
+                row = qso(
+                    "old-local",
+                    "DL1OLD",
+                )
+                storage.bind_qso_uid(
+                    "old-local",
+                    OLD_UID,
+                )
+
+                selected = qso_sync_candidates(
+                    storage,
+                    [row],
+                )
+                self.assertEqual(
+                    [
+                        item["local_id"]
+                        for item in selected
+                    ],
+                    ["old-local"],
+                )
+
+                prepared = qso_to_upsert_record(
+                    row
+                )
+                storage.set_sync_fingerprint(
+                    "old-local",
+                    qsl_upsert_fingerprint(
+                        prepared
+                    ),
+                )
+
+                self.assertEqual(
+                    qso_sync_candidates(
+                        storage,
+                        [row],
+                    ),
+                    [],
+                )
+
+                changed = dict(row)
+                changed["rst_sent"] = "-03"
+
+                selected = qso_sync_candidates(
+                    storage,
+                    [changed],
+                )
+                self.assertEqual(
+                    [
+                        item["local_id"]
+                        for item in selected
+                    ],
+                    ["old-local"],
+                )
+            finally:
+                db.close()
+
     def test_background_maps_new_qso_and_resolves_pending_recipient(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = MetadataDB(Path(tmp) / "metadata.db")
             try:
                 storage = QslStorage(db)
-                storage.bind_qso_uid("old-local", OLD_UID)
-                queue_recipient_check(storage, "new-local")
+                old_qso = qso(
+                    "old-local",
+                    "DL1OLD",
+                )
+                storage.bind_qso_uid(
+                    "old-local",
+                    OLD_UID,
+                )
+                storage.set_sync_fingerprint(
+                    "old-local",
+                    qsl_upsert_fingerprint(
+                        qso_to_upsert_record(
+                            old_qso
+                        )
+                    ),
+                )
+                queue_recipient_check(
+                    storage,
+                    "new-local",
+                )
                 client = FakeClient()
 
                 result = run_qsl_background_sync(
@@ -134,8 +220,11 @@ class QslBackgroundTests(unittest.TestCase):
                     storage,
                     db,
                     [
-                        qso("old-local", "DL1OLD"),
-                        qso("new-local", "DL1NEW"),
+                        old_qso,
+                        qso(
+                            "new-local",
+                            "DL1NEW",
+                        ),
                     ],
                     template_candidates=["DA6IT"],
                 )
@@ -152,7 +241,10 @@ class QslBackgroundTests(unittest.TestCase):
                 self.assertEqual(len(client.upserts), 1)
                 self.assertEqual(len(client.upserts[0]), 1)
                 self.assertEqual(result.template_profile, "DA6IT")
-                self.assertGreaterEqual(result.statuses_refreshed, 2)
+                self.assertEqual(
+                    result.statuses_refreshed,
+                    1,
+                )
                 self.assertEqual(result.errors, ())
             finally:
                 db.close()

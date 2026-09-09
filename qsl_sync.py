@@ -6,6 +6,7 @@ from typing import Any, Iterable
 from qsl_qso import (
     PreparedQslQso,
     prepare_upsert_batches,
+    qsl_upsert_fingerprint,
 )
 from qsl_storage import (
     QslStorage,
@@ -190,13 +191,23 @@ def map_upsert_response(
 
     mapped = 0
 
-    for row in parsed:
+    for prepared, row in zip(
+        batch,
+        parsed,
+    ):
         if row.qso_uid is None:
             continue
 
         storage.bind_qso_uid(
             row.local_id,
             row.qso_uid,
+        )
+
+        storage.set_sync_fingerprint(
+            prepared.local_id,
+            qsl_upsert_fingerprint(
+                prepared
+            ),
         )
 
         if row.qso:
