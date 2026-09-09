@@ -166,7 +166,7 @@ jobs:
             base_sha=""
           fi
 
-          exclude='(^|/)(\.venv|build|dist|own_patches)(/|$)'
+          exclude='(^|/)(\.git|\.venv|build|dist|own_patches)(/|$)'
 
           current_json="${RUNNER_TEMP}/detect-secrets-current.json"
           base_json="${RUNNER_TEMP}/detect-secrets-base.json"
