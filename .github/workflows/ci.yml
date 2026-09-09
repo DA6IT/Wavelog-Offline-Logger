@@ -24,9 +24,258 @@ jobs:
       - name: Run selftests
         run: python selftest.py
 
+  security:
+    name: Security checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.10'
+
+      - name: Install security tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input \
+            "bandit>=1.8,<2" \
+            "pip-audit>=2.9,<3" \
+            "detect-secrets>=1.5,<2"
+
+      - name: Bandit - Medium and High findings must be zero
+        shell: bash
+        run: |
+          set -euo pipefail
+          bandit -q -r . \
+            -x ./.venv,./build,./dist,./own_patches \
+            -ll
+
+      - name: Build audited dependency set
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          package_names = {
+              "pyinstaller",
+              "pillow",
+              "truststore",
+              "certifi",
+          }
+
+          versions = {
+              name: set()
+              for name in package_names
+          }
+
+          for path in (
+              Path("scripts/build-linux.sh"),
+              Path("scripts/build-macos.sh"),
+              Path("scripts/build-windows.ps1"),
+          ):
+              text = path.read_text(encoding="utf-8")
+
+              for name, version in re.findall(
+                  r"(?i)\b("
+                  r"pyinstaller|pillow|truststore|certifi"
+                  r")==([0-9][A-Za-z0-9.+_-]*)",
+                  text,
+              ):
+                  versions[name.lower()].add(version)
+
+          missing = sorted(
+              name
+              for name, values in versions.items()
+              if not values
+          )
+
+          conflicts = {
+              name: sorted(values)
+              for name, values in versions.items()
+              if len(values) > 1
+          }
+
+          if missing:
+              raise SystemExit(
+                  "Runtime dependency pin missing: "
+                  + ", ".join(missing)
+              )
+
+          if conflicts:
+              raise SystemExit(
+                  "Conflicting runtime dependency pins: "
+                  + repr(conflicts)
+              )
+
+          target = (
+              Path(os.environ["RUNNER_TEMP"])
+              / "wavelog-runtime-audit.txt"
+          )
+
+          target.write_text(
+              "".join(
+                  f"{name}=={next(iter(versions[name]))}\n"
+                  for name in sorted(versions)
+              ),
+              encoding="utf-8",
+          )
+
+          print(target.read_text(encoding="utf-8"))
+          PY
+
+      - name: pip-audit - bundled Python dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip_audit \
+            -r "${RUNNER_TEMP}/wavelog-runtime-audit.txt"
+
+      - name: detect-secrets - reject new findings
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          zero_sha="0000000000000000000000000000000000000000"
+          base_sha=""
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            base_sha="${PR_BASE_SHA}"
+          elif [[ "${EVENT_NAME}" == "push" ]]; then
+            base_sha="${PUSH_BEFORE_SHA}"
+          fi
+
+          if [[ -z "${base_sha}" || "${base_sha}" == "${zero_sha}" ]]; then
+            base_sha="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          fi
+
+          if [[ -n "${base_sha}" ]] && ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+            base_sha=""
+          fi
+
+          exclude='(^|/)(\.venv|build|dist|own_patches)(/|$)'
+
+          current_json="${RUNNER_TEMP}/detect-secrets-current.json"
+          base_json="${RUNNER_TEMP}/detect-secrets-base.json"
+          base_tree="${RUNNER_TEMP}/wavelog-security-base"
+
+          detect-secrets scan \
+            --all-files \
+            --exclude-files "${exclude}" \
+            > "${current_json}"
+
+          if [[ -n "${base_sha}" ]]; then
+            rm -rf "${base_tree}"
+            git worktree add --detach "${base_tree}" "${base_sha}"
+
+            (
+              cd "${base_tree}"
+              detect-secrets scan \
+                --all-files \
+                --exclude-files "${exclude}" \
+                > "${base_json}"
+            )
+
+            git worktree remove --force "${base_tree}"
+          else
+            printf '{"results":{}}\n' > "${base_json}"
+          fi
+
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+          import sys
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+
+          current = json.loads(
+              (
+                  temp
+                  / "detect-secrets-current.json"
+              ).read_text(encoding="utf-8")
+          )
+
+          baseline = json.loads(
+              (
+                  temp
+                  / "detect-secrets-base.json"
+              ).read_text(encoding="utf-8")
+          )
+
+          def rows(payload):
+              result = {}
+
+              for filename, findings in (
+                  payload.get("results") or {}
+              ).items():
+                  normalized = str(filename).replace("\\", "/")
+
+                  for finding in findings or []:
+                      key = (
+                          normalized,
+                          str(finding.get("type") or ""),
+                          str(
+                              finding.get("hashed_secret")
+                              or ""
+                          ),
+                      )
+
+                      result[key] = int(
+                          finding.get("line_number") or 0
+                      )
+
+              return result
+
+          current_rows = rows(current)
+          baseline_rows = rows(baseline)
+
+          new_findings = sorted(
+              set(current_rows)
+              - set(baseline_rows)
+          )
+
+          if not new_findings:
+              print("No new detect-secrets findings.")
+              raise SystemExit(0)
+
+          print(
+              "New potential secrets detected:",
+              file=sys.stderr,
+          )
+
+          for key in new_findings:
+              filename, kind, _digest = key
+              print(
+                  f"  {filename}:"
+                  f"{current_rows[key]} [{kind}]",
+                  file=sys.stderr,
+              )
+
+          print(
+              "\nReview each finding. "
+              "Legitimate constants must be explicitly "
+              "allowlisted; do not silently ignore the check.",
+              file=sys.stderr,
+          )
+
+          raise SystemExit(1)
+          PY
+
   windows-build:
     name: Windows x64 build
-    needs: selftest
+    needs: [selftest, security]
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -58,6 +307,7 @@ jobs:
 
   macos-build:
     name: macOS ${{ matrix.package_arch }} build
+    needs: [selftest, security]
     strategy:
       fail-fast: false
       matrix:
@@ -94,7 +344,7 @@ jobs:
 
   linux-build:
     name: Linux ${{ matrix.package_arch }} packages
-    needs: selftest
+    needs: [selftest, security]
     strategy:
       fail-fast: false
       matrix:
