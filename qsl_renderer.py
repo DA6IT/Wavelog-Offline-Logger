@@ -98,9 +98,16 @@ class QslAssetCache:
     def _path_for_url(
         self,
         url: str,
+        cache_key: str = "",
     ) -> Path:
+        identity = (
+            url
+            if not cache_key
+            else url + "\n" + str(cache_key)
+        )
+
         digest = hashlib.sha256(
-            url.encode("utf-8")
+            identity.encode("utf-8")
         ).hexdigest()
 
         return self.root / (
@@ -110,6 +117,8 @@ class QslAssetCache:
     def get_background_bytes(
         self,
         url: str,
+        *,
+        cache_key: str = "",
     ) -> bytes | None:
         url = _safe_asset_url(
             url
@@ -119,7 +128,8 @@ class QslAssetCache:
             return None
 
         target = self._path_for_url(
-            url
+            url,
+            cache_key,
         )
 
         if target.is_file():

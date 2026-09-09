@@ -234,11 +234,38 @@ def render_selected_qsl(
     background_bytes = None
 
     if background_url:
+        template_id = str(
+            template.get(
+                "id",
+                "",
+            )
+            or ""
+        ).strip()
+
+        revision = str(
+            template.get(
+                "revision",
+                "",
+            )
+            or template.get(
+                "updatedAt",
+                "",
+            )
+            or ""
+        ).strip()
+
+        cache_key = (
+            f"template:{template_id}:revision:{revision}"
+            if template_id or revision
+            else ""
+        )
+
         background_bytes = (
             QslAssetCache(
                 cache_root
             ).get_background_bytes(
-                background_url
+                background_url,
+                cache_key=cache_key,
             )
         )
 

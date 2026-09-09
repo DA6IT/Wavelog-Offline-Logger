@@ -274,6 +274,81 @@ class QslRendererTests(unittest.TestCase):
                 1,
             )
 
+    def test_asset_cache_separates_template_revisions(self):
+        first_image = Image.new(
+            "RGB",
+            (100, 80),
+            "#ffffff",
+        )
+        second_image = Image.new(
+            "RGB",
+            (100, 80),
+            "#000000",
+        )
+
+        first_buffer = io.BytesIO()
+        second_buffer = io.BytesIO()
+
+        first_image.save(
+            first_buffer,
+            format="PNG",
+        )
+        second_image.save(
+            second_buffer,
+            format="PNG",
+        )
+
+        url = (
+            "https://da6it.de/"
+            "wp-content/uploads/qsl-background.png"
+        )
+
+        responses = [
+            FakeResponse(
+                first_buffer.getvalue(),
+                url,
+            ),
+            FakeResponse(
+                second_buffer.getvalue(),
+                url,
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = QslAssetCache(
+                Path(tmp)
+            )
+
+            with patch(
+                "qsl_renderer.secure_urlopen",
+                side_effect=responses,
+            ) as mocked:
+                rev1_a = cache.get_background_bytes(
+                    url,
+                    cache_key="template:344:revision:1",
+                )
+                rev1_b = cache.get_background_bytes(
+                    url,
+                    cache_key="template:344:revision:1",
+                )
+                rev2 = cache.get_background_bytes(
+                    url,
+                    cache_key="template:344:revision:2",
+                )
+
+            self.assertEqual(
+                rev1_a,
+                rev1_b,
+            )
+            self.assertNotEqual(
+                rev1_a,
+                rev2,
+            )
+            self.assertEqual(
+                mocked.call_count,
+                2,
+            )
+
     def test_asset_cache_rejects_external_url(self):
         with tempfile.TemporaryDirectory() as tmp:
             cache = QslAssetCache(
