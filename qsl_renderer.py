@@ -657,14 +657,14 @@ def _draw_field(
         fill=color,
     )
 
-    bbox = scratch.getbbox()
-
-    if not bbox:
+    # IMPORTANT: keep the complete transparent field box.
+    #
+    # The browser renderer calculates center/right alignment inside the full
+    # configured field width. Cropping the transparent left/right area here
+    # destroys that alignment because the text is then pasted back at the
+    # field's left edge.
+    if not scratch.getbbox():
         return
-
-    scratch = scratch.crop(
-        bbox
-    )
 
     if rotation:
         scratch = scratch.rotate(

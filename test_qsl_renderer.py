@@ -145,6 +145,86 @@ class QslRendererTests(unittest.TestCase):
             (1400, 900),
         )
 
+    def test_center_alignment_preserves_full_field_box(self):
+        raw = render_qsl_png(
+            template(),
+            {
+                "qso.call": "DL1ABC",
+            },
+        )
+
+        image = Image.open(
+            io.BytesIO(raw)
+        ).convert("RGB")
+
+        background = Image.new(
+            "RGB",
+            image.size,
+            "#ffffff",
+        )
+
+        from PIL import ImageChops
+
+        bbox = ImageChops.difference(
+            image,
+            background,
+        ).getbbox()
+
+        self.assertIsNotNone(
+            bbox
+        )
+
+        center_x = (
+            bbox[0] + bbox[2]
+        ) / 2
+
+        # Field: x=10%, width=80% on a 1400px canvas.
+        self.assertGreater(
+            center_x,
+            620,
+        )
+        self.assertLess(
+            center_x,
+            780,
+        )
+
+    def test_right_alignment_preserves_full_field_box(self):
+        current = template()
+        current["fields"][0]["align"] = "right"
+
+        raw = render_qsl_png(
+            current,
+            {
+                "qso.call": "DL1ABC",
+            },
+        )
+
+        image = Image.open(
+            io.BytesIO(raw)
+        ).convert("RGB")
+
+        background = Image.new(
+            "RGB",
+            image.size,
+            "#ffffff",
+        )
+
+        from PIL import ImageChops
+
+        bbox = ImageChops.difference(
+            image,
+            background,
+        ).getbbox()
+
+        self.assertIsNotNone(
+            bbox
+        )
+
+        self.assertGreater(
+            bbox[2],
+            1150,
+        )
+
     def test_asset_cache_reuses_download(self):
         image = Image.new(
             "RGB",
