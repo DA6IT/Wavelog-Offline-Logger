@@ -22,7 +22,9 @@ jobs:
           python-version: '3.12.10'
 
       - name: Run selftests
-        run: python selftest.py
+        run: |
+          python selftest.py
+          python -m unittest test_data_backup_security.py -v
 
   security:
     name: Security checks
