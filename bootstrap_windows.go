@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.20.0"
+	appVersion   = "0.20.1"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 

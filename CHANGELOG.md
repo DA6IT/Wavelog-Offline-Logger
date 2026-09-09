@@ -2,6 +2,30 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.20.1] - 2026-09-09
+
+### Fixed
+
+- QSL-Vorschau und Versand verwenden jetzt denselben Renderpfad; dadurch entspricht die Vorschau zuverlässiger der tatsächlich versendeten PNG-Karte
+- horizontale Ausrichtung von QSL-Feldern mit `center` und `right` bleibt beim Rendern korrekt erhalten
+- QSL-Hintergrundbilder werden bei einer neuen Vorlagenrevision zuverlässig neu geladen, auch wenn die Bild-URL unverändert bleibt
+
+### Changed
+
+- der QSL-Abgleich überträgt zusätzliche für den Card Manager relevante QSO-/ADIF-Felder, sofern sie im lokalen QSO vorhanden sind
+- bereits zugeordnete QSOs werden erneut abgeglichen, wenn sich ihr QSL-relevanter Inhalt geändert hat; bestehende Zuordnungen aus älteren Versionen werden einmalig nachgezogen
+- der regelmäßige QSL-Statusabgleich ist für große Logbücher begrenzt und priorisiert fehlende sowie aktive Zustände
+- stabile QSL-Zustände werden deutlich seltener erneut abgefragt, um unnötige Serverlast zu vermeiden
+- die Texte unter **Was ist neu?** sind bewusst anwenderfreundlich formuliert; technische Details bleiben im Changelog und in den Release Notes
+
+### Security / Reliability
+
+- Wiederherstellung von Backups prüft ZIP-Pfade jetzt plattformübergreifend strenger und blockiert Traversal-, Windows-Pfad-, Symlink- und Pfadkollisionsfälle
+- Manifest, Profilregister, Profil-IDs und referenzierte ADI-Dateien eines Backups werden vor der Wiederherstellung gegengeprüft
+- die GitHub-CI enthält jetzt eigene Security-Checks mit Bandit, `pip-audit` und `detect-secrets`
+- Bandit: **0 Medium / 0 High**
+- `pip-audit`: **keine bekannten Vulnerabilities**
+
 ## [0.20.0] - 2026-09-08
 
 ### Added

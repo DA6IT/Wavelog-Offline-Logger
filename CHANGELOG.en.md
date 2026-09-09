@@ -2,6 +2,30 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.20.1 — 2026-09-09
+
+### Fixed
+
+- QSL preview and delivery now use the same rendering path so the preview more reliably matches the PNG card that is actually sent
+- horizontal `center` and `right` alignment of QSL fields is preserved correctly during rendering
+- QSL background images are refreshed when a template revision changes even when the image URL stays the same
+
+### Changed
+
+- QSL synchronization forwards additional QSO/ADIF fields relevant to the Card Manager when they are available locally
+- already mapped QSOs are synchronized again when their QSL-relevant content changes; mappings created by older versions are backfilled once
+- periodic QSL status refresh is bounded for large logbooks and prioritizes missing and active states
+- stable QSL states are refreshed much less often to avoid unnecessary server load
+- **What's New** text is intentionally written for regular users while technical detail remains in the changelog and release notes
+
+### Security / Reliability
+
+- backup restore now validates ZIP paths more strictly across platforms and rejects traversal, Windows-path, symlink and path-collision cases
+- backup manifest, profile registry, profile IDs and referenced ADIF files are cross-checked before restore
+- GitHub CI now includes dedicated security checks using Bandit, `pip-audit` and `detect-secrets`
+- Bandit: **0 Medium / 0 High**
+- `pip-audit`: **no known vulnerabilities**
+
 ## 0.20.0 — 2026-09-08
 
 ### Added
