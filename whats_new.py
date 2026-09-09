@@ -1,7 +1,17 @@
 from __future__ import annotations
 
 
+# User-facing release copy only: describe what improves for the user.
+# Avoid internal implementation terms, module names, APIs and developer jargon.
+
 WHATS_NEW: dict[str, tuple[str, ...]] = {
+    "0.20.1": (
+        "Die Vorschau von QSL-Karten wurde verbessert, damit sie noch zuverlässiger der später versendeten Karte entspricht.",
+        "Änderungen an bereits bekannten QSOs werden jetzt zuverlässiger mit dem QSL Card Manager abgeglichen.",
+        "Die automatische Aktualisierung von QSL-Informationen wurde für große Logbücher optimiert.",
+        "Sicherung und Wiederherstellung deiner Logger-Daten wurden sicherer und zuverlässiger gemacht.",
+        "Zusätzlich wurden verschiedene kleinere Fehler behoben und die Stabilität verbessert.",
+    ),
     "0.20.0": (
         "Neu: Der DA6IT.de QSL Card Manager ist direkt in den Offline Logger integriert – inklusive Motiven, persönlichem Layout, Vorschau und Versand aus dem Logbuch.",
         "Neue QSOs, QSL-Status und Motive werden nach der einmaligen Einrichtung automatisch im Hintergrund abgeglichen; Offline-Logging bleibt dabei jederzeit nutzbar.",
@@ -56,6 +66,13 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
+    "0.20.1": (
+        "QSL card preview has been improved so it more reliably matches the card that is later sent.",
+        "Changes to existing QSOs are now kept in sync with the QSL Card Manager more reliably.",
+        "Automatic QSL updates have been optimized for large logbooks.",
+        "Backup and restore of your Logger data are now safer and more reliable.",
+        "Several smaller issues have also been fixed to improve overall stability.",
+    ),
     "0.20.0": (
         "New: the DA6IT.de QSL Card Manager is integrated directly into the Offline Logger, including motifs, personal layouts, preview and sending from the logbook.",
         "New QSOs, QSL status and motifs synchronize automatically in the background after the one-time setup while offline logging always remains available.",
