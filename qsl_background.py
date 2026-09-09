@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from qsl_qso import qsl_upsert_fingerprint, qso_to_upsert_record
 from qsl_recipient import QslRecipientResult, resolve_pending_recipients
 from qsl_storage import QslStorage, QslStorageError, normalize_qso_uid
 from qsl_sync import QslSyncResult, sync_qsos
@@ -96,6 +97,57 @@ def unmapped_qsos(
 
         seen.add(local_id)
         result.append(raw)
+
+    return result
+
+
+def qso_sync_candidates(
+    storage: QslStorage,
+    qsos: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return new QSOs plus mapped QSOs whose QSL payload changed."""
+    mapped_local_ids = {
+        str(
+            row.get("local_id")
+            or ""
+        ).strip()
+        for row in storage.list_mappings()
+    }
+
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for raw in qsos:
+        if not isinstance(raw, dict):
+            continue
+
+        local_id = str(
+            raw.get("local_id")
+            or ""
+        ).strip()
+
+        if not local_id or local_id in seen:
+            continue
+
+        seen.add(local_id)
+
+        if local_id not in mapped_local_ids:
+            result.append(raw)
+            continue
+
+        prepared = qso_to_upsert_record(raw)
+        current = qsl_upsert_fingerprint(
+            prepared
+        )
+        previous = storage.sync_fingerprint_for_local(
+            local_id
+        )
+
+        # Pre-0.20.1 mappings have no fingerprint. Send them once so the
+        # richer designer/ADIF payload is backfilled, then only resend on
+        # actual QSL payload changes.
+        if previous != current:
+            result.append(raw)
 
     return result
 
@@ -215,9 +267,16 @@ def run_qsl_background_sync(
 
     sync_result = _empty_sync_result()
     try:
-        pending_qsos = unmapped_qsos(storage, qso_list)
+        pending_qsos = qso_sync_candidates(
+            storage,
+            qso_list,
+        )
         if pending_qsos:
-            sync_result = sync_qsos(client, storage, pending_qsos)
+            sync_result = sync_qsos(
+                client,
+                storage,
+                pending_qsos,
+            )
     except Exception as exc:
         errors.append("QSO-Sync: " + str(exc))
 

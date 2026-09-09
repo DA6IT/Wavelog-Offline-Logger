@@ -126,6 +126,12 @@ class QslStorage:
                     fetched_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS da6it_qsl_sync_state (
+                    local_id TEXT PRIMARY KEY,
+                    record_hash TEXT NOT NULL,
+                    synced_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS da6it_qsl_recipient_hint (
                     local_id TEXT PRIMARY KEY,
                     email TEXT NOT NULL,
@@ -437,6 +443,75 @@ class QslStorage:
             }
 
         return result
+
+    def set_sync_fingerprint(
+        self,
+        local_id: str,
+        record_hash: str,
+    ) -> None:
+        local_id = _normalize_local_id(
+            local_id
+        )
+        record_hash = str(
+            record_hash or ""
+        ).strip().lower()
+
+        if (
+            len(record_hash) != 64
+            or any(
+                ch not in "0123456789abcdef"
+                for ch in record_hash
+            )
+        ):
+            raise QslStorageError(
+                "Ungültiger QSL-Sync-Fingerprint"
+            )
+
+        with self.db.lock:
+            self.db.conn.execute(
+                """
+                INSERT INTO da6it_qsl_sync_state(
+                    local_id,record_hash,synced_at
+                )
+                VALUES(?,?,?)
+                ON CONFLICT(local_id) DO UPDATE SET
+                    record_hash=excluded.record_hash,
+                    synced_at=excluded.synced_at
+                """,
+                (
+                    local_id,
+                    record_hash,
+                    utc_now_iso(),
+                ),
+            )
+            self.db.conn.commit()
+
+    def sync_fingerprint_for_local(
+        self,
+        local_id: str,
+    ) -> str | None:
+        local_id = _normalize_local_id(
+            local_id
+        )
+
+        with self.db.lock:
+            row = self.db.conn.execute(
+                """
+                SELECT record_hash
+                FROM da6it_qsl_sync_state
+                WHERE local_id=?
+                """,
+                (local_id,),
+            ).fetchone()
+
+        if not row:
+            return None
+
+        value = str(
+            row["record_hash"] or ""
+        ).strip().lower()
+
+        return value or None
 
     def set_recipient_hint(
         self,

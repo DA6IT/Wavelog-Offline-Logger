@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,6 +19,27 @@ class QslQsoError(ValueError):
 class PreparedQslQso:
     local_id: str
     record: dict[str, str]
+
+
+def qsl_upsert_fingerprint(
+    prepared: PreparedQslQso,
+) -> str:
+    """Stable hash of the exact QSL API record sent for one local QSO."""
+    if not isinstance(prepared, PreparedQslQso):
+        raise QslQsoError(
+            "QSL-Fingerprint benötigt ein vorbereitetes QSO"
+        )
+
+    encoded = json.dumps(
+        prepared.record,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    return hashlib.sha256(
+        encoded
+    ).hexdigest()
 
 
 def _digits(value: Any) -> str:
