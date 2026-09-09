@@ -241,7 +241,10 @@ class QslBackgroundTests(unittest.TestCase):
                 self.assertEqual(len(client.upserts), 1)
                 self.assertEqual(len(client.upserts[0]), 1)
                 self.assertEqual(result.template_profile, "DA6IT")
-                self.assertGreaterEqual(result.statuses_refreshed, 2)
+                self.assertEqual(
+                    result.statuses_refreshed,
+                    1,
+                )
                 self.assertEqual(result.errors, ())
             finally:
                 db.close()
