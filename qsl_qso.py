@@ -131,6 +131,42 @@ def qso_to_upsert_record(
     if rst_rcvd:
         record["RST_RCVD"] = rst_rcvd
 
+    # Keep the QSL Card Manager's QSO copy useful for designer fields,
+    # archive views and later re-rendering. These ADIF names are already
+    # accepted by the fixed DA6IT.de client contract. Empty optional values
+    # stay omitted so existing minimal QSOs remain unchanged.
+    optional_fields = (
+        ("GRIDSQUARE", "gridsquare", True),
+        ("QTH", "qth", False),
+        ("NAME", "name", False),
+        ("OPERATOR", "operator_call", True),
+        ("MY_GRIDSQUARE", "my_gridsquare", True),
+        ("MY_CITY", "my_qth", False),
+        ("POTA_REF", "pota_ref", True),
+        ("MY_POTA_REF", "my_pota_ref", True),
+        ("SOTA_REF", "sota_ref", True),
+        ("MY_SOTA_REF", "my_sota_ref", True),
+        ("WWFF_REF", "wwff_ref", True),
+        ("MY_WWFF_REF", "my_wwff_ref", True),
+        ("CONTEST_ID", "contest_id", True),
+        ("COMMENT", "comment", False),
+        ("NOTES", "notes", False),
+        ("TX_PWR", "tx_pwr", False),
+        ("STX", "stx", False),
+        ("SRX", "srx", False),
+        ("STX_STRING", "stx_string", False),
+        ("SRX_STRING", "srx_string", False),
+    )
+
+    for adif_name, local_name, upper in optional_fields:
+        value = _text(
+            qso.get(local_name),
+            upper=upper,
+        )
+
+        if value:
+            record[adif_name] = value
+
     return PreparedQslQso(
         local_id=local_id,
         record=record,
