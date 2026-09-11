@@ -25,6 +25,7 @@ jobs:
         run: |
           python selftest.py
           python -m unittest test_data_backup_security.py -v
+          python -m unittest test_usage_stats.py test_qsl_eqsl.py -v
 
   security:
     name: Security checks

@@ -2,6 +2,40 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.21.0 — 2026-09-11
+
+### Added
+
+- direct **Open QRZ.com** action for the selected DX Cluster spot
+- direct QRZ.com action for the currently entered callsign on the **Log QSO** page
+- local QSL recommendations based on the eQSL member list
+- a six-month eQSL activity rule so missing callsigns and accounts without recent log uploads can become email-QSL candidates
+- pseudonymous usage statistics using a random installation ID, application version and operating-system family
+- visible installation ID in Settings plus actions to copy the ID and delete the associated statistics
+
+### Changed
+
+- the QSL Card Manager is substantially more compact so the recommendation list receives much more space
+- the eQSL member list is cached locally and refreshed in the background after the cache interval
+- already sent and queued/pending QSL emails are excluded from recommendations
+- the stable usage-statistics installation identifier is correctly described as pseudonymous rather than anonymous
+- README, user-guide, architecture and privacy documentation now reflect the new functionality
+
+### Privacy / Safety
+
+- usage statistics do not send callsigns, QSOs, locators, email addresses, Wavelog URLs, credentials, profile names or detailed feature usage
+- no statistics heartbeat is sent before the first-start notice has been acknowledged; the feature can be disabled later
+- DA6IT.de stores only the SHA-256 hash of the random installation ID in the statistics tables; normal web-server/security logs may independently process connection metadata
+- eQSL matching is performed locally and does not upload the local QSO or callsign list to eQSL
+- QSL recommendations never trigger delivery automatically; every QSL email remains an explicit user action
+
+### Security / Reliability
+
+- the eQSL download is size-bounded and restricted to the intended HTTPS host
+- a new eQSL cache is activated only after parsing and plausibility validation succeed
+- eQSL refresh failures do not overwrite an already usable cache
+- the new eQSL and usage-statistics tests also run in GitHub CI
+
 ## 0.20.2 — 2026-09-11
 
 ### Added

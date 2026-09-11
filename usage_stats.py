@@ -4,6 +4,7 @@ import json
 import platform
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, replace
@@ -16,10 +17,59 @@ STATE_FILE = "usage_stats.json"
 HEARTBEAT_URL = "https://da6it.de/wp-json/da6it/v1/offline-logger/heartbeat"
 FORGET_URL = "https://da6it.de/wp-json/da6it/v1/offline-logger/forget"
 HTTP_TIMEOUT_SECONDS = 5
+_USAGE_STATS_ALLOWED_HOSTS = frozenset({"da6it.de"})
 
 
 class UsageStatsError(RuntimeError):
     pass
+
+
+def _validate_usage_stats_https_url(value: str) -> str:
+    url = str(value or "").strip()
+
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+    except ValueError as exc:
+        raise UsageStatsError(
+            "Nutzungsstatistik verwendet eine ungültige Server-URL."
+        ) from exc
+
+    host = (parsed.hostname or "").lower()
+
+    if (
+        parsed.scheme.lower() != "https"
+        or host not in _USAGE_STATS_ALLOWED_HOSTS
+        or port not in {None, 443}
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise UsageStatsError(
+            "Nutzungsstatistik darf nur den freigegebenen DA6IT.de-HTTPS-Endpunkt verwenden."
+        )
+
+    return url
+
+
+class _UsageStatsHttpsRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req,
+        fp,
+        code,
+        msg,
+        headers,
+        newurl,
+    ):
+        _validate_usage_stats_https_url(newurl)
+        return super().redirect_request(
+            req,
+            fp,
+            code,
+            msg,
+            headers,
+            newurl,
+        )
 
 
 @dataclass(frozen=True)
@@ -153,11 +203,12 @@ class UsageStatsService:
             )
 
     def _post_json(self, url: str, payload: dict, version: str) -> int:
+        safe_url = _validate_usage_stats_https_url(url)
         if self._post_json_override is not None:
-            return int(self._post_json_override(url, payload, version))
+            return int(self._post_json_override(safe_url, payload, version))
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         request = urllib.request.Request(
-            url,
+            safe_url,
             data=body,
             method="POST",
             headers={
@@ -166,8 +217,12 @@ class UsageStatsService:
                 "User-Agent": f"DA6IT-Wavelog-Offline-Logger/{version}",
             },
         )
+        opener = urllib.request.build_opener(
+            _UsageStatsHttpsRedirectHandler(),
+        )
         try:
-            with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            with opener.open(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+                _validate_usage_stats_https_url(response.geturl())
                 return int(response.status)
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
             raise UsageStatsError(str(exc)) from exc

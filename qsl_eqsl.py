@@ -17,6 +17,7 @@ EQSL_CACHE_MAX_AGE = timedelta(hours=24)
 EQSL_INACTIVE_MONTHS = 6
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
 MIN_EXPECTED_MEMBERS = 1000
+_EQSL_ALLOWED_HOSTS = frozenset({"eqsl.cc", "www.eqsl.cc"})
 
 _CALL_RE = re.compile(r"^[A-Z0-9][A-Z0-9/.\-]{1,31}$")
 _CALL_HEADERS = {
@@ -39,6 +40,54 @@ _DATE_HEADERS = {
 
 class EqslMemberListError(RuntimeError):
     pass
+
+
+def _validate_eqsl_https_url(value: str) -> str:
+    url = str(value or "").strip()
+
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+    except ValueError as exc:
+        raise EqslMemberListError(
+            "eQSL-Mitgliederliste verwendet eine ungültige URL"
+        ) from exc
+
+    host = (parsed.hostname or "").lower()
+
+    if (
+        parsed.scheme.lower() != "https"
+        or host not in _EQSL_ALLOWED_HOSTS
+        or port not in {None, 443}
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise EqslMemberListError(
+            "eQSL-Mitgliederliste darf nur von den freigegebenen HTTPS-Hosts geladen werden"
+        )
+
+    return url
+
+
+class _EqslHttpsRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req,
+        fp,
+        code,
+        msg,
+        headers,
+        newurl,
+    ):
+        _validate_eqsl_https_url(newurl)
+        return super().redirect_request(
+            req,
+            fp,
+            code,
+            msg,
+            headers,
+            newurl,
+        )
 
 
 @dataclass(frozen=True)
@@ -227,23 +276,23 @@ class EqslMemberCache:
         return timedelta(0) <= age <= EQSL_CACHE_MAX_AGE
 
     def _download(self) -> bytes:
+        url = _validate_eqsl_https_url(EQSL_MEMBER_LIST_URL)
         request = urllib.request.Request(
-            EQSL_MEMBER_LIST_URL,
+            url,
             headers={
                 "User-Agent": "DA6IT-Wavelog-Offline-Logger/eQSL-member-cache",
                 "Accept": "text/csv,text/plain,application/octet-stream,*/*;q=0.5",
             },
             method="GET",
         )
+        opener = urllib.request.build_opener(
+            _EqslHttpsRedirectHandler(),
+        )
 
-        with urllib.request.urlopen(request, timeout=15) as response:
-            final_url = urllib.parse.urlparse(response.geturl())
-            host = (final_url.hostname or "").lower()
-
-            if final_url.scheme != "https" or host not in {"eqsl.cc", "www.eqsl.cc"}:
-                raise EqslMemberListError(
-                    "eQSL-Mitgliederliste wurde auf einen unerwarteten Host umgeleitet"
-                )
+        with opener.open(request, timeout=15) as response:
+            # Defense in depth: the redirect handler validates every redirect
+            # before it is followed; verify the final URL once more as well.
+            _validate_eqsl_https_url(response.geturl())
 
             length = response.headers.get("Content-Length")
             if length:

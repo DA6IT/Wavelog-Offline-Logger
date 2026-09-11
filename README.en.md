@@ -17,10 +17,12 @@ An offline-first desktop logger for amateur radio: log contacts in the field eve
 - validated ADIF import/export with backup and duplicate protection
 - xOTA sessions combining POTA, SOTA, WWFF, IOTA and COTA/WCA references
 - independent station profiles with profile-specific Wavelog API v2 synchronization
-- optional online mode for immediately pushing only new QSOs
+- optional online mode that pushes only new QSOs after a configurable delay; the default is five minutes
 - optional full synchronization at application startup and/or shutdown
 - bidirectional Wavelog contest-session and QSO assignment synchronization
 - Wavelog or direct QRZ.com callbook data, including station photos
+- direct QRZ.com pages from the Log QSO form and selected DX Cluster spots
+- integrated DA6IT.de QSL Card Manager with local eQSL matching for email-QSL recommendations
 - optional desktop notification after a locally saved QSO
 - bundled Hamlib CAT control including TUNE/ATU and a manual Windows Hamlib updater with rollback
 - Hamlib `rotctld` rotor control with live position, compass, bearing target, STOP and hardware-free Dummy testing
@@ -77,8 +79,8 @@ The logger complements Wavelog for portable operation, DXpeditions, pileups, con
 - Runtime online push transfers only new, unlinked QSOs.
 - Changes, downloads, deletions and conflicts are handled by full synchronization.
 - Deleting a logger profile is local-only and never deletes Wavelog data.
-- eQSL credentials can be stored, but the connection is still **Coming soon**.
-- There is no telemetry, user counting, advertising or project-side collection of application starts.
+- Direct eQSL upload/synchronization with personal eQSL credentials remains **Coming soon**. Independently, the eQSL member list is cached and evaluated locally for QSL recommendations.
+- Privacy-conscious pseudonymous usage statistics can, after the first-start notice, report a random installation ID, version and operating-system family at most once per day. They can be disabled and the associated statistics can be deleted in the app; callsigns and QSO data are not transmitted.
 - See the [privacy policy](PRIVACY.md) and [security policy](SECURITY.md).
 
 ## Uninstall

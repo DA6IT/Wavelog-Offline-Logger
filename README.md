@@ -18,10 +18,12 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - integrierter xOTA-Modus für kombinierte POTA-, SOTA-, WWFF-, IOTA- und COTA/WCA-Aktivierungen
 - mehrere getrennte Stationsprofile
 - profilspezifischer Wavelog-API-v2-Sync mit sichtbaren Konflikten und Fehlerursachen
-- optionaler Online-Modus: nur neue QSOs sofort pushen
+- optionaler Online-Modus: nur neue QSOs nach konfigurierbarer Verzögerung pushen; Standard sind fünf Minuten
 - optionaler Voll-Sync beim App-Start und/oder Beenden
 - bidirektionaler Abgleich von Wavelog-Contest-Sessions und deren QSO-Zuordnungen; Session-IDs werden automatisch übernommen
 - Callbook-Daten über Wavelog oder direkt über QRZ.com, einschließlich Stationsfoto
+- QRZ.com-Seiten direkt aus dem QSO-Formular und aus ausgewählten DX-Cluster-Spots öffnen
+- integrierter DA6IT.de QSL Card Manager mit lokalem eQSL-Abgleich für E-Mail-QSL-Empfehlungen
 - optionale Desktop-Benachrichtigung nach einem lokal gespeicherten QSO
 - CAT über mitgeliefertes Hamlib, inklusive TUNE/ATU und manuellem Windows-Hamlib-Updater mit Rückfallversion
 - Rotorsteuerung über Hamlib `rotctld` mit Live-Position, Kompass, Peilungsübernahme, STOP und Dummy-Test ohne Hardware
@@ -96,8 +98,8 @@ Der Logger ersetzt Wavelog nicht. Er ergänzt es für portable Einsätze, DXpedi
 - Ein Laufzeit-Push überträgt ausschließlich neue, unverknüpfte QSOs.
 - Änderungen, Downloads, Löschungen und Konflikte behandelt nur der vollständige Sync.
 - Profil-Löschung wirkt ausschließlich lokal und löscht keine Wavelog-Daten.
-- eQSL-Felder sind vorbereitet, aber weiterhin **Coming soon** und noch ohne Verbindung.
-- Es gibt keine Telemetrie, Nutzerzählung, Werbung oder projektseitige Erfassung von Programmstarts.
+- Direkter eQSL-Upload/-Sync mit persönlichen eQSL-Zugangsdaten bleibt **Coming soon**. Für QSL-Empfehlungen wird unabhängig davon die eQSL-Mitgliederliste lokal gecacht und ausgewertet.
+- Eine datensparsame pseudonyme Nutzungsstatistik kann nach dem Erststart-Hinweis höchstens einmal täglich eine zufällige Installations-ID, Version und Betriebssystemfamilie melden. Sie kann abgeschaltet und die zugehörigen Statistikdaten können in der App gelöscht werden; Rufzeichen und QSO-Daten werden nicht übertragen.
 - [Datenschutzerklärung](PRIVACY.md) und [Sicherheitsmeldungen](SECURITY.md) beschreiben lokale Daten und optionale Netzwerkdienste im Detail.
 
 ## Code signing policy

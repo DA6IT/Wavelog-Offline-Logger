@@ -6,7 +6,13 @@ import unittest
 import uuid
 from pathlib import Path
 
-from usage_stats import UsageStatsService
+from usage_stats import (
+    HEARTBEAT_URL,
+    UsageStatsError,
+    UsageStatsService,
+    _UsageStatsHttpsRedirectHandler,
+    _validate_usage_stats_https_url,
+)
 
 
 class UsageStatsTests(unittest.TestCase):
@@ -72,6 +78,56 @@ class UsageStatsTests(unittest.TestCase):
             self.assertTrue(payload["enabled"])
             self.assertTrue(payload["notice_seen"])
             self.assertTrue(payload["last_successful_heartbeat"])
+
+    def test_usage_stats_url_policy_accepts_only_da6it_https(self):
+        self.assertEqual(
+            _validate_usage_stats_https_url(HEARTBEAT_URL),
+            HEARTBEAT_URL,
+        )
+
+        for value in (
+            "file:///tmp/heartbeat",
+            "http://da6it.de/wp-json/da6it/v1/offline-logger/heartbeat",
+            "https://evil.example/wp-json/da6it/v1/offline-logger/heartbeat",
+            "https://" + "test-user" + ":" + "test-value" + "@da6it.de/wp-json/da6it/v1/offline-logger/heartbeat",
+            "https://da6it.de:8443/wp-json/da6it/v1/offline-logger/heartbeat",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(UsageStatsError):
+                    _validate_usage_stats_https_url(value)
+
+    def test_usage_stats_redirect_policy_rejects_foreign_host(self):
+        handler = _UsageStatsHttpsRedirectHandler()
+
+        with self.assertRaises(UsageStatsError):
+            handler.redirect_request(
+                None,
+                None,
+                302,
+                "Found",
+                {},
+                "https://evil.example/heartbeat",
+            )
+
+    def test_invalid_usage_stats_endpoint_is_rejected_before_transport(self):
+        calls = []
+
+        def post_json(url, payload, version):
+            calls.append((url, payload, version))
+            return 204
+
+        with tempfile.TemporaryDirectory() as temporary:
+            service = UsageStatsService(
+                Path(temporary),
+                heartbeat_url="file:///tmp/heartbeat",
+                post_json=post_json,
+            )
+            service.mark_notice_seen(enabled=True)
+
+            with self.assertRaises(UsageStatsError):
+                service.send_heartbeat("0.21.0")
+
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

@@ -118,8 +118,13 @@ try {
         throw "packaging/arch/PKGBUILD enthaelt nicht Version $version."
     }
     $expectedAppDirectory = "app-v$($version -replace '[^0-9A-Za-z]', '')"
-    if ($bootstrap -notmatch ('filepath\.Join\(base,\s*"' + [regex]::Escape($expectedAppDirectory) + '"\)')) {
-        throw "bootstrap_windows.go enthaelt nicht das erwartete App-Verzeichnis $expectedAppDirectory."
+    $literalAppDirectoryPattern = 'filepath\.Join\(base,\s*"' + [regex]::Escape($expectedAppDirectory) + '"\)'
+    $dynamicAppDirectoryPattern = 'filepath\.Join\(base,\s*"app-v"\s*\+\s*strings\.ReplaceAll\(appVersion,\s*"\.",\s*""\)\)'
+    if (
+        $bootstrap -notmatch $literalAppDirectoryPattern -and
+        $bootstrap -notmatch $dynamicAppDirectoryPattern
+    ) {
+        throw "bootstrap_windows.go enthaelt kein erwartetes versionsabhaengiges App-Verzeichnis."
     }
     if ($releaseNotes -notmatch ('(?m)^# .+ v' + [regex]::Escape($version) + '\s*$')) {
         throw "docs/RELEASE_NOTES.md enthaelt nicht Version $version."
@@ -135,6 +140,11 @@ try {
     }
 
     if (-not $releaseAlreadyTagged) {
+    $preReleaseStatus = @(& $git status --porcelain)
+    if ($preReleaseStatus) {
+        throw "Arbeitsbaum ist vor der Release-Erzeugung nicht sauber. Bitte Aenderungen zuerst committen oder verwerfen: $($preReleaseStatus -join ', ')"
+    }
+
     Write-Host "2/10 Vollstaendige Dokumentations-Screenshots erzeugen ..."
     if (-not $SkipScreenshotCapture) {
         & (Join-Path $PSScriptRoot "capture-doc-screenshots.ps1")
@@ -166,11 +176,19 @@ try {
         $env:PYTHONPATH = if ($env:PYTHONPATH) { "$packagePath;$env:PYTHONPATH" } else { $packagePath }
     }
     Invoke-Checked $python @("selftest.py")
+    $rootPythonFiles = @(
+        Get-ChildItem -LiteralPath $projectRoot -Filter "*.py" -File |
+            ForEach-Object { $_.Name }
+    )
+    $compileTargets = @($rootPythonFiles) + @(
+        "scripts\capture-doc-screenshots.py",
+        "scripts\set-windows-icon.py"
+    )
+    Invoke-Checked $python (@("-m", "py_compile") + $compileTargets)
     Invoke-Checked $python @(
-        "-m", "py_compile", "app.py", "logger_core.py", "callbook.py", "cat_control.py", "hamlib_update.py",
-        "dx_cluster.py", "external_logging.py",
-        "notifications.py", "ui_preferences.py", "update_check.py", "data_backup.py", "whats_new.py",
-        "xota.py", "scripts\capture-doc-screenshots.py", "scripts\set-windows-icon.py"
+        "-m", "unittest", "-v",
+        "test_usage_stats.py",
+        "test_qsl_eqsl.py"
     )
 
     foreach ($scriptPath in @(
@@ -220,22 +238,40 @@ try {
 
     Write-Host "5/10 Release-Branch vorbereiten ..."
     Invoke-Checked $git @("fetch", "--prune", "origin", "main")
-    $currentBranch = (& $git branch --show-current).Trim()
+    $sourceBranch = (& $git branch --show-current).Trim()
+    $sourceHead = (& $git rev-parse "HEAD").Trim()
+    $originMain = (& $git rev-parse "origin/main").Trim()
+
+    if ([string]::IsNullOrWhiteSpace($sourceBranch)) {
+        throw "Release muss von einem lokalen Branch gestartet werden; detached HEAD wird nicht unterstuetzt."
+    }
+
+    & $git merge-base --is-ancestor "origin/main" $sourceHead
+    if ($LASTEXITCODE -ne 0) {
+        throw "Der aktuelle Quell-Branch enthaelt origin/main nicht. Bitte zuerst main mergen oder rebasen."
+    }
+
+    if ($sourceBranch -eq "main" -and $sourceHead -ne $originMain) {
+        throw "Lokales main entspricht nicht origin/main. Bitte zuerst git pull --ff-only ausfuehren."
+    }
+
     $localBranches = @(& $git branch --format="%(refname:short)")
-    if ($currentBranch -ne $branch) {
+    if ($sourceBranch -ne $branch) {
         if ($localBranches -contains $branch) {
-            Invoke-Checked $git @("switch", $branch)
-        } else {
-            # The release branch must always start at the current remote main,
-            # even when the working copy still points to an older release PR.
-            Invoke-Checked $git @("switch", "-c", $branch, "origin/main")
+            throw "Der lokale Release-Branch $branch existiert bereits. Bitte vor dem erneuten Start bewusst pruefen oder entfernen."
         }
+
+        # Preserve the fully tested source branch. This is important when a
+        # feature branch already contains committed release changes that have
+        # not yet been merged to main.
+        Invoke-Checked $git @("switch", "-c", $branch, $sourceHead)
     }
 
     Write-Host "6/10 Gepruefte Dateien committen und Branch pushen ..."
     $releaseFiles = @(
         ".gitignore",
         ".gitattributes",
+        ".github/workflows/ci.yml",
         "app.py",
         "bootstrap_windows.go",
         "callbook.py",

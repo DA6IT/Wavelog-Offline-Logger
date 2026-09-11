@@ -1,6 +1,6 @@
 # Wavelog Offline Logger — architecture and developer notes
 
-> Version: 0.19.4
+> Version: 0.21.0
 > Goal: keep large functional areas independently maintainable without growing `app.py` back into a monolith.
 
 ## Overview
@@ -12,6 +12,7 @@ app.py
 │
 ├── feature_ui_shell.py
 ├── feature_update.py
+├── feature_usage.py
 ├── feature_wavelog_online.py
 ├── feature_profiles.py
 ├── feature_lifecycle.py
@@ -20,6 +21,7 @@ app.py
 ├── feature_contest.py
 ├── feature_xota.py
 ├── feature_qso_sync.py
+├── feature_qsl.py
 ├── feature_stats.py
 ├── feature_cat.py
 ├── feature_rotor.py
@@ -40,6 +42,8 @@ external_logging.py
 callbook.py
 xota.py
 wsjtx_sync.py
+qsl_eqsl.py
+usage_stats.py
 ...
 ```
 
@@ -51,6 +55,7 @@ wsjtx_sync.py
 |---|---|
 | `feature_ui_shell.py` | main window, navigation, styles and responsive UI |
 | `feature_update.py` | release checks, update flow and What's New |
+| `feature_usage.py` | first-start notice, settings and asynchronous usage-statistics heartbeat |
 | `feature_wavelog_online.py` | Wavelog reachability, online mode and auto-push |
 | `feature_profiles.py` | Logger profiles and profile-specific storage |
 | `feature_lifecycle.py` | shutdown and cleanup |
@@ -59,6 +64,7 @@ wsjtx_sync.py
 | `feature_contest.py` | contest logging |
 | `feature_xota.py` | xOTA UI and orchestration |
 | `feature_qso_sync.py` | QSO view, Wavelog sync and WSJT-X sync orchestration |
+| `feature_qsl.py` | QSL Card Manager UI, templates, local eQSL recommendations and delivery orchestration |
 | `feature_stats.py` | statistics |
 | `feature_cat.py` | CAT, Hamlib, FLRig and TUNE |
 | `feature_rotor.py` | rotor UI, `rotctld` lifecycle, live position and QSO bearing control |
@@ -98,9 +104,9 @@ The mixin must still be imported and added to `LoggerApp`; the filename alone do
 
 The Windows executable is a Go launcher. `bootstrap_windows.go` embeds all `feature_*.py` files through `embed.FS`, writes them to the versioned runtime directory and verifies their presence and contents.
 
-Non-feature modules such as `app_common.py`, `ui_theme.py`, `dialogs.py` and `wsjtx_sync.py` must be embedded explicitly.
+Non-feature modules such as `app_common.py`, `ui_theme.py`, `dialogs.py`, `wsjtx_sync.py`, `qsl_eqsl.py` and `usage_stats.py` must be embedded explicitly.
 
-The runtime directory is derived from `appVersion`. For example, `0.19.3` becomes `app-v0193`, so a new release does not require a second hard-coded runtime-path update.
+The runtime directory is derived from `appVersion`. For example, `0.21.0` becomes `app-v0210`, so a new release does not require a second hard-coded runtime-path update.
 
 Linux and macOS use PyInstaller with `app.py`; normal Python imports are discovered automatically, but real platform builds still need release smoke testing.
 
@@ -110,12 +116,12 @@ At minimum these values must match:
 
 ```python
 # logger_core.py
-VERSION = "0.19.4"
+VERSION = "0.21.0"
 ```
 
 ```go
 // bootstrap_windows.go
-appVersion = "0.19.4"
+appVersion = "0.21.0"
 ```
 
 The Windows build script verifies this relationship. `whats_new.py`, changelogs, user guides and release notes should be updated for every published version.
@@ -200,7 +206,9 @@ Before release, cover at least:
 - WSJT-X file sync
 - statistics
 - CAT start/stop
-- DX Cluster
+- DX Cluster including the QRZ.com action
+- QSL recommendations and eQSL cache
+- first-start usage notice plus enable/disable/delete statistics controls
 - UDP logging
 - settings persistence
 - backup/restore

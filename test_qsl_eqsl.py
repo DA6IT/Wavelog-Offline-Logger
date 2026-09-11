@@ -4,7 +4,11 @@ import unittest
 from datetime import date
 
 from qsl_eqsl import (
+    EQSL_MEMBER_LIST_URL,
     EqslMemberIndex,
+    EqslMemberListError,
+    _EqslHttpsRedirectHandler,
+    _validate_eqsl_https_url,
     parse_member_csv,
     subtract_months,
 )
@@ -58,6 +62,36 @@ class EqslMemberListTests(unittest.TestCase):
             subtract_months(date(2026, 8, 31), 6),
             date(2026, 2, 28),
         )
+
+    def test_eqsl_url_policy_accepts_only_expected_https_hosts(self):
+        self.assertEqual(
+            _validate_eqsl_https_url(EQSL_MEMBER_LIST_URL),
+            EQSL_MEMBER_LIST_URL,
+        )
+
+        for value in (
+            "file:///tmp/eQSLMemberList.csv",
+            "http://www.eqsl.cc/DownloadedFiles/eQSLMemberList.csv",
+            "https://evil.example/eQSLMemberList.csv",
+            "https://" + "test-user" + ":" + "test-value" + "@www.eqsl.cc/DownloadedFiles/eQSLMemberList.csv",
+            "https://www.eqsl.cc:8443/DownloadedFiles/eQSLMemberList.csv",
+        ):
+            with self.subTest(value=value):
+                with self.assertRaises(EqslMemberListError):
+                    _validate_eqsl_https_url(value)
+
+    def test_eqsl_redirect_policy_rejects_foreign_host(self):
+        handler = _EqslHttpsRedirectHandler()
+
+        with self.assertRaises(EqslMemberListError):
+            handler.redirect_request(
+                None,
+                None,
+                302,
+                "Found",
+                {},
+                "https://evil.example/eQSLMemberList.csv",
+            )
 
 
 if __name__ == "__main__":

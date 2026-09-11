@@ -5,13 +5,15 @@ from __future__ import annotations
 # Avoid internal implementation terms, module names, APIs and developer jargon.
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
+
     "0.21.0": (
-    "Im DX-Cluster und beim QSO-Log lÃ¤sst sich das aktuelle Rufzeichen jetzt direkt auf QRZ.com Ã¶ffnen.",
-    "Der QSL Card Manager zeigt E-Mail-QSL-Empfehlungen, wenn eine Gegenstation bei eQSL nicht gefunden wird oder dort seit mehr als sechs Monaten kein aktueller Log-Upload erkennbar ist und eine E-Mail-Adresse verfÃ¼gbar ist.",
-    "Die eQSL-Mitgliederliste wird lokal gecacht und ausgewertet; QSL-Empfehlungen lÃ¶sen niemals automatisch einen Versand aus.",
-    "Der QSL-Bereich wurde deutlich kompakter gestaltet, damit die Empfehlungsliste wesentlich mehr Platz erhÃ¤lt.",
-    "Eine datensparsame pseudonyme Nutzungsstatistik kann hÃ¶chstens einmal tÃ¤glich Installations-ID, Version und Betriebssystem melden. Sie lÃ¤sst sich abschalten und die gespeicherten Statistikdaten kÃ¶nnen direkt aus der App gelÃ¶scht werden.",
-),    "0.20.2": (
+        "Im DX-Cluster und beim QSO-Log lässt sich das aktuelle Rufzeichen jetzt direkt auf QRZ.com öffnen.",
+        "Der QSL Card Manager zeigt E-Mail-QSL-Empfehlungen, wenn eine Gegenstation bei eQSL nicht gefunden wird oder dort seit mehr als sechs Monaten kein aktueller Log-Upload erkennbar ist und eine E-Mail-Adresse verfügbar ist.",
+        "Die eQSL-Mitgliederliste wird lokal gecacht und ausgewertet; QSL-Empfehlungen lösen niemals automatisch einen Versand aus.",
+        "Der QSL-Bereich wurde deutlich kompakter gestaltet, damit die Empfehlungsliste wesentlich mehr Platz erhält.",
+        "Eine datensparsame pseudonyme Nutzungsstatistik kann höchstens einmal täglich Installations-ID, Version und Betriebssystem melden. Sie lässt sich abschalten und die gespeicherten Statistikdaten können direkt aus der App gelöscht werden.",
+    ),
+    "0.20.2": (
         "Der automatische Wavelog-Abgleich lässt sich jetzt verzögert ausführen; standardmäßig werden neue QSOs nach fünf Minuten gesammelt übertragen.",
         "Mehrere QSOs können gemeinsam ausgewählt und deutlich schneller gelöscht werden. Bei bereits synchronisierten QSOs warnt der Logger klar vor der späteren Löschung in Wavelog.",
         "Der Dublettenschutz für WSJT-X und externe digitale Logs wurde erweitert, damit wiederholte Abschlussmeldungen nicht unnötig doppelte oder dreifache QSOs erzeugen.",
@@ -79,13 +81,15 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
+
     "0.21.0": (
-    "The DX Cluster and Log QSO pages can now open QRZ.com directly for the selected or currently entered callsign.",
-    "The QSL Card Manager can recommend email QSLs when a station is missing from eQSL or has no recent log upload for more than six months and a usable email address is available.",
-    "The eQSL member list is cached and evaluated locally, and QSL recommendations never trigger delivery automatically.",
-    "The QSL area is substantially more compact so the recommendation list receives much more space.",
-    "Privacy-conscious pseudonymous usage statistics can report the installation ID, version and operating system at most once per day. They can be disabled and the stored statistics can be deleted directly from the app.",
-),    "0.20.2": (
+        "The DX Cluster and Log QSO pages can now open QRZ.com directly for the selected or currently entered callsign.",
+        "The QSL Card Manager can recommend email QSLs when a station is missing from eQSL or has no recent log upload for more than six months and a usable email address is available.",
+        "The eQSL member list is cached and evaluated locally, and QSL recommendations never trigger delivery automatically.",
+        "The QSL area is substantially more compact so the recommendation list receives much more space.",
+        "Privacy-conscious pseudonymous usage statistics can report the installation ID, version and operating system at most once per day. They can be disabled and the stored statistics can be deleted directly from the app.",
+    ),
+    "0.20.2": (
         "Automatic Wavelog synchronization can now be delayed; by default, new QSOs are collected and uploaded after five minutes.",
         "Multiple QSOs can be selected and deleted together much faster. The Logger clearly warns when synchronized QSOs will also be removed from Wavelog during a later full sync.",
         "Duplicate protection for WSJT-X and external digital logs has been improved so repeated final exchanges do not create unnecessary duplicate or triplicate QSOs.",

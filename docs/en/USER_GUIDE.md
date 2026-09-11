@@ -1,4 +1,4 @@
-# User guide — DA6IT.de Wavelog Offline Logger 0.19.4
+# User guide — DA6IT.de Wavelog Offline Logger 0.21.0
 
 [Deutsch](../USER_GUIDE.md) · **English**
 
@@ -6,7 +6,7 @@ This guide covers the complete application. Its screenshots are generated with i
 
 ## 1. Language, theme and profiles
 
-Open **Settings → General** to select **English** or **German**, Light or Dark theme, and QSO desktop notifications. Save and restart the application after changing language or theme. These are app-wide preferences; station, Wavelog, CAT, cluster and UDP values remain profile-specific.
+Open **Settings → General** to select **English** or **German**, Light or Dark theme, and QSO desktop notifications. The same page contains the pseudonymous usage-statistics control, the visible random installation ID and the deletion action for statistics stored for that ID. Save and restart the application after changing language or theme. These are app-wide preferences; station, Wavelog, CAT, cluster and UDP values remain profile-specific.
 
 Use the profile selector in the header to switch operating contexts. The app stops the old UDP listener before switching and starts the new profile's listener when its autostart option is enabled. A profile can be created, renamed, duplicated or deleted locally. Local profile deletion never deletes Wavelog data.
 
@@ -16,7 +16,7 @@ Use the profile selector in the header to switch operating contexts. The app sto
 
 Enter callsign, frequency, band, mode, reports and any optional locator, name, QTH, xOTA references, comment and notes. **Save QSO** writes the contact to ADI immediately. The form is cleared after successful manual or external logging. The most recently saved QSO remains available as a separate DX-spot candidate.
 
-The callsign field indicates worked status and shows recent matching contacts. If own and remote grid locators are known, the sidebar displays approximate distance and bearing. Wavelog or QRZ.com lookup can fill name, locator, QTH and photo; logging continues normally when lookup or internet is unavailable.
+The callsign field indicates worked status and shows recent matching contacts. If own and remote grid locators are known, the sidebar displays approximate distance and bearing. Wavelog or QRZ.com lookup can fill name, locator, QTH and photo; logging continues normally when lookup or internet is unavailable. **Open QRZ.com** opens the currently entered callsign in the default browser.
 
 ## 3. Fast Log / DXpedition
 
@@ -98,7 +98,7 @@ Discovery runs only when **Find FLRig** is clicked. Manual configuration remains
 
 ![DX Cluster](../screenshots/en/dx-cluster.png)
 
-Connect manually to receive live spots. Filter by band, mode, time and spotter region; sort by headings. Worked markers compare band and mode. Double-click tunes the radio without changing page; **Use for QSO** fills the log form. Public spotting uses a separate profile-specific DXSpider connection.
+Connect manually to receive live spots. Filter by band, mode, time and spotter region; sort by headings. Worked markers compare band and mode. Double-click tunes the radio without changing page; **Use for QSO** fills the log form and **Open QRZ.com** opens the selected spot callsign in the browser. Public spotting uses a separate profile-specific DXSpider connection.
 
 ## 10. UDP / WSJT-X
 
@@ -121,7 +121,7 @@ Before `wsjtx_log.adi` is changed, the logger creates a timestamped backup. Dupl
 File synchronization and **UDP Logging** are complementary: UDP provides live status and `QSO Logged` events while WSJT-X is running, while file synchronization reconciles the persistent WSJT-X log.
 ## 11. Settings and online services
 
-**Station & Wavelog** stores operator/station identity, local defaults, API URL/token and selected Wavelog station profile. **Callbook & Online services** chooses Wavelog or direct QRZ.com and automatic lookup. QRZ direct lookup works independently from Wavelog but may require a QRZ XML subscription. eQSL credentials are placeholders only; no eQSL connection or upload is active yet. **Data & connections** contains local log path, xOTA source URLs, DX spotting and UDP options.
+**Station & Wavelog** stores operator/station identity, local defaults, API URL/token and selected Wavelog station profile. **Callbook & Online services** chooses Wavelog or direct QRZ.com and automatic lookup. QRZ direct lookup works independently from Wavelog but may require a QRZ XML subscription. Personal eQSL credentials remain placeholders for a future direct upload/sync feature; independently, the QSL Card Manager downloads the eQSL member list without those credentials for local recommendations. **Data & connections** contains local log path, xOTA source URLs, DX spotting and UDP options.
 
 ## 12. Backup and restore
 
@@ -133,7 +133,7 @@ The app checks GitHub Releases silently. After confirmation it downloads only th
 
 ## 14. Privacy and troubleshooting
 
-Core logging, profiles, ADI, statistics and CTY.DAT work offline. Network is used only for explicitly configured Wavelog, QRZ, xOTA, DX Cluster/spotting, release checks and initial Windows runtime setup. The project collects no telemetry or usage counts. See [Troubleshooting](TROUBLESHOOTING.md), [Privacy](../../PRIVACY.md) and [Security](../../SECURITY.md).
+Core logging, profiles, ADI, statistics and CTY.DAT work offline. Network can be used by configured Wavelog, QRZ, the DA6IT.de QSL Card Manager, the locally evaluated eQSL member-list download, xOTA, DX Cluster/spotting, release checks, initial Windows runtime setup and the pseudonymous usage statistics enabled after the first-start notice. The usage heartbeat contains only the random installation ID, application version and operating-system family; it can be disabled and deleted from Settings. See [Troubleshooting](TROUBLESHOOTING.md), [Privacy](../../PRIVACY.md) and [Security](../../SECURITY.md).
 
 ## DA6IT.de QSL Card Manager
 
@@ -142,6 +142,12 @@ Store the Connection Key under **Settings → QSL**. In **QSL Card Manager**, sy
 In **Logbook & Sync**, **Send QSL Email** sends one selected QSO directly. Multiple QSOs selected with Ctrl/Shift are handed to the DA6IT.de server-side mail queue.
 
 The **Email QSL** column shows `✅` when the server records the mail as sent. This does not confirm delivery or reading.
+
+### QSL recommendations
+
+The QSL Card Manager downloads the eQSL member list locally and shows email-QSL recommendations only for QSOs with a usable email recipient. An eQSL entry with a log upload within the last six months is treated as active and is not recommended. Missing entries or older activity can make a QSO eligible. Already sent and queued/pending QSL emails are hidden from the recommendation list.
+
+Recommendations never send mail automatically. **Send QSL by email** starts the existing DA6IT.de delivery path with the server-side QRZ recipient check.
 
 ### Private control copy
 
@@ -157,7 +163,7 @@ Under **Settings → QSL**, an optional private **control copy** can be enabled 
 
 Automatic background synchronization never sends QSL mail on its own. Sending still requires an explicit user action.
 
-### QSL Card Manager – final 0.20.0 workflow
+### QSL Card Manager – workflow
 
 After the QSL connection key has been configured once, the QSL integration works automatically during normal operation. Existing local QSL data and motifs are used immediately from the cache, followed by background updates of new QSO mappings, status and motifs.
 

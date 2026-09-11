@@ -1,55 +1,63 @@
-# DA6IT.de Wavelog Offline Logger v0.20.2
+# DA6IT.de Wavelog Offline Logger v0.21.0
 
 ## Deutsch
 
-v0.20.2 ist ein Wartungsupdate mit Schwerpunkt auf ruhigerem Wavelog-Sync, schnellerer Logbuchbedienung und besserem Schutz vor doppelten digitalen QSOs.
+v0.21.0 erweitert den Offline Logger um direkte QRZ.com-Aufrufe, lokale eQSL-basierte QSL-Empfehlungen und eine datensparsame pseudonyme Nutzungsstatistik. Gleichzeitig wurde der QSL Card Manager deutlich kompakter gestaltet.
 
 ### Highlights
 
-- **Auto-Sync mit Verzögerung:** Neue QSOs werden im Online-Modus standardmäßig fünf Minuten gesammelt und anschließend gemeinsam zu Wavelog übertragen. Die Verzögerung kann pro Profil zwischen 1 und 60 Minuten gewählt werden.
-- **Mehrere QSOs schnell löschen:** Im Logbuch können mehrere QSOs gemeinsam ausgewählt und in einem Schritt gelöscht werden. Auch bei großen Logbüchern bleibt der Vorgang deutlich schneller.
-- **Klare Warnung vor Wavelog-Löschung:** Bereits synchronisierte QSOs werden beim Löschen deutlich gekennzeichnet. Ihre Remote-Löschung erfolgt weiterhin erst beim nächsten vollständigen Sync.
-- **Besserer Dublettenschutz:** Wiederholte Abschlussmeldungen aus WSJT-X und externen digitalen Logs führen deutlich seltener zu doppelten oder dreifachen QSOs.
-- **Dubletten schon beim Import erkennen:** Auch doppelte Einträge, die bereits in einer WSJT-X-ADIF-Datei vorhanden sind, werden innerhalb desselben Imports erkannt und übersprungen.
+- **QRZ.com direkt öffnen:** Im DX-Cluster kann die QRZ.com-Seite des ausgewählten Spots geöffnet werden. Auch im Reiter **QSO loggen** steht QRZ.com direkt für das eingegebene Rufzeichen bereit.
+- **QSL-Empfehlungen mit lokalem eQSL-Abgleich:** Der Logger lädt die eQSL-Mitgliederliste lokal und kann eine E-Mail-QSL empfehlen, wenn die Gegenstation dort nicht gefunden wird oder seit mehr als sechs Monaten keinen aktuellen Log-Upload mehr hatte und eine nutzbare E-Mail-Adresse vorhanden ist.
+- **Keine automatischen QSL-Mails:** Empfehlungen sind ausschließlich Hinweise. Der Versand startet nur nach einer ausdrücklichen Benutzeraktion und verwendet weiterhin den vorhandenen DA6IT.de-QSL-Card-Manager-Versandweg.
+- **Mehr Platz für Empfehlungen:** QSL-Sync, Serverstatus und Motivauswahl sind deutlich kompakter. Dadurch steht der Empfehlungsliste wesentlich mehr Fläche zur Verfügung.
+- **Pseudonyme Nutzungsstatistik:** Nach dem Erststart-Hinweis kann der Logger höchstens einmal täglich eine zufällige Installations-ID, Version und Betriebssystemfamilie an DA6IT.de melden. Rufzeichen, QSOs, Locator, Wavelog-Adresse und Zugangsdaten werden nicht übertragen. Die Funktion kann abgeschaltet und die gespeicherten Statistikdaten können direkt aus der App gelöscht werden.
 
-### Synchronisierung und Sicherheit
+### eQSL und QSL-Empfehlungen
 
-Der verzögerte automatische Upload überträgt ausschließlich neue lokale QSOs. Er führt keine Remote-Löschungen aus.
+Die eQSL-Mitgliederliste wird im App-Datenverzeichnis gecacht und vollständig lokal mit dem eigenen Logbuch verglichen. Das Empfehlungssystem überträgt die eigenen QSOs oder darin enthaltene Rufzeichen nicht an eQSL.
 
-Wird ein bereits mit Wavelog verknüpftes QSO bewusst lokal gelöscht, bleibt die Löschabsicht gespeichert und wird erst beim nächsten vollständigen Sync zu Wavelog übertragen. Vorher zeigt der Logger jetzt eine deutlichere Warnung mit der Anzahl betroffener QSOs.
+Ein eQSL-Eintrag gilt für die Empfehlung als aktiv, wenn innerhalb der letzten sechs Monate ein Log-Upload erkennbar ist. Fehlt der Eintrag oder liegt der letzte Upload länger zurück, kann ein QSO als Kandidat für eine E-Mail-QSL erscheinen. Bereits versendete sowie laufende oder queued QSL-Mails werden nicht erneut empfohlen.
 
-Das lokale ADIF-Log bleibt weiterhin die maßgebliche QSO-Datenquelle.
+Die Empfehlungen verwenden weiterhin die vorhandene serverseitige QRZ-Empfängerprüfung und den bestehenden QSL-Mailversand über DA6IT.de. Es wird keine neue eQSL-Funktion in der DA6IT-QSL-API benötigt.
 
-### Danke
+### Datenschutz und Sicherheit
 
-Vielen Dank an **DO1DX** für das hilfreiche Feedback und die Praxishinweise, die direkt in diese Verbesserungen eingeflossen sind.
+Die neue Nutzungsstatistik verwendet eine zufällige, nicht aus Rufzeichen, Hardware, Profil oder Wavelog-Daten abgeleitete Installations-ID. Vor Bestätigung des Erststart-Hinweises wird kein Heartbeat gesendet. DA6IT.de speichert in den Statistiktabellen nur den SHA-256-Hash der ID; da die Kennung über mehrere Starts stabil bleibt, wird die Verarbeitung ausdrücklich als pseudonym bezeichnet.
 
-Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.2/docs/en/USER_GUIDE.md)
+Der eQSL-Download ist größenbegrenzt, auf den vorgesehenen HTTPS-Host beschränkt und ersetzt einen vorhandenen Cache erst nach erfolgreicher Prüfung. Bei einem vorübergehenden Downloadfehler kann ein bereits vorhandener Cache weiterverwendet werden.
+
+Die Datenschutzerklärung sowie README, Benutzerhandbuch und Architekturhinweise wurden für diese Funktionen aktualisiert.
+
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.21.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.21.0/docs/en/USER_GUIDE.md)
 
 ---
 
 ## English
 
-v0.20.2 is a maintenance update focused on calmer Wavelog synchronization, faster logbook handling and stronger protection against duplicate digital QSOs.
+v0.21.0 adds direct QRZ.com actions, local eQSL-based QSL recommendations and privacy-conscious pseudonymous usage statistics while making the QSL Card Manager substantially more compact.
 
 ### Highlights
 
-- **Delayed automatic synchronization:** In online mode, new QSOs are collected for five minutes by default and then uploaded to Wavelog as a batch. The delay can be configured per profile from 1 to 60 minutes.
-- **Fast multi-QSO deletion:** Multiple QSOs can be selected and deleted in one step, with much better performance on large logbooks.
-- **Clear warning before Wavelog deletion:** Already synchronized QSOs are clearly identified before deletion. Remote deletion still happens only during the next full synchronization.
-- **Improved duplicate protection:** Repeated final exchanges from WSJT-X and external digital logging are much less likely to create duplicate or triplicate QSOs.
-- **Duplicates detected during import:** Duplicate records that already exist inside a WSJT-X ADIF file are detected and skipped within the same import.
+- **Open QRZ.com directly:** The selected DX Cluster spot can be opened on QRZ.com, and the **Log QSO** page can open QRZ.com for the currently entered callsign.
+- **QSL recommendations with local eQSL matching:** The Logger downloads the eQSL member list locally and can recommend an email QSL when the remote station is not listed or has not uploaded a log for more than six months and a usable email address is available.
+- **No automatic QSL email:** Recommendations are advisory only. Sending still requires an explicit user action and continues to use the existing DA6IT.de QSL Card Manager delivery path.
+- **More room for recommendations:** QSL synchronization, server status and motif selection are more compact, leaving substantially more space for the recommendation list.
+- **Pseudonymous usage statistics:** After the first-start notice, the Logger can report a random installation ID, application version and operating-system family to DA6IT.de at most once per day. Callsigns, QSOs, locators, Wavelog URLs and credentials are not sent. Statistics can be disabled and the stored statistics for the current installation can be deleted directly from the app.
 
-### Synchronization and safety
+### eQSL and QSL recommendations
 
-The delayed automatic upload sends new local QSOs only. It never performs remote deletions.
+The eQSL member list is cached in the application data directory and compared with the local logbook entirely on the user's device. The recommendation feature does not upload the user's QSOs or local callsign list to eQSL.
 
-When a QSO already linked to Wavelog is deliberately deleted locally, the delete intent is retained and sent to Wavelog only during the next full synchronization. The Logger now displays a clearer warning including the number of affected QSOs.
+An eQSL entry is treated as active for recommendation purposes when a log upload is visible within the last six months. Missing entries or older activity can make a QSO eligible for an email-QSL recommendation. Already sent and queued/pending QSL emails are not recommended again.
 
-The local ADIF log remains the authoritative QSO data source.
+Recommendations continue to use the existing server-side QRZ recipient check and the established DA6IT.de QSL email path. No new eQSL functionality is required in the DA6IT QSL API.
 
-### Thanks
+### Privacy and security
 
-Many thanks to **DO1DX** for the helpful feedback and practical input that directly contributed to these improvements.
+Usage statistics use a random installation identifier that is not derived from callsigns, hardware, profiles or Wavelog data. No heartbeat is sent before the first-start notice has been acknowledged. DA6IT.de stores only the SHA-256 hash of the identifier in the statistics tables; because the identifier remains stable across starts, the processing is explicitly described as pseudonymous.
 
-Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.2/docs/en/USER_GUIDE.md)
+The eQSL download is size-bounded, restricted to the intended HTTPS host and only replaces an existing cache after successful validation. An existing cache can remain usable during temporary download failures.
+
+The privacy policy, README, user guide and architecture notes have been updated for these features.
+
+Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.21.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.21.0/docs/en/USER_GUIDE.md)
