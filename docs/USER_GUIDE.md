@@ -71,6 +71,7 @@ Die linke Navigation öffnet:
 - **Contest Logging** – Seriennummern, Exchanges und Contest-Sitzung
 - **xOTA** – portable POTA-, SOTA-, WWFF-, IOTA-, COTA- und WCA-Aktivierungen vorbereiten
 - **Logbuch & Sync** – lokale QSOs, Sync- und QSL-Status
+- **QSL Card Manager** – QSL-Sync, Motivauswahl und lokale eQSL-basierte Empfehlungen
 - **Statistiken** – lokale Auswertungen
 - **DX Cluster** – Spots empfangen, filtern und übernehmen
 - **CAT Setup** – Funkgerät und Rotor über Hamlib verbinden
@@ -95,6 +96,12 @@ Einstellungen mit Zugangsdaten, Speicherort und Stationsrufzeichen gelten pro Lo
 - **Was ist neu?** öffnet die Versionshinweise erneut. Nach dem ersten Start einer neuen Version erscheinen sie einmal automatisch.
 - Unter **Daten & Backup** lassen sich alle Profile, Einstellungen, Sync-Metadaten und ADI-Logbücher in einem ZIP sichern und wiederherstellen.
 - Unter **Nutzungsstatistik** kann die pseudonyme Statistik ein- oder ausgeschaltet werden. Die zufällige Installations-ID ist sichtbar, kann kopiert werden und die zugehörigen Statistikdaten können direkt aus der App gelöscht werden.
+
+![Nutzungsstatistik in den Einstellungen](screenshots/settings-usage-statistics.png)
+
+Beim ersten Start von v0.21.0 erscheint vor der ersten Statistikübertragung ein eigener Hinweis. Erst nachdem dieser Hinweis bestätigt wurde, darf der tägliche Heartbeat laufen. Wird der Hinweis geschlossen, ohne eine Auswahl zu treffen, wird dadurch keine Statistikübertragung ausgelöst.
+
+![Erststart-Hinweis zur Nutzungsstatistik](screenshots/usage-statistics-notice.png)
 
 ![Englische Oberfläche im Dark-Theme](screenshots/qso-logging-english-dark.png)
 
@@ -418,6 +425,9 @@ Die vollständige Bildübersicht steht in der [Screenshot-Galerie](SCREENSHOTS.m
 
 ## DA6IT.de QSL Card Manager
 
+![QSL Card Manager](screenshots/qsl-card-manager.png)
+
+
 Unter **Einstellungen → QSL** wird der Connection Key hinterlegt. Im **QSL Card Manager** werden QSOs synchronisiert, Motive geladen und pro Stationsprofil ausgewählt. **Vorschau** rendert die Karte lokal.
 
 Im Bereich **Logbuch & Sync** versendet **QSL E-Mail senden** ein einzelnes markiertes QSO direkt. Mehrere mit Strg/Shift markierte QSOs werden an die serverseitige DA6IT.de Mail-Queue übergeben.
@@ -425,6 +435,9 @@ Im Bereich **Logbuch & Sync** versendet **QSL E-Mail senden** ein einzelnes mark
 Die Spalte **E-Mail QSL** zeigt `✅`, wenn der Server die Mail als versendet führt. Das bedeutet nicht, dass Zustellung oder Lesen bestätigt wurden.
 
 ### QSL-Empfehlungen
+
+![QSL-Empfehlungen](screenshots/qsl-recommendations.png)
+
 
 Der QSL Card Manager lädt die eQSL-Mitgliederliste lokal und zeigt E-Mail-QSL-Empfehlungen nur für QSOs, für die eine nutzbare E-Mail-Adresse bekannt ist. Ein eQSL-Eintrag mit einem Log-Upload innerhalb der letzten sechs Monate gilt als aktiv und wird nicht empfohlen. Fehlt der Eintrag oder liegt der letzte Upload länger zurück, kann das QSO als Empfehlung erscheinen. Bereits versendete oder laufende/queued QSL-Mails werden ausgeblendet.
 

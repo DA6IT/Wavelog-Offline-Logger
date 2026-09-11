@@ -6,7 +6,13 @@ This guide covers the complete application. Its screenshots are generated with i
 
 ## 1. Language, theme and profiles
 
-Open **Settings → General** to select **English** or **German**, Light or Dark theme, and QSO desktop notifications. The same page contains the pseudonymous usage-statistics control, the visible random installation ID and the deletion action for statistics stored for that ID. Save and restart the application after changing language or theme. These are app-wide preferences; station, Wavelog, CAT, cluster and UDP values remain profile-specific.
+Open **Settings → General** to select **English** or **German**, Light or Dark theme, and QSO desktop notifications. The same page contains the pseudonymous usage-statistics control, the visible random installation ID and the deletion action for statistics stored for that ID.
+
+![Usage-statistics settings](../screenshots/en/settings-usage-statistics.png)
+
+On first start of v0.21.0, a dedicated notice is shown before any usage-statistics heartbeat is allowed. Closing the notice without choosing an option does not trigger a statistics transmission.
+
+![First-start usage-statistics notice](../screenshots/en/usage-statistics-notice.png) Save and restart the application after changing language or theme. These are app-wide preferences; station, Wavelog, CAT, cluster and UDP values remain profile-specific.
 
 Use the profile selector in the header to switch operating contexts. The app stops the old UDP listener before switching and starts the new profile's listener when its autostart option is enabled. A profile can be created, renamed, duplicated or deleted locally. Local profile deletion never deletes Wavelog data.
 
@@ -137,6 +143,9 @@ Core logging, profiles, ADI, statistics and CTY.DAT work offline. Network can be
 
 ## DA6IT.de QSL Card Manager
 
+![QSL Card Manager](../screenshots/en/qsl-card-manager.png)
+
+
 Store the Connection Key under **Settings → QSL**. In **QSL Card Manager**, synchronize QSOs, load motifs and select one per station profile. **Preview** renders the card locally.
 
 In **Logbook & Sync**, **Send QSL Email** sends one selected QSO directly. Multiple QSOs selected with Ctrl/Shift are handed to the DA6IT.de server-side mail queue.
@@ -144,6 +153,9 @@ In **Logbook & Sync**, **Send QSL Email** sends one selected QSO directly. Multi
 The **Email QSL** column shows `✅` when the server records the mail as sent. This does not confirm delivery or reading.
 
 ### QSL recommendations
+
+![QSL recommendations](../screenshots/en/qsl-recommendations.png)
+
 
 The QSL Card Manager downloads the eQSL member list locally and shows email-QSL recommendations only for QSOs with a usable email recipient. An eQSL entry with a log upload within the last six months is treated as active and is not recommended. Missing entries or older activity can make a QSO eligible. Already sent and queued/pending QSL emails are hidden from the recommendation list.
 

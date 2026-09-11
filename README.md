@@ -37,6 +37,13 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - responsive Oberfläche mit gezieltem Scrollen bei langen Geräteeinstellungen; Felder, Aktionen und Abstände passen sich gemeinsam an und werden vor jedem Release in mehreren Fenstergrößen geprüft
 - Builds für Windows x64, macOS Apple Silicon/Intel und Linux x64/ARM64
 
+
+### QSL Card Manager in v0.21.0
+
+Der integrierte QSL Card Manager zeigt QSL-Sync, aktives Motiv und lokale eQSL-basierte Empfehlungen gemeinsam in einer Ansicht. Empfehlungen führen niemals zu einem automatischen Versand; eine QSL-Mail wird nur nach einer ausdrücklichen Benutzeraktion über den bestehenden DA6IT.de-QSL-Weg versendet.
+
+![QSL Card Manager mit Empfehlungen](docs/screenshots/qsl-card-manager.png)
+
 ## WSJT-X Sync
 
 Neben dem bestehenden UDP-Live-Logging kann der Logger jetzt die von WSJT-X verwendete `wsjtx_log.adi` direkt abgleichen. Der Offline Logger ist dabei der lokale Merge-Hub:

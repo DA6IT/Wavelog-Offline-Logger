@@ -35,6 +35,13 @@ An offline-first desktop logger for amateur radio: log contacts in the field eve
 - responsive layouts with scrollable long device settings on small windows and release checks at several window sizes
 - Windows x64, macOS Apple Silicon/Intel, Debian/Ubuntu, AppImage and Arch packages
 
+
+### QSL Card Manager in v0.21.0
+
+The integrated QSL Card Manager combines QSL synchronization, the active motif and locally evaluated eQSL-based recommendations in one view. Recommendations never send mail automatically; a QSL email is sent only after an explicit user action through the existing DA6IT.de QSL delivery path.
+
+![QSL Card Manager with recommendations](docs/screenshots/en/qsl-card-manager.png)
+
 ## WSJT-X Sync
 
 In addition to the existing UDP live integration, the logger can synchronize WSJT-X's `wsjtx_log.adi` directly. The Offline Logger acts as the local merge hub:
