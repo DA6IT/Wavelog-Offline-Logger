@@ -2,6 +2,32 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.20.2] - 2026-09-11
+
+### Added
+
+- profilspezifisch konfigurierbare Verzögerung für den automatischen Wavelog-Upload mit Auswahl von 1 bis 60 Minuten; Standard sind 5 Minuten
+- Mehrfachauswahl beim Löschen von QSOs mit zusammengefasster Sicherheitsabfrage und sichtbarer Anzahl bereits mit Wavelog verknüpfter QSOs
+- gemeinsame Dublettenerkennung für WSJT-X-Sync, ADIF-Import und UDP-Logging
+
+### Changed
+
+- der Auto-Sync arbeitet batchweise: das erste neue QSO startet den Timer, weitere QSOs verlängern das Zeitfenster nicht erneut
+- Mehrfachlöschungen lesen und schreiben das lokale ADIF-Log nur einmal und bleiben dadurch auch bei großen Logbüchern schnell
+- nach einer Löschung bleibt die Ansicht am nächsten sinnvollen QSO statt an den Anfang des Logbuchs zu springen
+- FT8/FT4 und weitere WSJT-Familienmodi erkennen zeitlich nahe Wiederholungen desselben QSOs toleranter; andere Betriebsarten bleiben streng abgeglichen
+- Dubletten, die bereits innerhalb derselben importierten WSJT-X-ADIF-Datei vorhanden sind, werden während desselben Imports erkannt
+
+### Safety / Sync
+
+- Remote-Löschungen bleiben ausdrücklich dem vollständigen Sync vorbehalten; der normale verzögerte Auto-Push löscht keine QSOs in Wavelog
+- beim Löschen bereits synchronisierter QSOs weist ein deutlicher Warnhinweis auf die spätere Löschung in Wavelog hin
+- lokales ADIF bleibt weiterhin die maßgebliche QSO-Datenquelle
+
+### Danke
+
+- Vielen Dank an **DO1DX** für das hilfreiche Feedback und die Praxishinweise zu diesen Verbesserungen.
+
 ## [0.20.1] - 2026-09-09
 
 ### Fixed

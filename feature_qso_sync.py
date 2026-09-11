@@ -39,6 +39,7 @@ class QsoSyncFeatureMixin:
         self._qso_cache_generation = 0
         self._qso_tree_generation = -1
         self._qso_render_generation = 0
+        self._qso_restore_selection: str | None = None
         self._qso_cached_qsos: list[dict] = []
         self._qso_cached_by_id: dict[str, dict] = {}
         self._qso_cached_meta_by_id: dict[str, dict] = {}
@@ -86,7 +87,13 @@ class QsoSyncFeatureMixin:
         actions = ttk.Frame(card, style="Card.TFrame")
         actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(actions, text="QSO bearbeiten", style="Secondary.TButton", command=self.edit_selected_qso).pack(side="left")
-        ttk.Button(actions, text="QSO löschen", style="Secondary.TButton", command=self.delete_selected_qso).pack(side="left", padx=8)
+        self.delete_qso_button = ttk.Button(
+            actions,
+            text="QSO löschen",
+            style="Secondary.TButton",
+            command=self.delete_selected_qso,
+        )
+        self.delete_qso_button.pack(side="left", padx=8)
         self.qsl_mail_button = ttk.Button(
             actions,
             text="QSL E-Mail senden",
@@ -453,7 +460,7 @@ class QsoSyncFeatureMixin:
         if self._qso_tree_generation == self._qso_cache_generation:
             return
 
-        selected = self.selected_id()
+        selected = self._qso_restore_selection or self.selected_id()
         try:
             yview = self.tree.yview()
         except tk.TclError:
@@ -516,6 +523,7 @@ class QsoSyncFeatureMixin:
                 self.tree.yview_moveto(float(yview[0]))
             except (tk.TclError, ValueError, TypeError):
                 pass
+        self._qso_restore_selection = None
         self._sync_selection_changed()
 
     def _cached_qso(self, local_id: str | None) -> dict | None:
@@ -526,9 +534,14 @@ class QsoSyncFeatureMixin:
             return dict(cached)
         return self.store.find(str(local_id))
 
+    def selected_ids(self) -> tuple[str, ...]:
+        if not hasattr(self, "tree"):
+            return ()
+        return tuple(str(value) for value in self.tree.selection())
+
     def selected_id(self) -> str | None:
-        s = self.tree.selection() if hasattr(self, "tree") else []
-        return s[0] if s else None
+        selected = self.selected_ids()
+        return selected[0] if selected else None
 
     def import_adif(self):
         source = filedialog.askopenfilename(
@@ -572,6 +585,15 @@ class QsoSyncFeatureMixin:
     def _sync_selection_changed(self, _event=None):
         if not hasattr(self, "sync_detail_label"):
             return
+        selection_count = len(self.selected_ids())
+        if hasattr(self, "delete_qso_button"):
+            self.delete_qso_button.configure(
+                text=(
+                    f"{selection_count} QSOs löschen"
+                    if selection_count > 1
+                    else "QSO löschen"
+                )
+            )
         local_id = self.selected_id()
         meta = self.db.get_meta(local_id) if local_id else None
         status = str((meta or {}).get("status") or "")
@@ -621,18 +643,99 @@ class QsoSyncFeatureMixin:
             messagebox.showerror("Bearbeiten fehlgeschlagen", str(e), parent=self)
 
     def delete_selected_qso(self):
-        lid = self.selected_id()
-        if not lid:
+        local_ids = list(self.selected_ids())
+        if not local_ids:
             return
-        q = self._cached_qso(lid)
-        if not q:
+
+        cached = self._qso_cached_by_id
+        qsos = [dict(cached[lid]) for lid in local_ids if lid in cached]
+        if len(qsos) != len(local_ids):
+            by_id = {
+                str(row.get("local_id") or ""): row
+                for row in self.store.scan()
+                if row.get("local_id")
+            }
+            qsos = [dict(by_id[lid]) for lid in local_ids if lid in by_id]
+        if not qsos:
             return
-        if not messagebox.askyesno("QSO löschen", f"{q['call']} vom {q['qso_date']} wirklich löschen?\n\nIst es bereits synchronisiert, wird die Löschung beim nächsten Sync auch an Wavelog übertragen.", parent=self):
+
+        meta_by_id = self._qso_cached_meta_by_id
+        if not meta_by_id:
+            meta_by_id = {
+                str(meta.get("local_id") or ""): meta
+                for meta in self.db.list_meta()
+                if meta.get("local_id")
+            }
+        remote_count = sum(
+            1
+            for lid in local_ids
+            if (meta_by_id.get(lid) or {}).get("wavelog_id") is not None
+        )
+        local_only_count = len(local_ids) - remote_count
+
+        if len(local_ids) == 1:
+            q = qsos[0]
+            intro = f"{q.get('call', '')} vom {q.get('qso_date', '')} wirklich löschen?"
+        else:
+            intro = f"{len(local_ids)} ausgewählte QSOs wirklich löschen?"
+
+        if remote_count:
+            remote_warning = (
+                f"ACHTUNG: {remote_count} QSO(s) sind bereits mit Wavelog verknüpft. "
+                "Diese QSOs werden beim nächsten vollständigen Sync auch aus Wavelog gelöscht."
+            )
+        else:
+            remote_warning = (
+                "Die ausgewählten QSOs sind derzeit nicht mit Wavelog verknüpft "
+                "und werden nur lokal gelöscht."
+            )
+
+        details = (
+            f"{intro}\n\n{remote_warning}\n\n"
+            f"Ausgewählt: {len(local_ids)} · Wavelog: {remote_count} · Nur lokal: {local_only_count}\n\n"
+            "Diese Aktion bitte nur ausführen, wenn die QSOs tatsächlich gelöscht werden sollen."
+        )
+        if not messagebox.askokcancel(
+            "QSOs löschen",
+            details,
+            icon="warning",
+            parent=self,
+        ):
             return
-        self.db.mark_pending_delete(lid)
-        self.store.delete(lid)
+
+        children = list(self.tree.get_children())
+        selected_set = set(local_ids)
+        positions = [
+            index for index, item_id in enumerate(children)
+            if item_id in selected_set
+        ]
+        anchor = None
+        if positions:
+            for item_id in children[max(positions) + 1:]:
+                if item_id not in selected_set:
+                    anchor = item_id
+                    break
+            if anchor is None:
+                for item_id in reversed(children[:min(positions)]):
+                    if item_id not in selected_set:
+                        anchor = item_id
+                        break
+
+        try:
+            # First persist the local ADIF removal. Only after that do linked
+            # QSOs become explicit remote-delete candidates.
+            deleted_ids = self.store.delete_many(local_ids)
+            self.db.mark_pending_delete_many(deleted_ids)
+        except Exception as exc:
+            self.refresh_qsos()
+            messagebox.showerror("QSOs löschen", str(exc), parent=self)
+            return
+
+        if not deleted_ids:
+            return
+        self._qso_restore_selection = anchor
         self.refresh_qsos()
-        self.status_var.set("QSO lokal gelöscht")
+        self.status_var.set(f"{len(deleted_ids)} QSO(s) lokal gelöscht")
         self._local_sync_change()
 
     def configure_wsjtx_sync(self):

@@ -132,6 +132,7 @@ class SettingsFeatureMixin:
         self.set_token = tk.StringVar()
         self.set_station_profile = tk.StringVar()
         self.set_auto_sync_online = tk.BooleanVar(value=False)
+        self.set_auto_sync_delay = tk.StringVar(value="5 min")
         self.set_full_sync_on_start = tk.BooleanVar(value=False)
         self.set_full_sync_on_exit = tk.BooleanVar(value=False)
         ttk.Label(right, text="Wavelog URL", style="Card.TLabel").grid(row=2, column=0, sticky="w", pady=(5,3))
@@ -157,21 +158,35 @@ class SettingsFeatureMixin:
             text="Online-Modus: neue QSOs automatisch zu Wavelog pushen",
             variable=self.set_auto_sync_online,
         ).grid(row=13, column=0, sticky="w")
+        auto_sync_delay_row = ttk.Frame(right, style="Card.TFrame")
+        auto_sync_delay_row.grid(row=14, column=0, sticky="ew", pady=(7, 0))
+        ttk.Label(
+            auto_sync_delay_row,
+            text="Auto-Sync Verzögerung",
+            style="Card.TLabel",
+        ).pack(side="left")
+        ttk.Combobox(
+            auto_sync_delay_row,
+            textvariable=self.set_auto_sync_delay,
+            values=("1 min", "2 min", "5 min", "10 min", "15 min", "30 min", "60 min"),
+            state="readonly",
+            width=9,
+        ).pack(side="left", padx=(10, 0))
         ttk.Checkbutton(
             right,
             text="Vollständigen Sync beim App-Start ausführen",
             variable=self.set_full_sync_on_start,
-        ).grid(row=14, column=0, sticky="w", pady=(6, 0))
+        ).grid(row=15, column=0, sticky="w", pady=(6, 0))
         ttk.Checkbutton(
             right,
             text="Vollständigen Sync beim Beenden ausführen",
             variable=self.set_full_sync_on_exit,
-        ).grid(row=15, column=0, sticky="w", pady=(6, 0))
+        ).grid(row=16, column=0, sticky="w", pady=(6, 0))
         ttk.Label(
             right,
-            text="Alle Optionen gelten pro Profil und sind unabhängig wählbar. Offline werden QSOs weiter sicher lokal gespeichert.",
+            text="Die Auto-Sync-Verzögerung startet mit dem ersten neuen QSO eines Batches und wird durch weitere QSOs nicht verlängert.",
             style="Muted.Card.TLabel", wraplength=450,
-        ).grid(row=16, column=0, sticky="w", pady=(5, 0))
+        ).grid(row=17, column=0, sticky="w", pady=(5, 0))
 
         callbook_card = self._card(online_tab, row=0, column=0, sticky="nsew", padx=(0, 8))
         callbook_card.columnconfigure(0, weight=1)
@@ -532,6 +547,12 @@ class SettingsFeatureMixin:
         self.set_url.set(self.db.get_setting("wavelog_url", ""))
         self.set_token.set(self.db.get_token())
         self.set_auto_sync_online.set(self.db.get_setting("auto_sync_online", "0") == "1")
+        try:
+            auto_sync_delay_seconds = int(self.db.get_setting("auto_sync_delay_seconds", "300") or "300")
+        except ValueError:
+            auto_sync_delay_seconds = 300
+        auto_sync_delay_seconds = min(3600, max(60, auto_sync_delay_seconds))
+        self.set_auto_sync_delay.set(f"{auto_sync_delay_seconds // 60} min")
         self.set_full_sync_on_start.set(self.db.get_setting("full_sync_on_start", "0") == "1")
         self.set_full_sync_on_exit.set(self.db.get_setting("full_sync_on_exit", "0") == "1")
         source = self.db.get_setting("callbook_source", CALLBOOK_SOURCE_WAVELOG).strip().lower()
@@ -604,6 +625,13 @@ class SettingsFeatureMixin:
             self.db.set_setting("wavelog_url", self.set_url.get().strip())
             self.db.set_token(self.set_token.get().strip())
             self.db.set_setting("auto_sync_online", "1" if self.set_auto_sync_online.get() else "0")
+            try:
+                auto_sync_delay_minutes = int(self.set_auto_sync_delay.get().split()[0])
+            except (ValueError, IndexError) as exc:
+                raise ValueError("Die Auto-Sync-Verzögerung ist ungültig.") from exc
+            if auto_sync_delay_minutes not in (1, 2, 5, 10, 15, 30, 60):
+                raise ValueError("Die Auto-Sync-Verzögerung ist ungültig.")
+            self.db.set_setting("auto_sync_delay_seconds", auto_sync_delay_minutes * 60)
             self.db.set_setting("full_sync_on_start", "1" if self.set_full_sync_on_start.get() else "0")
             self.db.set_setting("full_sync_on_exit", "1" if self.set_full_sync_on_exit.get() else "0")
             source = CALLBOOK_SOURCE_LABELS.get(self.set_callbook_source.get(), CALLBOOK_SOURCE_WAVELOG)

@@ -1,81 +1,55 @@
-# DA6IT.de Wavelog Offline Logger v0.20.1
+# DA6IT.de Wavelog Offline Logger v0.20.2
 
 ## Deutsch
 
-v0.20.1 ist ein Wartungs- und Zuverlässigkeitsupdate rund um QSL-Karten, Synchronisierung und Datensicherung. Die Oberfläche bleibt dabei bewusst kompakt; der Schwerpunkt liegt auf zuverlässigerem Verhalten im Hintergrund.
+v0.20.2 ist ein Wartungsupdate mit Schwerpunkt auf ruhigerem Wavelog-Sync, schnellerer Logbuchbedienung und besserem Schutz vor doppelten digitalen QSOs.
 
 ### Highlights
 
-- **QSL-Vorschau verbessert:** Die Vorschau entspricht jetzt noch zuverlässiger der Karte, die später tatsächlich versendet wird.
-- **Änderungen an QSOs werden erkannt:** Bereits bekannte QSOs werden erneut mit dem QSL Card Manager abgeglichen, wenn sich relevante Angaben geändert haben.
-- **Besser für große Logbücher:** QSL-Status werden gezielter und in begrenzten Mengen aktualisiert. Dadurch entstehen bei großen Logbüchern deutlich weniger unnötige Abfragen.
-- **Aktuellere QSL-Motive:** Geänderte Hintergrundbilder werden auch dann zuverlässig neu geladen, wenn ihre URL gleich geblieben ist.
-- **Sichereres Backup/Restore:** Backups werden vor der Wiederherstellung strenger geprüft, damit ungültige oder problematische Dateipfade nicht übernommen werden.
-- **Mehr automatische Sicherheitsprüfungen:** Die GitHub-CI prüft Änderungen zusätzlich mit Bandit, `pip-audit` und `detect-secrets`.
+- **Auto-Sync mit Verzögerung:** Neue QSOs werden im Online-Modus standardmäßig fünf Minuten gesammelt und anschließend gemeinsam zu Wavelog übertragen. Die Verzögerung kann pro Profil zwischen 1 und 60 Minuten gewählt werden.
+- **Mehrere QSOs schnell löschen:** Im Logbuch können mehrere QSOs gemeinsam ausgewählt und in einem Schritt gelöscht werden. Auch bei großen Logbüchern bleibt der Vorgang deutlich schneller.
+- **Klare Warnung vor Wavelog-Löschung:** Bereits synchronisierte QSOs werden beim Löschen deutlich gekennzeichnet. Ihre Remote-Löschung erfolgt weiterhin erst beim nächsten vollständigen Sync.
+- **Besserer Dublettenschutz:** Wiederholte Abschlussmeldungen aus WSJT-X und externen digitalen Logs führen deutlich seltener zu doppelten oder dreifachen QSOs.
+- **Dubletten schon beim Import erkennen:** Auch doppelte Einträge, die bereits in einer WSJT-X-ADIF-Datei vorhanden sind, werden innerhalb desselben Imports erkannt und übersprungen.
 
-### QSL-Synchronisierung
+### Synchronisierung und Sicherheit
 
-Neue QSOs werden weiterhin automatisch zum QSL Card Manager übertragen. Bereits bekannte QSOs werden nur dann erneut abgeglichen, wenn sich die für den Card Manager relevanten Daten geändert haben.
+Der verzögerte automatische Upload überträgt ausschließlich neue lokale QSOs. Er führt keine Remote-Löschungen aus.
 
-Nach dem Update werden bestehende Zuordnungen aus älteren Versionen einmalig nachgezogen. Dadurch stehen auch die erweiterten QSO-Angaben aus v0.20.1 im Card Manager zur Verfügung, ohne anschließend bei jedem Hintergrundlauf erneut übertragen zu werden.
+Wird ein bereits mit Wavelog verknüpftes QSO bewusst lokal gelöscht, bleibt die Löschabsicht gespeichert und wird erst beim nächsten vollständigen Sync zu Wavelog übertragen. Vorher zeigt der Logger jetzt eine deutlichere Warnung mit der Anzahl betroffener QSOs.
 
-Der regelmäßige Statusabgleich wurde außerdem begrenzt: fehlende und noch aktive QSL-Zustände haben Vorrang, während stabile Zustände deutlich seltener erneut geprüft werden.
+Das lokale ADIF-Log bleibt weiterhin die maßgebliche QSO-Datenquelle.
 
-### Backup und Wiederherstellung
+### Danke
 
-Vor einer Wiederherstellung prüft der Logger das Backup nun strenger. Dazu gehören unter anderem Profilinformationen, die im Backup referenzierten Logdateien und problematische Dateipfade.
+Vielen Dank an **DO1DX** für das hilfreiche Feedback und die Praxishinweise, die direkt in diese Verbesserungen eingeflossen sind.
 
-Diese Änderungen betreffen ausschließlich die Prüfung und Wiederherstellung. Das normale lokale ADIF-Logging bleibt unverändert.
-
-### Sicherheit
-
-Für die Release-Prüfung wurden die bestehenden Python-, Architektur-, Rotor-, LogStore-, WSJT-X-, QSL- und Backup-Tests ausgeführt. Bandit meldet keine Medium- oder High-Findings; `pip-audit` meldet keine bekannten Vulnerabilities.
-
-Die GitHub-CI führt diese Sicherheitsprüfungen künftig ebenfalls automatisch aus. `detect-secrets` blockiert dort neue verdächtige Secret-Funde gegenüber dem jeweiligen Ausgangsstand.
-
-### Hinweis zum QSL-Versand
-
-Der automatische Hintergrundabgleich versendet weiterhin **niemals selbstständig QSL-Mails**. Der Versand bleibt immer eine ausdrückliche Benutzeraktion.
-
-Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.1/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.1/docs/en/USER_GUIDE.md)
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.2/docs/en/USER_GUIDE.md)
 
 ---
 
 ## English
 
-v0.20.1 is a maintenance and reliability update focused on QSL cards, synchronization and backup restore. The application remains intentionally compact while background behavior becomes more reliable.
+v0.20.2 is a maintenance update focused on calmer Wavelog synchronization, faster logbook handling and stronger protection against duplicate digital QSOs.
 
 ### Highlights
 
-- **Improved QSL preview:** the preview now more reliably matches the card that is actually sent.
-- **QSO changes are detected:** existing QSOs are synchronized with the QSL Card Manager again when relevant details change.
-- **Better for large logbooks:** QSL status updates are targeted and bounded, greatly reducing unnecessary requests for large logs.
-- **Fresher QSL motifs:** changed background images are reloaded reliably even when their URL stays the same.
-- **Safer backup and restore:** backups are validated more strictly before restore so invalid or problematic paths are rejected.
-- **More automated security checks:** GitHub CI now additionally runs Bandit, `pip-audit` and `detect-secrets`.
+- **Delayed automatic synchronization:** In online mode, new QSOs are collected for five minutes by default and then uploaded to Wavelog as a batch. The delay can be configured per profile from 1 to 60 minutes.
+- **Fast multi-QSO deletion:** Multiple QSOs can be selected and deleted in one step, with much better performance on large logbooks.
+- **Clear warning before Wavelog deletion:** Already synchronized QSOs are clearly identified before deletion. Remote deletion still happens only during the next full synchronization.
+- **Improved duplicate protection:** Repeated final exchanges from WSJT-X and external digital logging are much less likely to create duplicate or triplicate QSOs.
+- **Duplicates detected during import:** Duplicate records that already exist inside a WSJT-X ADIF file are detected and skipped within the same import.
 
-### QSL synchronization
+### Synchronization and safety
 
-New QSOs continue to be synchronized automatically with the QSL Card Manager. Existing QSOs are synchronized again only when data relevant to the Card Manager has changed.
+The delayed automatic upload sends new local QSOs only. It never performs remote deletions.
 
-After updating, mappings created by older versions are backfilled once. This makes the additional QSO information introduced in v0.20.1 available to the Card Manager without resending unchanged QSOs on every background run.
+When a QSO already linked to Wavelog is deliberately deleted locally, the delete intent is retained and sent to Wavelog only during the next full synchronization. The Logger now displays a clearer warning including the number of affected QSOs.
 
-Periodic status refresh is also bounded: missing and active QSL states are prioritized while stable states are checked much less frequently.
+The local ADIF log remains the authoritative QSO data source.
 
-### Backup and restore
+### Thanks
 
-Before restoring, the Logger now validates the backup more strictly, including profile information, referenced log files and problematic file paths.
+Many thanks to **DO1DX** for the helpful feedback and practical input that directly contributed to these improvements.
 
-These changes affect validation and restore only. Normal local ADIF logging remains unchanged.
-
-### Security
-
-Release validation included the existing Python, architecture, rotor, LogStore, WSJT-X, QSL and backup tests. Bandit reports no Medium or High findings and `pip-audit` reports no known vulnerabilities.
-
-GitHub CI now runs these security checks automatically as well. `detect-secrets` blocks new suspicious secret findings relative to the relevant base revision.
-
-### QSL delivery note
-
-Automatic background synchronization still **never sends QSL email on its own**. Sending always remains an explicit user action.
-
-Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.1/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.1/docs/en/USER_GUIDE.md)
+Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.2/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.20.2/docs/en/USER_GUIDE.md)
