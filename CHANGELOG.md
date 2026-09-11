@@ -2,6 +2,40 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.21.0] - 2026-09-11
+
+### Added
+
+- direkter **QRZ.com öffnen**-Button für den ausgewählten DX-Cluster-Spot
+- direkter QRZ.com-Aufruf für das aktuell eingegebene Rufzeichen im Reiter **QSO loggen**
+- lokale QSL-Empfehlungen auf Basis der eQSL-Mitgliederliste
+- 6-Monats-Aktivitätsregel für eQSL-Empfehlungen: nicht gefundene Rufzeichen sowie Accounts ohne aktuellen Log-Upload können als E-Mail-QSL-Kandidaten erscheinen
+- pseudonyme Nutzungsstatistik mit zufälliger Installations-ID, App-Version und Betriebssystemfamilie
+- sichtbare Installations-ID in den Einstellungen sowie Funktionen zum Kopieren und Löschen der zugehörigen Statistikdaten
+
+### Changed
+
+- der QSL Card Manager wurde deutlich kompakter gestaltet, damit die QSL-Empfehlungsliste wesentlich mehr Platz erhält
+- die eQSL-Mitgliederliste wird lokal gecacht und nach Ablauf des Cache-Zeitraums im Hintergrund aktualisiert
+- bereits versendete sowie laufende/queued QSL-Mails werden aus den Empfehlungen ausgeschlossen
+- die stabile Installationskennung der Nutzungsstatistik wird korrekt als pseudonym statt anonym beschrieben
+- README, Benutzerhandbuch, Architektur- und Datenschutztexte wurden an die neuen Funktionen angepasst
+
+### Privacy / Safety
+
+- die Nutzungsstatistik überträgt keine Rufzeichen, QSOs, Locator, E-Mail-Adressen, Wavelog-URLs, Zugangsdaten, Profilnamen oder detaillierte Funktionsnutzung
+- vor Bestätigung des Erststart-Hinweises wird kein Statistik-Heartbeat gesendet; die Funktion kann später abgeschaltet werden
+- DA6IT.de speichert in den Statistiktabellen nur den SHA-256-Hash der zufälligen Installations-ID; normale Webserver-/Security-Logs können unabhängig davon Verbindungsmetadaten verarbeiten
+- die eQSL-Auswertung erfolgt lokal; für die Empfehlung werden keine lokalen QSOs oder Rufzeichenlisten an eQSL übertragen
+- QSL-Empfehlungen lösen niemals selbstständig einen Versand aus; jede QSL-Mail bleibt eine ausdrückliche Benutzeraktion
+
+### Security / Reliability
+
+- der eQSL-Download ist größenbegrenzt und auf den vorgesehenen HTTPS-Host beschränkt
+- ein neuer eQSL-Cache wird erst nach erfolgreichem Parsen und Plausibilitätsprüfung aktiviert
+- Fehler beim eQSL-Refresh überschreiben keinen bereits nutzbaren Cache
+- die neuen eQSL- und Nutzungsstatistik-Tests laufen zusätzlich in der GitHub-CI
+
 ## [0.20.2] - 2026-09-11
 
 ### Added

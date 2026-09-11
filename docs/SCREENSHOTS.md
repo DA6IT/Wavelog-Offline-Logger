@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/SCREENSHOTS.md)
 
-Die Bilder zeigen Version 0.19.1 mit automatisch erzeugten, isolierten Demo-Daten. Der Prozess greift weder auf echte Logger-Profile noch auf Funkgerät, Netzwerk, API-Tokens oder persönliche ADI-Dateien zu.
+Die Bilder zeigen Version 0.21.0 mit automatisch erzeugten, isolierten Demo-Daten. Der Prozess greift weder auf echte Logger-Profile noch auf Funkgerät, Netzwerk, API-Tokens oder persönliche ADI-Dateien zu.
 
 ## QSO loggen
 
@@ -23,6 +23,14 @@ Die Bilder zeigen Version 0.19.1 mit automatisch erzeugten, isolierten Demo-Date
 ## Logbuch und Sync
 
 ![Logbuch und Sync](screenshots/logbook-sync.png)
+
+## QSL Card Manager
+
+![QSL Card Manager](screenshots/qsl-card-manager.png)
+
+## QSL-Empfehlungen
+
+![Lokale eQSL-basierte QSL-Empfehlungen](screenshots/qsl-recommendations.png)
 
 ## Statistiken
 
@@ -47,6 +55,14 @@ Die Bilder zeigen Version 0.19.1 mit automatisch erzeugten, isolierten Demo-Date
 ## Einstellungen – Allgemein
 
 ![Allgemeine Einstellungen](screenshots/settings-general.png)
+
+## Einstellungen – Nutzungsstatistik
+
+![Nutzungsstatistik mit Installations-ID und Löschfunktion](screenshots/settings-usage-statistics.png)
+
+## Erststart-Hinweis zur Nutzungsstatistik
+
+![Hinweis zur pseudonymen Nutzungsstatistik](screenshots/usage-statistics-notice.png)
 
 ## Englisch und Dark-Theme
 

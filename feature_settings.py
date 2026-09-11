@@ -99,6 +99,51 @@ class SettingsFeatureMixin:
         self.backup_status_label = ttk.Label(general_right, text="Noch kein Backup in dieser Sitzung erstellt.", style="Muted.Card.TLabel")
         self.backup_status_label.pack(anchor="w", pady=(14, 0))
 
+        ttk.Separator(general_right).pack(fill="x", pady=18)
+        ttk.Label(general_right, text="Nutzungsstatistik", style="CardTitle.TLabel").pack(anchor="w")
+        usage_help = (
+            "At most once per day the app sends a random installation ID, the app version and the operating system. "
+            "No callsigns, QSOs, logbook data, Wavelog addresses or credentials are transmitted."
+            if self.language == "en"
+            else
+            "Höchstens einmal pro Tag sendet die App eine zufällige Installations-ID, die App-Version und das Betriebssystem. "
+            "Rufzeichen, QSOs, Logbuchdaten, Wavelog-Adressen und Zugangsdaten werden nicht übertragen."
+        )
+        ttk.Label(
+            general_right,
+            text=usage_help,
+            style="Muted.Card.TLabel",
+            wraplength=450,
+        ).pack(anchor="w", pady=(4, 10))
+        self.set_usage_stats = tk.BooleanVar(value=self.usage_stats.enabled)
+        ttk.Checkbutton(
+            general_right,
+            text="Nutzungsstatistik aktivieren",
+            variable=self.set_usage_stats,
+        ).pack(anchor="w")
+
+        usage_id_row = ttk.Frame(general_right, style="Card.TFrame")
+        usage_id_row.pack(fill="x", pady=(12, 0))
+        ttk.Label(usage_id_row, text="Installations-ID", style="Card.TLabel").pack(anchor="w")
+        usage_id_value_row = ttk.Frame(usage_id_row, style="Card.TFrame")
+        usage_id_value_row.pack(fill="x", pady=(4, 0))
+        self.usage_stats_id_var = tk.StringVar(value=self.usage_stats.installation_id)
+        ttk.Entry(
+            usage_id_value_row,
+            textvariable=self.usage_stats_id_var,
+            state="readonly",
+        ).pack(side="left", fill="x", expand=True)
+        ttk.Button(
+            usage_id_value_row,
+            text="ID kopieren",
+            command=self._copy_usage_stats_installation_id,
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            general_right,
+            text="Meine Statistikdaten löschen",
+            command=self._delete_usage_stats_from_settings,
+        ).pack(anchor="w", pady=(10, 0))
+
         left = self._card(station_tab, row=0, column=0, sticky="nsew", padx=(0, 8))
         left.columnconfigure(1, weight=1)
         ttk.Label(left, text="Offline-Stationsprofil", style="CardTitle.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
@@ -536,6 +581,7 @@ class SettingsFeatureMixin:
         self.set_ui_language.set("English" if self.ui_preferences.language == "en" else "Deutsch")
         self.set_ui_theme.set("Dunkel / Dark" if self.ui_preferences.theme == "dark" else "Hell / Light")
         self.set_qso_notifications.set(self.ui_preferences.qso_notifications)
+        self._refresh_usage_stats_settings_ui()
         self.set_operator.set(self.db.get_setting("operator_call", ""))
         self.set_station.set(self.db.get_setting("station_call", ""))
         self.set_locator.set(self.db.get_setting("locator", ""))
@@ -668,6 +714,7 @@ class SettingsFeatureMixin:
             # Notification changes take effect immediately. Language and theme
             # still use the existing controlled restart path.
             self.ui_preferences = new_ui_preferences
+            self._save_usage_stats_enabled(self.set_usage_stats.get())
             self._store_dx_spotter_config(spotter_config)
             selected = self.station_by_label.get(self.set_station_profile.get())
             if selected:

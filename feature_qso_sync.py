@@ -404,6 +404,9 @@ class QsoSyncFeatureMixin:
         self._remember_last_spottable_from_cache(qsos)
         self._apply_qso_summary()
 
+        if hasattr(self, "_refresh_qsl_recommendations"):
+            self._refresh_qsl_recommendations()
+
         current_page = getattr(self, "current_page", "")
         if current_page == "qsos":
             self._ensure_qso_tree_rendered()

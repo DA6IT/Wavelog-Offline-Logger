@@ -17,7 +17,7 @@ Eine lokale `pip`-Installation ist für den unterstützten Windows-Build nicht e
 
 ## Vollständige Freigabe von Windows aus
 
-Das wiederverwendbare Skript liest die Version aus `logger_core.py` und prüft sie gegen den Windows-Bootstrapper und das Arch-Paket. Anschließend übernimmt es:
+Das wiederverwendbare Skript liest die Version aus `logger_core.py` und prüft sie gegen den Windows-Bootstrapper und das Arch-Paket. Der Release-Branch wird vom aktuell getesteten Branch-HEAD erzeugt; dieser Branch muss `origin/main` vollständig enthalten. Damit können bereits sauber committe Feature-Branches ohne Verlust ihrer Änderungen in den Release-Prozess übernommen werden. Anschließend übernimmt das Skript:
 
 1. GitHub-Anmeldung und Werkzeugprüfung
 2. vollständige Dokumentations-Screenshots
@@ -83,6 +83,9 @@ Erst nach Annahme des Projekts werden die echten SignPath-Kennungen und Secrets 
 - direkter QRZ.com-Lookup ohne Wavelog-Konfiguration
 - TLS-Verbindung zu Wavelog und QRZ
 - QSO-Benachrichtigung, UDP, CAT und DX-Cluster
+- QRZ.com-Aktionen im QSO-Log und DX-Cluster
+- eQSL-Listenabruf, QSL-Empfehlungen und Ausschluss bereits versendeter/queued Mails
+- Nutzungsstatistik: Erststart-Hinweis, Deaktivieren und Löschen/Rotieren der Installations-ID
 - Prüfsummen aus dem Release
 - Windows-Dateieigenschaften: Product Name, Product/File Version, Beschreibung und Originaldateiname
 - macOS Apple Silicon und Intel: Entpacken, Erststart per Rechtsklick **Öffnen**, lokales QSO und CAT

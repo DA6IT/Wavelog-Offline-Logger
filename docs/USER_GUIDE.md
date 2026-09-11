@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/USER_GUIDE.md)
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.19.4. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.21.0. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -71,6 +71,7 @@ Die linke Navigation öffnet:
 - **Contest Logging** – Seriennummern, Exchanges und Contest-Sitzung
 - **xOTA** – portable POTA-, SOTA-, WWFF-, IOTA-, COTA- und WCA-Aktivierungen vorbereiten
 - **Logbuch & Sync** – lokale QSOs, Sync- und QSL-Status
+- **QSL Card Manager** – QSL-Sync, Motivauswahl und lokale eQSL-basierte Empfehlungen
 - **Statistiken** – lokale Auswertungen
 - **DX Cluster** – Spots empfangen, filtern und übernehmen
 - **CAT Setup** – Funkgerät und Rotor über Hamlib verbinden
@@ -94,6 +95,13 @@ Einstellungen mit Zugangsdaten, Speicherort und Stationsrufzeichen gelten pro Lo
 - Änderungen an Sprache und Theme werden nach einem Neustart vollständig aktiv.
 - **Was ist neu?** öffnet die Versionshinweise erneut. Nach dem ersten Start einer neuen Version erscheinen sie einmal automatisch.
 - Unter **Daten & Backup** lassen sich alle Profile, Einstellungen, Sync-Metadaten und ADI-Logbücher in einem ZIP sichern und wiederherstellen.
+- Unter **Nutzungsstatistik** kann die pseudonyme Statistik ein- oder ausgeschaltet werden. Die zufällige Installations-ID ist sichtbar, kann kopiert werden und die zugehörigen Statistikdaten können direkt aus der App gelöscht werden.
+
+![Nutzungsstatistik in den Einstellungen](screenshots/settings-usage-statistics.png)
+
+Beim ersten Start von v0.21.0 erscheint vor der ersten Statistikübertragung ein eigener Hinweis. Erst nachdem dieser Hinweis bestätigt wurde, darf der tägliche Heartbeat laufen. Wird der Hinweis geschlossen, ohne eine Auswahl zu treffen, wird dadurch keine Statistikübertragung ausgelöst.
+
+![Erststart-Hinweis zur Nutzungsstatistik](screenshots/usage-statistics-notice.png)
 
 ![Englische Oberfläche im Dark-Theme](screenshots/qso-logging-english-dark.png)
 
@@ -133,7 +141,7 @@ Als Rufzeichenquelle stehen zur Verfügung:
 
 Der direkte QRZ-Modus arbeitet unabhängig von einer Wavelog-Konfiguration. Fehlen QRZ-Benutzername oder Passwort, zeigt der Verbindungstest dies als QRZ-Fehler an; es wird nicht unbemerkt auf Wavelog umgeschaltet. Erfolgreiche Ergebnisse werden lokal zwischengespeichert. Name, Locator und QTH werden nur in leere oder zuvor automatisch ausgefüllte Felder geschrieben; eigene Eingaben werden nicht überschrieben.
 
-Die eQSL.cc-Felder sind vorbereitet und klar als **Coming soon** markiert. Version 0.16.0 stellt noch keine eQSL-Verbindung her und führt weder Upload noch Download aus.
+Die eQSL.cc-Zugangsdaten bleiben für einen späteren direkten eQSL-Upload/-Sync vorbereitet. Unabhängig davon nutzt der **QSL Card Manager** die eQSL-Mitgliederliste ohne persönliche eQSL-Zugangsdaten für lokale QSL-Empfehlungen.
 
 ### 4.4 Daten & Verbindungen
 
@@ -182,6 +190,8 @@ Rechts erscheinen, soweit verfügbar:
 - Name, QTH und Land
 - Locator sowie CQ-/ITU-Zonen
 - Offline-DXCC-Daten aus `CTY.DAT`
+
+Neben **Callbook neu laden** öffnet **QRZ.com öffnen** die QRZ.com-Seite des aktuell eingegebenen Rufzeichens im Standardbrowser.
 
 Kein Foto oder keine Internetverbindung vergrößert die Seitenleiste nicht. Der Logger bleibt vollständig benutzbar. **DX-Spot senden** verwendet die getrennte Spotter-Verbindung. **TUNE (ATU)** ist nur bei aktiver CAT-Verbindung verfügbar.
 
@@ -355,6 +365,7 @@ Fehlt der Mode, wertet die App Kommentar, typische FT8-Frequenzen und eindeutige
 
 - **Doppelklick:** TRX auf Frequenz und Mode abstimmen; kein Seitenwechsel
 - **QSO übernehmen:** ausgewählten Spot in das QSO-Formular übertragen
+- **QRZ.com öffnen:** QRZ.com-Seite des ausgewählten Spot-Rufzeichens im Browser öffnen
 - **DX-Spot senden:** aktuellen QSO-Kandidaten über die getrennte DXSpider-Verbindung melden. Nach dem Speichern und Leeren des Formulars bleibt das letzte QSO als eigener Spot-Kandidat erhalten.
 
 ## 13. UDP Logging / WSJT-X
@@ -393,10 +404,13 @@ Beim ersten Start einer neuen Version erscheint einmalig **Was ist neu?**. Die H
 
 Offline verfügbar sind QSO-Erfassung, ADI-Speicherung, Profile, Statistiken, CTY.DAT-Ländererkennung und die lokale Logbuchansicht.
 
-Netzwerk benötigen nur ausdrücklich konfigurierte oder gestartete Funktionen:
+Netzwerk können aktivierte, konfigurierte oder ausdrücklich gestartete Funktionen verwenden:
 
 - Wavelog-Erreichbarkeitsprüfung und Sync
 - Wavelog- oder QRZ-Callbook
+- DA6IT.de QSL Card Manager
+- Download der eQSL-Mitgliederliste für lokale QSL-Empfehlungen
+- pseudonyme Nutzungsstatistik nach Bestätigung des Erststart-Hinweises
 - DX-Cluster-Empfang und Spotversand
 - Release-Prüfung
 - einmalige Windows-Runtime-Einrichtung
@@ -411,11 +425,23 @@ Die vollständige Bildübersicht steht in der [Screenshot-Galerie](SCREENSHOTS.m
 
 ## DA6IT.de QSL Card Manager
 
+![QSL Card Manager](screenshots/qsl-card-manager.png)
+
+
 Unter **Einstellungen → QSL** wird der Connection Key hinterlegt. Im **QSL Card Manager** werden QSOs synchronisiert, Motive geladen und pro Stationsprofil ausgewählt. **Vorschau** rendert die Karte lokal.
 
 Im Bereich **Logbuch & Sync** versendet **QSL E-Mail senden** ein einzelnes markiertes QSO direkt. Mehrere mit Strg/Shift markierte QSOs werden an die serverseitige DA6IT.de Mail-Queue übergeben.
 
 Die Spalte **E-Mail QSL** zeigt `✅`, wenn der Server die Mail als versendet führt. Das bedeutet nicht, dass Zustellung oder Lesen bestätigt wurden.
+
+### QSL-Empfehlungen
+
+![QSL-Empfehlungen](screenshots/qsl-recommendations.png)
+
+
+Der QSL Card Manager lädt die eQSL-Mitgliederliste lokal und zeigt E-Mail-QSL-Empfehlungen nur für QSOs, für die eine nutzbare E-Mail-Adresse bekannt ist. Ein eQSL-Eintrag mit einem Log-Upload innerhalb der letzten sechs Monate gilt als aktiv und wird nicht empfohlen. Fehlt der Eintrag oder liegt der letzte Upload länger zurück, kann das QSO als Empfehlung erscheinen. Bereits versendete oder laufende/queued QSL-Mails werden ausgeblendet.
+
+Die Empfehlung versendet niemals automatisch. Erst **QSL per E-Mail senden** startet den bestehenden DA6IT.de-QSL-Versandweg mit serverseitiger QRZ-Empfängerprüfung.
 
 ### Private Kontrollkopie
 
@@ -431,7 +457,7 @@ Unter **Einstellungen → QSL** kann optional eine private **Kontrollkopie** akt
 
 Der automatische Hintergrundabgleich versendet niemals selbstständig QSL-Mails. Der Versand benötigt weiterhin eine ausdrückliche Benutzeraktion.
 
-### QSL Card Manager – finaler 0.20.0 Workflow
+### QSL Card Manager – Workflow
 
 Nach dem einmaligen Hinterlegen des QSL-Verbindungsschlüssels arbeitet die QSL-Integration im Normalbetrieb automatisch. Vorhandene lokale QSL-Daten und Motive werden sofort aus dem Cache verwendet; anschließend aktualisiert die App neue QSO-Zuordnungen, Status und Motive im Hintergrund.
 

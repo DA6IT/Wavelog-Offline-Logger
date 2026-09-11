@@ -27,6 +27,7 @@ from feature_stats import StatsFeatureMixin
 from feature_udp import UdpFeatureMixin
 from feature_ui_shell import UiShellFeatureMixin
 from feature_update import UpdateFeatureMixin
+from feature_usage import UsageStatsFeatureMixin
 from feature_wavelog_online import WavelogOnlineFeatureMixin
 from feature_xota import XotaFeatureMixin
 from logger_core import APP_NAME, VERSION, app_data_dir
@@ -37,6 +38,7 @@ from ui_theme import set_theme, theme
 class LoggerApp(
     UiShellFeatureMixin,
     UpdateFeatureMixin,
+    UsageStatsFeatureMixin,
     WavelogOnlineFeatureMixin,
     ProfilesFeatureMixin,
     LifecycleFeatureMixin,
@@ -91,6 +93,7 @@ class LoggerApp(
         """Initialize feature-owned state before any widgets are built."""
         self._init_ui_shell_feature()
         self._init_lifecycle_feature()
+        self._init_usage_stats_feature()
         self._init_qso_sync_feature()
         self._init_qsl_feature()
         self._init_wavelog_online_feature()
@@ -139,7 +142,7 @@ class LoggerApp(
         self.after(350, self._show_adif_migration_report)
         self.after(600, self._autostart_udp_log)
         self.after(700, self._localization_tick)
-        self.after(950, self._show_whats_new_if_needed)
+        self.after(950, self._show_startup_notices)
         self.after(1300, self._maybe_startup_wsjtx_sync)
         self.after(1800, self._start_update_check)
         self.after(2500, self._start_wavelog_monitor)

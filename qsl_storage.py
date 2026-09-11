@@ -565,6 +565,23 @@ class QslStorage:
 
         return dict(row) if row else None
 
+    def list_recipient_hints(
+        self,
+    ) -> dict[str, dict[str, str]]:
+        with self.db.lock:
+            rows = self.db.conn.execute(
+                """
+                SELECT local_id,email,source,updated_at
+                FROM da6it_qsl_recipient_hint
+                """
+            ).fetchall()
+
+        return {
+            str(row["local_id"]): dict(row)
+            for row in rows
+            if row["local_id"]
+        }
+
     def delete_recipient_hint(
         self,
         local_id: str,

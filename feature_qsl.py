@@ -29,6 +29,7 @@ from qsl_delivery import (
     render_selected_qsl,
     send_single_qsl,
 )
+from qsl_eqsl import EqslLoadResult, EqslMemberCache, EqslMemberIndex
 from qsl_renderer import (
     latest_qso,
     qso_designer_values,
@@ -60,6 +61,11 @@ class QslFeatureMixin:
         self.qsl_background_busy = False
         self.qsl_background_job = None
         self.qsl_background_reason = ""
+        self.qsl_eqsl_refresh_busy = False
+        self.qsl_eqsl_index: EqslMemberIndex | None = None
+        self.qsl_eqsl_cache_time = None
+        self.qsl_recommendation_by_id: dict[str, dict] = {}
+        self._qsl_recommendation_override_qso: dict | None = None
 
     @staticmethod
     def _qsl_recipient_email_valid(value: str) -> bool:
@@ -371,20 +377,9 @@ class QslFeatureMixin:
 
         ttk.Label(
             local_card,
-            text="Lokale QSL-Synchronisierung",
+            text="QSL-Sync",
             style="CardTitle.TLabel",
         ).grid(row=0, column=0, sticky="w")
-
-        ttk.Label(
-            local_card,
-            text=(
-                "Lokale QSOs werden zum DA6IT.de QSL Card Manager "
-                "übertragen. Der Server liefert die stabile qsoUid; "
-                "der Logger berechnet diese Kennung niemals selbst."
-            ),
-            style="Muted.Card.TLabel",
-            wraplength=500,
-        ).grid(row=1, column=0, sticky="ew", pady=(4, 14))
 
         self.qsl_local_status_var = tk.StringVar(
             value="QSL-Status wird geladen …"
@@ -393,35 +388,45 @@ class QslFeatureMixin:
             local_card,
             textvariable=self.qsl_local_status_var,
             style="Card.TLabel",
-            wraplength=500,
-        ).grid(row=2, column=0, sticky="ew", pady=(0, 14))
+            wraplength=560,
+        ).grid(row=1, column=0, sticky="ew", pady=(3, 7))
+
+        sync_actions = ttk.Frame(
+            local_card,
+            style="Card.TFrame",
+        )
+        sync_actions.grid(
+            row=2,
+            column=0,
+            sticky="ew",
+        )
+        sync_actions.columnconfigure(1, weight=1)
 
         self.qsl_sync_button = ttk.Button(
-            local_card,
-            text="Jetzt mit QSL Card Manager synchronisieren",
+            sync_actions,
+            text="Jetzt synchronisieren",
             style="Primary.TButton",
             command=self.sync_qsl_now,
         )
-        self.qsl_sync_button.grid(row=3, column=0, sticky="w")
+        self.qsl_sync_button.grid(row=0, column=0, sticky="w")
 
         self.qsl_sync_status_var = tk.StringVar(
             value="Noch kein QSL-Sync in dieser Sitzung."
         )
         self.qsl_sync_status_label = tk.Label(
-            local_card,
+            sync_actions,
             textvariable=self.qsl_sync_status_var,
             bg=theme.CARD,
             fg=theme.MUTED,
-            font=("Segoe UI", 9),
-            justify="left",
-            anchor="w",
-            wraplength=500,
+            font=("Segoe UI", 8),
+            justify="right",
+            anchor="e",
         )
         self.qsl_sync_status_label.grid(
-            row=4,
-            column=0,
-            sticky="ew",
-            pady=(12, 0),
+            row=0,
+            column=1,
+            sticky="e",
+            padx=(12, 0),
         )
 
         server_card = self._card(
@@ -440,16 +445,6 @@ class QslFeatureMixin:
             style="CardTitle.TLabel",
         ).grid(row=0, column=0, sticky="w")
 
-        ttk.Label(
-            server_card,
-            text=(
-                "Contract, API-Version und Versandlimits werden beim "
-                "manuellen QSL-Sync direkt vom Server geladen."
-            ),
-            style="Muted.Card.TLabel",
-            wraplength=500,
-        ).grid(row=1, column=0, sticky="ew", pady=(4, 14))
-
         self.qsl_server_status_var = tk.StringVar(
             value="Noch kein Serverstatus in dieser Sitzung."
         )
@@ -460,13 +455,14 @@ class QslFeatureMixin:
             fg=theme.MUTED,
             font=("Segoe UI", 9),
             justify="left",
-            anchor="nw",
-            wraplength=500,
+            anchor="w",
+            wraplength=600,
         )
         self.qsl_server_status_label.grid(
-            row=2,
+            row=1,
             column=0,
-            sticky="nsew",
+            sticky="ew",
+            pady=(3, 0),
         )
 
         template_card = self._card(
@@ -481,30 +477,13 @@ class QslFeatureMixin:
 
         ttk.Label(
             template_card,
-            text="QSL-Motive",
+            text="QSL-Motiv",
             style="CardTitle.TLabel",
         ).grid(
             row=0,
             column=0,
             columnspan=3,
             sticky="w",
-        )
-
-        ttk.Label(
-            template_card,
-            text=(
-                "Community-Motive und eigene Vorlagen werden vom "
-                "QSL Card Manager geladen und lokal gecacht. "
-                "Die Auswahl gilt für das aktuelle Stationsprofil."
-            ),
-            style="Muted.Card.TLabel",
-            wraplength=1040,
-        ).grid(
-            row=1,
-            column=0,
-            columnspan=3,
-            sticky="ew",
-            pady=(4, 12),
         )
 
         ttk.Label(
@@ -551,7 +530,7 @@ class QslFeatureMixin:
             row=3,
             column=0,
             sticky="w",
-            pady=(12, 0),
+            pady=(5, 0),
             padx=(0, 10),
         )
 
@@ -565,7 +544,7 @@ class QslFeatureMixin:
             row=3,
             column=1,
             sticky="ew",
-            pady=(12, 0),
+            pady=(5, 0),
         )
 
         self.qsl_preview_button = ttk.Button(
@@ -579,7 +558,7 @@ class QslFeatureMixin:
             column=2,
             sticky="e",
             padx=(10, 0),
-            pady=(12, 0),
+            pady=(5, 0),
         )
         self.qsl_template_combo.bind(
             "<<ComboboxSelected>>",
@@ -604,55 +583,585 @@ class QslFeatureMixin:
             column=0,
             columnspan=3,
             sticky="ew",
-            pady=(10, 0),
+            pady=(4, 0),
         )
 
-        result_card = self._card(
+        recommendation_card = self._card(
             page,
             row=2,
             column=0,
             columnspan=2,
             sticky="nsew",
         )
-        result_card.columnconfigure(0, weight=1)
+        recommendation_card.columnconfigure(0, weight=1)
+        recommendation_card.rowconfigure(1, weight=1)
+
+        recommendation_head = ttk.Frame(
+            recommendation_card,
+            style="Card.TFrame",
+        )
+        recommendation_head.grid(
+            row=0,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=(0, 8),
+        )
 
         ttk.Label(
-            result_card,
-            text="Letzter QSL-Sync",
+            recommendation_head,
+            text="QSL-Empfehlungen",
             style="CardTitle.TLabel",
-        ).grid(row=0, column=0, sticky="w")
+        ).pack(side="left")
 
+        self.qsl_eqsl_status_var = tk.StringVar(
+            value="eQSL-Liste wird vorbereitet …"
+        )
         ttk.Label(
-            result_card,
-            text=(
-                "Der Sync ist idempotent: bereits bekannte QSOs werden "
-                "vom Server als unchanged erkannt. Neue oder geänderte QSOs "
-                "erhalten bzw. behalten ihre serverseitige qsoUid."
-            ),
+            recommendation_head,
+            textvariable=self.qsl_eqsl_status_var,
             style="Muted.Card.TLabel",
-            wraplength=1040,
-        ).grid(row=1, column=0, sticky="ew", pady=(4, 14))
+        ).pack(side="right")
 
+        recommendation_columns = (
+            "call",
+            "date",
+            "band",
+            "mode",
+        )
+        self.qsl_recommendation_tree = ttk.Treeview(
+            recommendation_card,
+            columns=recommendation_columns,
+            show="headings",
+            selectmode="browse",
+            height=14,
+        )
+
+        recommendation_headings = (
+            {
+                "call": "Call",
+                "date": "Date",
+                "band": "Band",
+                "mode": "Mode",
+            }
+            if self.language == "en"
+            else {
+                "call": "Call",
+                "date": "Datum",
+                "band": "Band",
+                "mode": "Mode",
+            }
+        )
+        recommendation_widths = {
+            "call": 170,
+            "date": 125,
+            "band": 85,
+            "mode": 110,
+        }
+
+        for column in recommendation_columns:
+            self.qsl_recommendation_tree.heading(
+                column,
+                text=recommendation_headings[column],
+            )
+            self.qsl_recommendation_tree.column(
+                column,
+                width=recommendation_widths[column],
+                minwidth=70,
+                stretch=(column == "call"),
+            )
+
+        self.qsl_recommendation_tree.grid(
+            row=1,
+            column=0,
+            sticky="nsew",
+        )
+        recommendation_scroll = ttk.Scrollbar(
+            recommendation_card,
+            orient="vertical",
+            command=self.qsl_recommendation_tree.yview,
+        )
+        recommendation_scroll.grid(
+            row=1,
+            column=1,
+            sticky="ns",
+        )
+        self.qsl_recommendation_tree.configure(
+            yscrollcommand=recommendation_scroll.set,
+        )
+        self.qsl_recommendation_tree.bind(
+            "<<TreeviewSelect>>",
+            self._qsl_recommendation_selected,
+        )
+        self.qsl_recommendation_tree.bind(
+            "<Double-1>",
+            lambda _event: self._send_selected_qsl_recommendation(),
+        )
+
+        recommendation_actions = ttk.Frame(
+            recommendation_card,
+            style="Card.TFrame",
+        )
+        recommendation_actions.grid(
+            row=2,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=(8, 0),
+        )
+
+        self.qsl_recommendation_summary_var = tk.StringVar(
+            value="Noch keine eQSL-Daten geladen."
+        )
+        ttk.Label(
+            recommendation_actions,
+            textvariable=self.qsl_recommendation_summary_var,
+            style="Muted.Card.TLabel",
+        ).pack(side="left")
+
+        self.qsl_eqsl_refresh_button = ttk.Button(
+            recommendation_actions,
+            text="eQSL-Liste aktualisieren",
+            style="Secondary.TButton",
+            command=lambda: self._start_eqsl_member_refresh(force=True),
+        )
+        self.qsl_eqsl_refresh_button.pack(side="right")
+
+        self.qsl_recommendation_send_button = ttk.Button(
+            recommendation_actions,
+            text="QSL per E-Mail senden",
+            style="Primary.TButton",
+            command=self._send_selected_qsl_recommendation,
+            state="disabled",
+        )
+        self.qsl_recommendation_send_button.pack(
+            side="right",
+            padx=(0, 8),
+        )
+
+        # The detailed last-sync result is kept for status/error updates but
+        # intentionally not rendered as a separate card. The recommendation
+        # list gets the available vertical space instead.
         self.qsl_result_var = tk.StringVar(
             value="Noch keine Sync-Ergebnisse vorhanden."
         )
         self.qsl_result_label = tk.Label(
-            result_card,
+            local_card,
             textvariable=self.qsl_result_var,
             bg=theme.CARD,
             fg=theme.MUTED,
-            font=("Segoe UI", 10),
-            justify="left",
-            anchor="nw",
-            wraplength=1040,
-        )
-        self.qsl_result_label.grid(
-            row=2,
-            column=0,
-            sticky="nsew",
         )
 
         self.refresh_qsl_page()
+        self.after(
+            900,
+            self._start_eqsl_member_refresh,
+        )
+
+    def _start_eqsl_member_refresh(
+        self,
+        *,
+        force: bool = False,
+    ) -> None:
+        if self.qsl_eqsl_refresh_busy or getattr(self, "closing", False):
+            return
+
+        self.qsl_eqsl_refresh_busy = True
+
+        if hasattr(self, "qsl_eqsl_refresh_button"):
+            self.qsl_eqsl_refresh_button.configure(state="disabled")
+
+        if hasattr(self, "qsl_eqsl_status_var"):
+            self.qsl_eqsl_status_var.set(
+                "Loading eQSL member list …"
+                if self.language == "en"
+                else "eQSL-Mitgliederliste wird geladen …"
+            )
+
+        cache = EqslMemberCache(
+            Path(self.data_dir)
+        )
+
+        def worker() -> None:
+            try:
+                result = cache.refresh(
+                    force=force
+                )
+                if not self.closing:
+                    self.after(
+                        0,
+                        lambda: self._eqsl_member_refresh_ok(
+                            result
+                        ),
+                    )
+            except Exception as exc:
+                message = str(exc)
+                if not self.closing:
+                    self.after(
+                        0,
+                        lambda error=message: self._eqsl_member_refresh_failed(
+                            error
+                        ),
+                    )
+
+        threading.Thread(
+            target=worker,
+            name="eqsl-member-list-refresh",
+            daemon=True,
+        ).start()
+
+    def _eqsl_member_refresh_ok(
+        self,
+        result: EqslLoadResult,
+    ) -> None:
+        self.qsl_eqsl_refresh_busy = False
+        self.qsl_eqsl_index = result.index
+        self.qsl_eqsl_cache_time = result.cache_time
+
+        if hasattr(self, "qsl_eqsl_refresh_button"):
+            self.qsl_eqsl_refresh_button.configure(state="normal")
+
+        timestamp = result.cache_time.astimezone().strftime(
+            "%d.%m.%Y %H:%M"
+        )
+        count = len(result.index.members)
+
+        if result.stale_fallback:
+            text = (
+                f"eQSL cache: {count:,} calls · {timestamp} · update failed"
+                if self.language == "en"
+                else f"eQSL-Cache: {count:,} Calls · {timestamp} · Update fehlgeschlagen"
+            )
+        elif result.downloaded:
+            text = (
+                f"eQSL list: {count:,} calls · updated {timestamp}"
+                if self.language == "en"
+                else f"eQSL-Liste: {count:,} Calls · aktualisiert {timestamp}"
+            )
+        else:
+            text = (
+                f"eQSL cache: {count:,} calls · {timestamp}"
+                if self.language == "en"
+                else f"eQSL-Cache: {count:,} Calls · {timestamp}"
+            )
+
+        if hasattr(self, "qsl_eqsl_status_var"):
+            self.qsl_eqsl_status_var.set(text)
+
+        self._refresh_qsl_recommendations()
+
+    def _eqsl_member_refresh_failed(
+        self,
+        message: str,
+    ) -> None:
+        self.qsl_eqsl_refresh_busy = False
+
+        if hasattr(self, "qsl_eqsl_refresh_button"):
+            self.qsl_eqsl_refresh_button.configure(state="normal")
+
+        if self.qsl_eqsl_index is None:
+            text = (
+                "eQSL list unavailable · no recommendations"
+                if self.language == "en"
+                else "eQSL-Liste nicht verfügbar · keine Empfehlungen"
+            )
+        else:
+            text = (
+                "eQSL update failed · existing cache remains active"
+                if self.language == "en"
+                else "eQSL-Update fehlgeschlagen · vorhandener Cache bleibt aktiv"
+            )
+
+        if hasattr(self, "qsl_eqsl_status_var"):
+            self.qsl_eqsl_status_var.set(text)
+
+        if hasattr(self, "qsl_recommendation_summary_var"):
+            self.qsl_recommendation_summary_var.set(
+                str(message)[:240]
+                if self.qsl_eqsl_index is None
+                else self.qsl_recommendation_summary_var.get()
+            )
+
+        self._refresh_qsl_recommendations()
+
+    def _qsl_recommendation_selected(
+        self,
+        _event=None,
+    ) -> None:
+        if not hasattr(
+            self,
+            "qsl_recommendation_send_button",
+        ):
+            return
+
+        selected = (
+            self.qsl_recommendation_tree.selection()
+            if hasattr(self, "qsl_recommendation_tree")
+            else ()
+        )
+        self.qsl_recommendation_send_button.configure(
+            state=(
+                "normal"
+                if selected and not self.qsl_mail_busy
+                else "disabled"
+            )
+        )
+
+    def _refresh_qsl_recommendations(
+        self,
+    ) -> None:
+        if not hasattr(
+            self,
+            "qsl_recommendation_tree",
+        ):
+            return
+
+        tree = self.qsl_recommendation_tree
+        tree.delete(*tree.get_children())
+        self.qsl_recommendation_by_id = {}
+
+        index = self.qsl_eqsl_index
+        if index is None:
+            self.qsl_recommendation_summary_var.set(
+                "No recommendations without a local eQSL member list."
+                if self.language == "en"
+                else "Ohne lokale eQSL-Mitgliederliste werden keine Empfehlungen erzeugt."
+            )
+            self._qsl_recommendation_selected()
+            return
+
+        if not getattr(self, "_qso_view_loaded", False):
+            self.qsl_recommendation_summary_var.set(
+                "Waiting for the local logbook …"
+                if self.language == "en"
+                else "Warte auf das lokale Logbuch …"
+            )
+            self._qsl_recommendation_selected()
+            return
+
+        qsos = list(
+            getattr(
+                self,
+                "_qso_cached_qsos",
+                [],
+            )
+        )
+
+        try:
+            storage = QslStorage(self.db)
+            snapshots = storage.list_status_snapshots_by_local()
+            hints = storage.list_recipient_hints()
+        except Exception as exc:
+            self.qsl_recommendation_summary_var.set(
+                (
+                    "QSL status could not be loaded: "
+                    if self.language == "en"
+                    else "QSL-Status konnte nicht geladen werden: "
+                )
+                + str(exc)[:180]
+            )
+            self._qsl_recommendation_selected()
+            return
+
+        recommendations: list[
+            tuple[str, str, str, str, str, str, dict]
+        ] = []
+
+        active_mail_states = {
+            "queued",
+            "queue",
+            "pending",
+            "processing",
+            "sending",
+        }
+
+        for qso in qsos:
+            if not isinstance(qso, dict):
+                continue
+
+            local_id = str(
+                qso.get("local_id") or ""
+            ).strip()
+            call = str(
+                qso.get("call") or ""
+            ).strip().upper()
+
+            if not local_id or not call:
+                continue
+
+            snapshot = snapshots.get(local_id) or {}
+            payload = snapshot.get("payload")
+            payload = payload if isinstance(payload, dict) else {}
+
+            mail_status = str(
+                payload.get("mailStatus")
+                or payload.get("mail_status")
+                or ""
+            ).strip().lower()
+            sent_at = str(
+                payload.get("emailSentAt")
+                or payload.get("email_sent_at")
+                or ""
+            ).strip()
+
+            if sent_at or mail_status == "sent" or mail_status in active_mail_states:
+                continue
+
+            email = str(
+                payload.get("qrzEmail")
+                or payload.get("qrz_email")
+                or ""
+            ).strip()
+
+            if not self._qsl_recipient_email_valid(email):
+                hint = hints.get(local_id) or {}
+                email = str(
+                    hint.get("email") or ""
+                ).strip()
+
+            if not self._qsl_recipient_email_valid(email):
+                continue
+
+            eqsl_status, last_upload = index.classify(
+                call
+            )
+
+            if eqsl_status == "active":
+                continue
+
+            if eqsl_status == "missing":
+                reason = (
+                    "no eQSL entry"
+                    if self.language == "en"
+                    else "kein eQSL-Eintrag"
+                )
+            elif last_upload is None:
+                reason = (
+                    "eQSL account without log upload"
+                    if self.language == "en"
+                    else "eQSL ohne Log-Upload"
+                )
+            else:
+                formatted = last_upload.strftime(
+                    "%d.%m.%Y"
+                )
+                reason = (
+                    f"eQSL inactive since {formatted}"
+                    if self.language == "en"
+                    else f"eQSL inaktiv seit {formatted}"
+                )
+
+            qso_date = str(
+                qso.get("qso_date") or ""
+            ).strip()
+            if len(qso_date) == 8:
+                date_text = (
+                    f"{qso_date[6:8]}."
+                    f"{qso_date[4:6]}."
+                    f"{qso_date[0:4]}"
+                )
+            else:
+                date_text = qso_date or "—"
+
+            recommendations.append(
+                (
+                    qso_date,
+                    str(qso.get("time_on") or ""),
+                    local_id,
+                    call,
+                    date_text,
+                    reason,
+                    qso,
+                )
+            )
+
+        recommendations.sort(
+            key=lambda item: (
+                item[0],
+                item[1],
+                item[3],
+            ),
+            reverse=True,
+        )
+
+        display_limit = 200
+
+        for (
+            _qso_date,
+            _time_on,
+            local_id,
+            call,
+            date_text,
+            reason,
+            qso,
+        ) in recommendations[:display_limit]:
+            self.qsl_recommendation_by_id[
+                local_id
+            ] = qso
+            tree.insert(
+                "",
+                "end",
+                iid=local_id,
+                values=(
+                    call,
+                    date_text,
+                    str(qso.get("band") or "—"),
+                    str(qso.get("mode") or "—"),
+                ),
+            )
+
+        count = len(recommendations)
+
+        if count == 0:
+            summary = (
+                "No e-mail QSL recommendations at the moment."
+                if self.language == "en"
+                else "Aktuell keine E-Mail-QSL-Empfehlungen."
+            )
+        elif count > display_limit:
+            summary = (
+                f"{count} recommendations · newest {display_limit} shown"
+                if self.language == "en"
+                else f"{count} Empfehlungen · neueste {display_limit} angezeigt"
+            )
+        else:
+            summary = (
+                f"{count} recommendation(s)"
+                if self.language == "en"
+                else f"{count} Empfehlung(en)"
+            )
+
+        self.qsl_recommendation_summary_var.set(
+            summary
+        )
+        self._qsl_recommendation_selected()
+
+    def _send_selected_qsl_recommendation(
+        self,
+    ) -> None:
+        if self.qsl_mail_busy:
+            return
+
+        selected = (
+            self.qsl_recommendation_tree.selection()
+            if hasattr(self, "qsl_recommendation_tree")
+            else ()
+        )
+
+        if not selected:
+            return
+
+        qso = self.qsl_recommendation_by_id.get(
+            str(selected[0])
+        )
+
+        if not isinstance(qso, dict):
+            return
+
+        self._qsl_recommendation_override_qso = dict(
+            qso
+        )
+        self.send_selected_qsl_email()
 
     def _qsl_station_profile_candidates(
         self,
@@ -881,7 +1390,7 @@ class QslFeatureMixin:
         )
 
         self.qsl_template_detail_var.set(
-            f"{kind}{layout}\n"
+            f"{kind}{layout} · "
             f"Template-ID: {item['id']} · Revision: {item['revision']} · "
             f"{canvas.get('width', '—')}×{canvas.get('height', '—')} px · "
             f"{len(item.get('fields') or [])} Felder · Hintergrund: {bg_text}"
@@ -1341,21 +1850,30 @@ class QslFeatureMixin:
             )
         )
 
+        self._qsl_recommendation_selected()
+
     def send_selected_qsl_email(
         self,
     ) -> None:
         if self.qsl_mail_busy:
             return
 
-        selected_qsos = self._selected_qsos_for_qsl()
+        override_qso = self._qsl_recommendation_override_qso
+        self._qsl_recommendation_override_qso = None
 
-        if len(selected_qsos) > 1:
-            self._queue_selected_qsl_emails(
-                selected_qsos
-            )
-            return
+        if override_qso is not None:
+            selected_qsos: list[dict] = []
+            qso = override_qso
+        else:
+            selected_qsos = self._selected_qsos_for_qsl()
 
-        qso = self._selected_qso_for_qsl()
+            if len(selected_qsos) > 1:
+                self._queue_selected_qsl_emails(
+                    selected_qsos
+                )
+                return
+
+            qso = self._selected_qso_for_qsl()
 
         if not qso:
             messagebox.showwarning(
@@ -2089,20 +2607,16 @@ class QslFeatureMixin:
         )
 
         if self.language == "en":
-            key_text = "configured" if has_key else "not configured"
+            key_text = "key ready" if has_key else "key missing"
             self.qsl_local_status_var.set(
-                f"Local QSOs: {qso_text}\n"
-                f"qsoUid mappings: {mappings}\n"
-                f"Pending offline actions: {pending}\n"
-                f"Connection key: {key_text}"
+                f"{qso_text} QSOs · {mappings} mapped · "
+                f"{pending} pending · {key_text}"
             )
         else:
-            key_text = "eingerichtet" if has_key else "nicht eingerichtet"
+            key_text = "Key bereit" if has_key else "Key fehlt"
             self.qsl_local_status_var.set(
-                f"Lokale QSOs: {qso_text}\n"
-                f"qsoUid-Mappings: {mappings}\n"
-                f"Offene Offline-Aktionen: {pending}\n"
-                f"Connection Key: {key_text}"
+                f"{qso_text} QSOs · {mappings} zugeordnet · "
+                f"{pending} offen · {key_text}"
             )
 
         if hasattr(self, "qsl_sync_button"):
@@ -2145,6 +2659,7 @@ class QslFeatureMixin:
 
         self._refresh_qsl_server_status()
         self._refresh_qsl_template_catalog()
+        self._refresh_qsl_recommendations()
 
     def _refresh_qsl_server_status(self) -> None:
         if not hasattr(self, "qsl_server_status_var"):
@@ -2161,9 +2676,9 @@ class QslFeatureMixin:
         usage = bootstrap.get("mailUsage")
         usage = usage if isinstance(usage, dict) else {}
 
-        lines = [
-            f"Contract: {contract}",
-            f"Core: {core} · API: {api}",
+        parts = [
+            f"Core {core}",
+            f"API {api}",
         ]
 
         hour_limit = usage.get("hourLimit")
@@ -2174,45 +2689,32 @@ class QslFeatureMixin:
         mail_enabled = usage.get("mailEnabled")
 
         if hour_limit is not None:
-            if self.language == "en":
-                lines.append(
-                    f"Hour: {hour_remaining if hour_remaining is not None else '—'} "
-                    f"of {hour_limit} available"
-                )
-            else:
-                lines.append(
-                    f"Stunde: {hour_remaining if hour_remaining is not None else '—'} "
-                    f"von {hour_limit} verfügbar"
-                )
+            parts.append(
+                f"{'Hour' if self.language == 'en' else 'Std.'} "
+                f"{hour_remaining if hour_remaining is not None else '—'}/{hour_limit}"
+            )
 
         if day_limit is not None:
-            if self.language == "en":
-                lines.append(
-                    f"Day: {day_remaining if day_remaining is not None else '—'} "
-                    f"of {day_limit} available"
-                )
-            else:
-                lines.append(
-                    f"Tag: {day_remaining if day_remaining is not None else '—'} "
-                    f"von {day_limit} verfügbar"
-                )
+            parts.append(
+                f"{'Day' if self.language == 'en' else 'Tag'} "
+                f"{day_remaining if day_remaining is not None else '—'}/{day_limit}"
+            )
 
         if queued is not None:
-            lines.append(f"Queue: {queued}")
+            parts.append(f"Queue {queued}")
 
         if mail_enabled is not None:
-            if self.language == "en":
-                lines.append(
-                    "Mail sending: "
-                    + ("enabled" if bool(mail_enabled) else "disabled")
+            parts.append(
+                (
+                    "Mail on" if bool(mail_enabled) else "Mail off"
                 )
-            else:
-                lines.append(
-                    "Mailversand: "
-                    + ("aktiv" if bool(mail_enabled) else "deaktiviert")
+                if self.language == "en"
+                else (
+                    "Mail aktiv" if bool(mail_enabled) else "Mail aus"
                 )
+            )
 
-        self.qsl_server_status_var.set("\n".join(lines))
+        self.qsl_server_status_var.set(" · ".join(parts))
         self.qsl_server_status_label.configure(fg=theme.OK)
 
     def sync_qsl_now(self) -> None:
@@ -2321,45 +2823,21 @@ class QslFeatureMixin:
 
         if self.language == "en":
             summary = (
-                f"Processed: {result.total}\n"
-                f"Created: {result.created} · Updated: {result.updated} · "
-                f"Unchanged: {result.unchanged} · Ignored: {result.ignored}\n"
-                f"qsoUid mappings written: {result.mapped}"
+                f"{result.total} processed · {result.created} new · "
+                f"{result.updated} updated · {result.unchanged} unchanged · "
+                f"recipient: {recipient_result.email} email / "
+                f"{recipient_result.no_email} no email / "
+                f"{recipient_result.pending_after} pending"
             )
-            if result.synced_at:
-                summary += f"\nServer sync time: {result.synced_at}"
-
-            summary += (
-                f"\nRecipient checks: {recipient_result.processed} · "
-                f"email: {recipient_result.email} · "
-                f"no email: {recipient_result.no_email} · "
-                f"not found: {recipient_result.not_found} · "
-                f"cached: {recipient_result.cached} · "
-                f"errors: {recipient_result.failed} · "
-                f"pending: {recipient_result.pending_after}"
-            )
-
             status = f"QSL sync completed: {result.total} QSO(s)"
         else:
             summary = (
-                f"Verarbeitet: {result.total}\n"
-                f"Neu: {result.created} · Aktualisiert: {result.updated} · "
-                f"Unverändert: {result.unchanged} · Ignoriert: {result.ignored}\n"
-                f"qsoUid-Mappings gespeichert: {result.mapped}"
+                f"{result.total} verarbeitet · {result.created} neu · "
+                f"{result.updated} aktualisiert · {result.unchanged} unverändert · "
+                f"Empfänger: {recipient_result.email} Mail / "
+                f"{recipient_result.no_email} ohne Mail / "
+                f"{recipient_result.pending_after} offen"
             )
-            if result.synced_at:
-                summary += f"\nServer-Synczeit: {result.synced_at}"
-
-            summary += (
-                f"\nEmpfänger geprüft: {recipient_result.processed} · "
-                f"mit Mail: {recipient_result.email} · "
-                f"ohne Mail: {recipient_result.no_email} · "
-                f"nicht gefunden: {recipient_result.not_found} · "
-                f"aus Cache: {recipient_result.cached} · "
-                f"Fehler: {recipient_result.failed} · "
-                f"noch offen: {recipient_result.pending_after}"
-            )
-
             status = f"QSL-Sync abgeschlossen: {result.total} QSO(s)"
 
         self.qsl_result_var.set(summary)
