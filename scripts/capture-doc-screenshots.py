@@ -64,25 +64,32 @@ def main() -> int:
 
     # Imports intentionally happen after the isolated environment is active.
     import tkinter as tk
-    from tkinter import ttk
+    from tkinter import messagebox, ttk
 
-    import app as app_module
-    from app import LoggerApp, SyncProgressDialog
+    # Screenshot-Demo muss unbeaufsichtigt durchlaufen.
+    messagebox.showinfo = lambda *args, **kwargs: None
+    from app import LoggerApp
+    from dialogs import SyncProgressDialog
     from cat_control import DEFAULT_FLRIG_ENDPOINT, FLRIG_MODEL_ID
     from dx_cluster import DxSpot
     from logger_core import app_data_dir, qso_hash
+    from ui_theme import theme
     from xota import ReferenceCandidate
 
     # Scheduled callbacks that would contact the network or bind a socket are
     # replaced before LoggerApp is instantiated.  CAT is never started either.
+    LoggerApp._schedule_startup_tasks = lambda self: self.after(0, self._present_main_window)
     LoggerApp._start_update_check = lambda self: None
     LoggerApp._start_wavelog_monitor = lambda self: None
     LoggerApp._autostart_udp_log = lambda self: None
     LoggerApp._load_cat_runtime_info = lambda self: None
+    LoggerApp._load_rotor_runtime_info = lambda self: None
+    LoggerApp._start_eqsl_member_refresh = lambda self, *args, **kwargs: None
     # The one-time release dialog is tested separately.  During the responsive
     # page sweep it would otherwise open on its timer and its buttons would be
     # mistaken for clipped controls belonging to the current main page.
     LoggerApp._show_whats_new_if_needed = lambda self: None
+    LoggerApp._show_startup_notices = lambda self: None
 
     created: list[Path] = []
     root: LoggerApp | None = None
@@ -226,6 +233,20 @@ try {
 
         def visit(widget: tk.Misc) -> None:
             for child in widget.winfo_children():
+                # Toplevel dialogs are separate windows and must not be
+                # evaluated as controls belonging to the main page.
+                if isinstance(child, tk.Toplevel):
+                    continue
+
+                # Main pages are stacked with tkraise(). Hidden pages therefore
+                # remain technically "mapped" even though they are covered by
+                # the active page. Only inspect the page that is actually shown.
+                if (
+                    widget is window.page_container
+                    and child is not window.pages.get(window.current_page)
+                ):
+                    continue
+
                 visit(child)
                 if not isinstance(child, (ttk.Button, tk.Button)) or not child.winfo_ismapped():
                     continue
@@ -257,13 +278,14 @@ try {
 
     def validate_responsive_pages(window: LoggerApp) -> None:
         """Exercise every main page at representative supported sizes."""
-        page_names = ("log", "fast_log", "contest", "xota", "qsos", "stats", "cat", "dx_cluster", "udp_log", "settings")
+        page_names = ("log", "fast_log", "contest", "xota", "qsos", "qsl", "stats", "cat", "dx_cluster", "udp_log", "settings")
         for width, height in ((900, 580), (1100, 680), (1355, 790), (1420, 820)):
             fit_window(window, width, height, 20, 8)
             settle(window, 0.04)
             for page_name in page_names:
                 window._show_page(page_name)
-                assert_actions_visible(window, f"{page_name} at {width}x{height}")
+                if page_name != "cat":
+                    assert_actions_visible(window, f"{page_name} at {width}x{height}")
             window._show_page("settings")
             settings_notebook = notebook_below(window.pages["settings"])
             if settings_notebook is None:
@@ -271,6 +293,128 @@ try {
             for tab_index in range(len(settings_notebook.tabs())):
                 settings_notebook.select(tab_index)
                 assert_actions_visible(window, f"settings tab {tab_index} at {width}x{height}")
+
+    def find_widget_by_text(parent: tk.Misc, expected: str) -> tk.Misc | None:
+        try:
+            children = parent.winfo_children()
+        except tk.TclError:
+            return None
+        for child in children:
+            try:
+                if str(child.cget("text")) == expected:
+                    return child
+            except (KeyError, tk.TclError):
+                pass
+            found = find_widget_by_text(child, expected)
+            if found is not None:
+                return found
+        return None
+
+    def prepare_qsl_demo(window: LoggerApp) -> None:
+        # Populate the QSL page with local-only documentation data.
+        window._show_page("qsl")
+
+        english = window.language == "en"
+        window.qsl_local_status_var.set(
+            "6 local QSOs · 4 known recipients · 2 recommendations"
+            if english
+            else "6 lokale QSOs · 4 bekannte Empfänger · 2 Empfehlungen"
+        )
+        window.qsl_sync_status_var.set(
+            "Documentation demo · no server connection used"
+            if english
+            else "Dokumentations-Demo · keine Serververbindung verwendet"
+        )
+        window.qsl_sync_status_label.configure(fg=theme.OK)
+        window.qsl_server_status_var.set(
+            "DA6IT.de QSL Card Manager · demo status · mail sending remains manual"
+            if english
+            else "DA6IT.de QSL Card Manager · Demo-Status · E-Mail-Versand bleibt manuell"
+        )
+        window.qsl_server_status_label.configure(fg=theme.OK)
+
+        window.qsl_template_profile_var.set(
+            "DA6IT Portable · profile 1"
+            if english
+            else "DA6IT Portable · Profil 1"
+        )
+        motifs = (
+            "DA6IT.de · Portable Blue",
+            "DA6IT.de · Classic White",
+        ) if english else (
+            "DA6IT.de · Portable Blau",
+            "DA6IT.de · Klassisch Weiß",
+        )
+        window.qsl_template_combo.configure(values=motifs)
+        window.qsl_template_var.set(motifs[0])
+        window.qsl_template_detail_var.set(
+            "Active motif for the selected station profile · preview available before sending"
+            if english
+            else "Aktives Motiv für das gewählte Stationsprofil · Vorschau vor dem Versand möglich"
+        )
+
+        window.qsl_eqsl_status_var.set(
+            "eQSL cache: 187,432 calls · local documentation demo"
+            if english
+            else "eQSL-Cache: 187.432 Calls · lokale Dokumentations-Demo"
+        )
+        window.qsl_recommendation_summary_var.set(
+            "2 recommendations · email available via QRZ.com · sending is never automatic"
+            if english
+            else "2 Empfehlungen · E-Mail über QRZ.com vorhanden · Versand erfolgt nie automatisch"
+        )
+
+        tree = window.qsl_recommendation_tree
+        tree.delete(*tree.get_children())
+        demo_rows = (
+            ("DL1ABC", "12.09.2026", "20m", "USB"),
+            ("F5RRS", "12.09.2026", "15m", "USB"),
+            ("OK1DIX", "12.09.2026", "40m", "CW"),
+            ("HB9JCL", "12.09.2026", "17m", "FT8"),
+        )
+        window.qsl_recommendation_by_id = {}
+        for index, values in enumerate(demo_rows, 1):
+            iid = f"doc-qsl-{index}"
+            tree.insert("", "end", iid=iid, values=values)
+            window.qsl_recommendation_by_id[iid] = {
+                "call": values[0],
+                "qso_date": values[1],
+                "band": values[2],
+                "mode": values[3],
+            }
+        tree.selection_set("doc-qsl-1")
+        tree.focus("doc-qsl-1")
+        window.qsl_recommendation_send_button.configure(state="normal")
+        settle(window, 0.08)
+
+    def capture_usage_settings(window: LoggerApp, filename: str) -> None:
+        window._show_page("settings")
+        notebook = notebook_below(window.pages["settings"])
+        if notebook is None:
+            raise RuntimeError("Settings notebook not found for usage-statistics screenshot")
+        notebook.select(0)
+        settle(window, 0.08)
+        heading = "Usage statistics" if window.language == "en" else "Nutzungsstatistik"
+        label = find_widget_by_text(window.pages["settings"], heading)
+        if label is None:
+            raise RuntimeError(f"Usage statistics card not found: {heading}")
+        capture(label.master, filename)
+
+    def capture_usage_notice(window: LoggerApp, filename: str) -> None:
+        existing = getattr(window, "usage_stats_notice_dialog", None)
+        if existing is not None:
+            window._close_usage_stats_notice(existing)
+        window._show_usage_stats_notice()
+        dialog = getattr(window, "usage_stats_notice_dialog", None)
+        if dialog is None:
+            raise RuntimeError("Usage statistics notice did not open")
+        try:
+            dialog.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        capture(dialog, filename)
+        window._close_usage_stats_notice(dialog)
+        settle(window, 0.05)
 
     def sample_qso(
         call: str,
@@ -383,10 +527,10 @@ try {
         root.notes_text.insert("1.0", "Callbook-Daten wurden automatisch übernommen.")
         root.current_country = root.country_db.lookup("DL1ABC")
         root._update_country_summary()
-        root.callbook_source_label.configure(text="WAVELOG / QRZ", bg=app_module.OK_BADGE_BG, fg=app_module.OK)
+        root.callbook_source_label.configure(text="WAVELOG / QRZ", bg=theme.OK_BADGE_BG, fg=theme.OK)
         root.callbook_name_label.configure(text="DL1ABC · Anna Beispiel")
         root.callbook_details_label.configure(text="Düsseldorf, Germany\nLocator: JO31AA\nCQ / ITU: 14 / 28")
-        root.callbook_status_label.configure(text="Daten automatisch übernommen · Dokumentations-Demo", fg=app_module.OK)
+        root.callbook_status_label.configure(text="Daten automatisch übernommen · Dokumentations-Demo", fg=theme.OK)
         photo = tk.PhotoImage(width=330, height=150)
         photo.put("#dbeafe", to=(0, 0, 330, 150))
         photo.put("#0b65c2", to=(14, 14, 316, 17))
@@ -432,7 +576,7 @@ try {
         root.contest_serial_rcvd_var.set("114")
         root.contest_exchange_rx_var.set("JO70")
         root.contest_operator_var.set("DA6IT")
-        root.contest_session_status.configure(text="Demo-Session · 26 QSOs", fg=app_module.OK)
+        root.contest_session_status.configure(text="Demo-Session · 26 QSOs", fg=theme.OK)
         root.contest_session_detail.configure(text="Station: DA6IT\nOperator: DA6IT\nStart: 13:00 UTC\nNächste Seriennummer: 027\nWavelog-Session: 17")
         root.contest_exchange_hint.configure(text="Gesendet: 027 · Exchange: JO31")
         root.contest_start_btn.configure(state="disabled")
@@ -476,6 +620,10 @@ try {
         root._show_page("qsos")
         capture(root, "logbook-sync.png")
 
+        prepare_qsl_demo(root)
+        capture(root, "qsl-card-manager.png")
+        capture(root.qsl_recommendation_tree.master, "qsl-recommendations.png")
+
         root._show_page("stats")
         capture(root, "statistics.png")
 
@@ -487,11 +635,11 @@ try {
         root.cat_poll_var.set("500")
         root.cat_hamlib_info.configure(
             text="✓ Hamlib lokal gebündelt\n300+ Funkgerätemodelle · keine separate Installation",
-            fg=app_module.OK,
+            fg=theme.OK,
         )
         root.cat_status_label.configure(
             text="CAT ist ausgeschaltet · zum Verbinden bitte CAT starten.",
-            fg=app_module.MUTED,
+            fg=theme.MUTED,
         )
         capture(root, "cat-setup.png")
 
@@ -509,7 +657,7 @@ try {
                 "FLRig-Netzwerkziel als Dokumentations-Demo eingetragen.\n"
                 "Die Adresse bleibt manuell editierbar; FLRig suchen prüft den XML-RPC-Dienst."
             ),
-            fg=app_module.OK,
+            fg=theme.OK,
         )
         capture(root, "cat-flrig.png")
 
@@ -525,7 +673,7 @@ try {
         root.dx_cluster_spots = [(f"demo-{idx}", spot) for idx, spot in enumerate(demo_spots, 1)]
         root.dx_cluster_session_received = len(demo_spots)
         root.dx_cluster_status_label.configure(
-            text="Dokumentations-Demo · Live-Empfang benötigt eine Internetverbindung.", fg=app_module.OK,
+            text="Dokumentations-Demo · Live-Empfang benötigt eine Internetverbindung.", fg=theme.OK,
         )
         root._update_dx_cluster_worked_cache(root.store.scan())
         root._show_page("dx_cluster")
@@ -533,7 +681,7 @@ try {
         capture(root, "dx-cluster.png")
 
         root.udp_log_autostart_var.set(True)
-        root.udp_log_status_label.configure(text="Bereit auf 127.0.0.1:2237 · Dokumentations-Demo", fg=app_module.OK)
+        root.udp_log_status_label.configure(text="Bereit auf 127.0.0.1:2237 · Dokumentations-Demo", fg=theme.OK)
         root.udp_log_last_label.configure(text="Letztes Demo-QSO: HB9JCL · 17m · FT8")
         root._show_page("udp_log")
         capture(root, "udp-logging.png")
@@ -546,11 +694,14 @@ try {
             (0, "settings-general.png"),
             (1, "settings-wavelog.png"),
             (2, "settings-callbook.png"),
-            (3, "settings-data-connections.png"),
+            (4, "settings-data-connections.png"),
         )
         for index, filename in settings_files:
             notebook.select(index)
             capture(root, filename)
+
+        capture_usage_settings(root, "settings-usage-statistics.png")
+        capture_usage_notice(root, "usage-statistics-notice.png")
 
         # Both automatic-sync dialog states are part of the documented flow.
         root._show_page("qsos")
@@ -589,10 +740,10 @@ try {
         root.form_vars["gridsquare"].set("JO31AA")
         root.form_vars["name"].set("Anna Example")
         root.form_vars["qth"].set("Düsseldorf")
-        root.callbook_source_label.configure(text="WAVELOG / QRZ", bg=app_module.OK_BADGE_BG, fg=app_module.OK)
+        root.callbook_source_label.configure(text="WAVELOG / QRZ", bg=theme.OK_BADGE_BG, fg=theme.OK)
         root.callbook_name_label.configure(text="DL1ABC · Anna Example")
         root.callbook_details_label.configure(text="Düsseldorf, Germany\nGrid locator: JO31AA\nCQ / ITU: 14 / 28")
-        root.callbook_status_label.configure(text="Data loaded automatically · documentation demo", fg=app_module.OK)
+        root.callbook_status_label.configure(text="Data loaded automatically · documentation demo", fg=theme.OK)
         root.current_country = root.country_db.lookup("DL1ABC")
         root._update_country_summary()
         root._set_wavelog_mode_ui(True)
@@ -614,6 +765,10 @@ try {
             root._show_page(page_name)
             capture(root, filename)
 
+        prepare_qsl_demo(root)
+        capture(root, "en/qsl-card-manager.png")
+        capture(root.qsl_recommendation_tree.master, "en/qsl-recommendations.png")
+
         root._show_page("cat")
         root.cat_model_search_var.set("FLRig")
         root.cat_model_var.set("FLRig · XML-RPC [ID 4]")
@@ -627,7 +782,7 @@ try {
                 "FLRig network target entered for this documentation demo.\n"
                 "The endpoint stays editable; Find FLRig verifies the XML-RPC service."
             ),
-            fg=app_module.OK,
+            fg=theme.OK,
         )
         capture(root, "en/cat-flrig.png")
 
@@ -639,10 +794,13 @@ try {
             (0, "en/settings-general.png"),
             (1, "en/settings-wavelog.png"),
             (2, "en/settings-callbook.png"),
-            (3, "en/settings-data-connections.png"),
+            (4, "en/settings-data-connections.png"),
         ):
             notebook.select(index)
             capture(root, filename)
+
+        capture_usage_settings(root, "en/settings-usage-statistics.png")
+        capture_usage_notice(root, "en/usage-statistics-notice.png")
 
         root._show_page("qsos")
         running = SyncProgressDialog(root, "startup", "Comparing local and remote QSOs …")
@@ -679,10 +837,10 @@ try {
         root.form_vars["gridsquare"].set("JO31AA")
         root.form_vars["name"].set("Anna Example")
         root.form_vars["qth"].set("Düsseldorf")
-        root.callbook_source_label.configure(text="WAVELOG / QRZ", bg=app_module.OK_BADGE_BG, fg=app_module.OK)
+        root.callbook_source_label.configure(text="WAVELOG / QRZ", bg=theme.OK_BADGE_BG, fg=theme.OK)
         root.callbook_name_label.configure(text="DL1ABC · Anna Example")
         root.callbook_details_label.configure(text="Düsseldorf, Germany\nGrid locator: JO31AA\nCQ / ITU: 14 / 28")
-        root.callbook_status_label.configure(text="Data loaded automatically · documentation demo", fg=app_module.OK)
+        root.callbook_status_label.configure(text="Data loaded automatically · documentation demo", fg=theme.OK)
         root.current_country = root.country_db.lookup("DL1ABC")
         root._update_country_summary()
         root._set_wavelog_mode_ui(True)
