@@ -3,6 +3,8 @@ from __future__ import annotations
 import atexit
 import re
 import threading
+import urllib.parse
+import webbrowser
 from collections import Counter
 from datetime import datetime, timezone
 import tkinter as tk
@@ -160,6 +162,14 @@ class DxClusterFeatureMixin:
         actions = ttk.Frame(table, style="Card.TFrame")
         actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(actions, text="QSO übernehmen", style="Primary.TButton", command=self._use_selected_dx_spot).pack(side="left")
+        self.dx_cluster_qrz_button = ttk.Button(
+            actions,
+            text="QRZ.com öffnen",
+            style="Secondary.TButton",
+            command=self._open_selected_dx_spot_qrz,
+            state="disabled",
+        )
+        self.dx_cluster_qrz_button.pack(side="left", padx=(8, 0))
         tk.Label(
             actions, text="Überschriften sortieren · neu: hellblau · gleicher Mode gearbeitet: grün · Doppelklick stimmt TRX ab.",
             bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9),
@@ -371,6 +381,8 @@ class DxClusterFeatureMixin:
         self.dx_cluster_visible_ids = []
         self.dx_cluster_selected_id = None
         self.dx_cluster_seen_keys.clear()
+        if hasattr(self, "dx_cluster_qrz_button"):
+            self.dx_cluster_qrz_button.configure(state="disabled")
         self._refresh_dx_cluster_spots()
 
     def _dx_cluster_time_filter_changed(self, _event=None):
@@ -556,6 +568,10 @@ class DxClusterFeatureMixin:
 
         if selected_id not in self.dx_cluster_spot_by_id:
             self.dx_cluster_selected_id = None
+        if hasattr(self, "dx_cluster_qrz_button"):
+            self.dx_cluster_qrz_button.configure(
+                state="normal" if self.dx_cluster_selected_id else "disabled",
+            )
         self.dx_cluster_tree.configure(state="disabled")
         if old_y:
             self.dx_cluster_tree.yview_moveto(old_y[0])
@@ -588,6 +604,8 @@ class DxClusterFeatureMixin:
         self.dx_cluster_selected_id = self.dx_cluster_visible_ids[visible_index]
         self.dx_cluster_tree.tag_remove("selected", "1.0", "end")
         self.dx_cluster_tree.tag_add("selected", f"{line}.0", f"{line}.end")
+        if hasattr(self, "dx_cluster_qrz_button"):
+            self.dx_cluster_qrz_button.configure(state="normal")
         return "break"
 
     def _dx_cluster_table_double_click(self, event):
@@ -600,6 +618,33 @@ class DxClusterFeatureMixin:
 
     def _selected_dx_cluster_spot(self) -> DxSpot | None:
         return self.dx_cluster_spot_by_id.get(self.dx_cluster_selected_id or "")
+
+    def _open_selected_dx_spot_qrz(self):
+        spot = self._selected_dx_cluster_spot()
+        if spot is None:
+            messagebox.showinfo("DX Cluster", "Bitte zuerst einen DX-Spot auswählen.", parent=self)
+            return
+        callsign = (spot.call or "").strip().upper()
+        if not callsign:
+            return
+        url = "https://www.qrz.com/db/" + urllib.parse.quote(callsign, safe="")
+        try:
+            opened = webbrowser.open_new_tab(url)
+        except Exception as exc:
+            messagebox.showerror(
+                "QRZ.com öffnen",
+                f"QRZ.com konnte nicht geöffnet werden:\n{exc}",
+                parent=self,
+            )
+            return
+        if not opened:
+            messagebox.showwarning(
+                "QRZ.com öffnen",
+                "Der Standardbrowser konnte QRZ.com nicht öffnen.",
+                parent=self,
+            )
+            return
+        self.status_var.set(f"QRZ.com geöffnet: {callsign}")
 
     def _use_selected_dx_spot(self):
         spot = self._selected_dx_cluster_spot()

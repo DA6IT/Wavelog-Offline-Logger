@@ -7,6 +7,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 import tkinter as tk
@@ -77,6 +78,7 @@ class LogbookFeatureMixin:
         self.call_entry.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0, 14))
         self.call_entry.bind("<KeyRelease>", self._call_changed)
         self.call_entry.bind("<Return>", lambda e: self.save_qso())
+        self.call_var.trace_add("write", lambda *_args: self._update_qrz_page_button())
 
         self.freq_var = tk.StringVar()
         self.band_var = tk.StringVar(value="20m")
@@ -194,7 +196,22 @@ class LogbookFeatureMixin:
             bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 8), justify="left", anchor="w", wraplength=350,
         )
         self.callbook_status_label.grid(row=10, column=0, sticky="ew", pady=(5, 0))
-        ttk.Button(right, text="Callbook neu laden", style="Secondary.TButton", command=self._manual_callbook_lookup).grid(row=11, column=0, sticky="w", pady=(7, 0))
+        callbook_actions = ttk.Frame(right, style="Card.TFrame")
+        callbook_actions.grid(row=11, column=0, sticky="w", pady=(7, 0))
+        ttk.Button(
+            callbook_actions,
+            text="Callbook neu laden",
+            style="Secondary.TButton",
+            command=self._manual_callbook_lookup,
+        ).pack(side="left")
+        self.qrz_page_button = ttk.Button(
+            callbook_actions,
+            text="QRZ.com öffnen",
+            style="Secondary.TButton",
+            command=self._open_current_qrz_page,
+            state="disabled",
+        )
+        self.qrz_page_button.pack(side="left", padx=(8, 0))
 
         ttk.Separator(right).grid(row=12, column=0, sticky="ew", pady=12)
         ttk.Label(right, text="DXCC · offline", style="CardTitle.TLabel").grid(row=13, column=0, sticky="w")
@@ -407,6 +424,61 @@ class LogbookFeatureMixin:
 
     def _manual_callbook_lookup(self):
         self._schedule_callbook_lookup(self.call_var.get().strip().upper(), force=True)
+
+    def _update_qrz_page_button(self) -> None:
+        if not hasattr(self, "qrz_page_button"):
+            return
+        callsign = self.call_var.get().strip().upper()
+        self.qrz_page_button.configure(
+            state="normal" if lookup_candidate(callsign) else "disabled",
+        )
+
+    def _open_current_qrz_page(self) -> None:
+        callsign = self.call_var.get().strip().upper()
+        if not lookup_candidate(callsign):
+            messagebox.showinfo(
+                "QRZ.com",
+                (
+                    "Please enter a complete callsign first."
+                    if self.language == "en"
+                    else "Bitte zuerst ein vollständiges Rufzeichen eingeben."
+                ),
+                parent=self,
+            )
+            return
+
+        url = "https://www.qrz.com/db/" + urllib.parse.quote(callsign, safe="")
+        try:
+            opened = webbrowser.open_new_tab(url)
+        except Exception as exc:
+            messagebox.showerror(
+                "QRZ.com",
+                (
+                    f"QRZ.com could not be opened:\n{exc}"
+                    if self.language == "en"
+                    else f"QRZ.com konnte nicht geöffnet werden:\n{exc}"
+                ),
+                parent=self,
+            )
+            return
+
+        if not opened:
+            messagebox.showwarning(
+                "QRZ.com",
+                (
+                    "The default browser could not open QRZ.com."
+                    if self.language == "en"
+                    else "Der Standardbrowser konnte QRZ.com nicht öffnen."
+                ),
+                parent=self,
+            )
+            return
+
+        self.status_var.set(
+            f"QRZ.com opened: {callsign}"
+            if self.language == "en"
+            else f"QRZ.com geöffnet: {callsign}"
+        )
 
     def _start_callbook_lookup(self, callsign: str, generation: int, force: bool = False):
         self.callbook_lookup_job = None

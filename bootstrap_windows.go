@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.20.2"
+	appVersion   = "0.21.0"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -64,6 +64,9 @@ var callbookSource []byte
 
 //go:embed ui_preferences.py
 var uiPreferencesSource []byte
+
+//go:embed usage_stats.py
+var usageStatsSource []byte
 
 //go:embed notifications.py
 var notificationsSource []byte
@@ -115,6 +118,9 @@ var qslDeliverySource []byte
 
 //go:embed qsl_background.py
 var qslBackgroundSource []byte
+
+//go:embed qsl_eqsl.py
+var qslEqslSource []byte
 
 //go:embed feature_*.py
 var featureFS embed.FS
@@ -353,6 +359,9 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "ui_preferences.py"), uiPreferencesSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "usage_stats.py"), usageStatsSource, 0644); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "notifications.py"), notificationsSource, 0644); err != nil {
 		return err
 	}
@@ -402,6 +411,9 @@ func writeAppFiles(appDir string) error {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(appDir, "qsl_background.py"), qslBackgroundSource, 0644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "qsl_eqsl.py"), qslEqslSource, 0644); err != nil {
 		return err
 	}
 	featureNames, err := featureFileNames()
@@ -490,6 +502,7 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "dx_cluster.py"),
 		filepath.Join(appDir, "callbook.py"),
 		filepath.Join(appDir, "ui_preferences.py"),
+		filepath.Join(appDir, "usage_stats.py"),
 		filepath.Join(appDir, "notifications.py"),
 		filepath.Join(appDir, "xota.py"),
 		filepath.Join(appDir, "data_backup.py"),
@@ -507,6 +520,7 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "qsl_renderer.py"),
 		filepath.Join(appDir, "qsl_delivery.py"),
 		filepath.Join(appDir, "qsl_background.py"),
+		filepath.Join(appDir, "qsl_eqsl.py"),
 		filepath.Join(appDir, "cty.dat"),
 		filepath.Join(appDir, "assets", "da6it-logo.webp"),
 		filepath.Join(appDir, "assets", "da6it-icon.png"),
@@ -546,6 +560,7 @@ func embeddedAppFilesMatch(appDir string) bool {
 		"dx_cluster.py":       dxClusterSource,
 		"callbook.py":         callbookSource,
 		"ui_preferences.py":   uiPreferencesSource,
+		"usage_stats.py":      usageStatsSource,
 		"notifications.py":    notificationsSource,
 		"xota.py":             xotaSource,
 		"data_backup.py":      dataBackupSource,
@@ -562,6 +577,7 @@ func embeddedAppFilesMatch(appDir string) bool {
 		"qsl_templates.py":       qslTemplatesSource,
 		"qsl_renderer.py":        qslRendererSource,
 		"qsl_delivery.py":        qslDeliverySource,
+		"qsl_eqsl.py":            qslEqslSource,
 		"cty.dat":             ctyData,
 		filepath.Join("assets", "da6it-logo.webp"): da6itLogo,
 		filepath.Join("assets", "da6it-icon.png"):  da6itIcon,
