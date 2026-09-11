@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Iterable
 
 from logger_core import adif_fields_to_qso, parse_adif
+from qso_duplicates import find_duplicate_qso as _find_duplicate_qso
 
 
 WSJTX_MAGIC = 0xADBCCBDA
@@ -337,14 +338,7 @@ def qso_identity(qso: dict[str, Any]) -> tuple[str, ...]:
 
 
 def find_duplicate_qso(qsos: Iterable[dict[str, Any]], incoming: dict[str, Any]) -> dict[str, Any] | None:
-    incoming_id = str(incoming.get("local_id") or "")
-    identity = qso_identity(incoming)
-    for qso in qsos:
-        if incoming_id and str(qso.get("local_id") or "") == incoming_id:
-            return qso
-        if qso_identity(qso) == identity:
-            return qso
-    return None
+    return _find_duplicate_qso(qsos, incoming)
 
 
 class UdpLogReceiver:

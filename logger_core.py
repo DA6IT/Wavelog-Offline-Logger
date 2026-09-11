@@ -22,8 +22,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from qso_duplicates import QsoMatcher
+
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.20.1"
+VERSION = "0.20.2"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -1228,15 +1230,38 @@ class LogStore:
             updated["_file"] = str(new_path)
             return updated
 
-    def delete(self, local_id: str) -> bool:
+    def delete_many(self, local_ids: Iterable[str]) -> list[str]:
+        requested = []
+        seen = set()
+        for value in local_ids:
+            local_id = str(value or "").strip()
+            if local_id and local_id not in seen:
+                requested.append(local_id)
+                seen.add(local_id)
+        if not requested:
+            return []
+
         with self.lock:
-            old = self.find(local_id)
-            if not old:
-                return False
-            path = Path(old["_file"])
-            records = [q for q in self._read_file(path) if q.get("local_id") != local_id]
-            self._write_file(path, records)
-            return True
+            self._recover_pending_append(self.canonical_path)
+            records = self._read_file(self.canonical_path)
+            wanted = set(requested)
+            deleted = {
+                str(row.get("local_id") or "")
+                for row in records
+                if str(row.get("local_id") or "") in wanted
+            }
+            if not deleted:
+                return []
+            kept = [
+                row
+                for row in records
+                if str(row.get("local_id") or "") not in deleted
+            ]
+            self._write_file(self.canonical_path, kept)
+            return [local_id for local_id in requested if local_id in deleted]
+
+    def delete(self, local_id: str) -> bool:
+        return bool(self.delete_many((local_id,)))
 
     @staticmethod
     def _natural_key(qso: dict[str, Any]) -> tuple[str, ...]:
@@ -1250,7 +1275,7 @@ class LogStore:
             incoming = self._read_file_strict(source)
             existing = self.scan()
             existing_ids = {str(row.get("local_id") or "") for row in existing}
-            existing_keys = {self._natural_key(row) for row in existing}
+            duplicate_matcher = QsoMatcher(existing)
             imported, skipped, invalid = [], 0, []
             for index, row in enumerate(incoming, start=1):
                 if not row.get("call") or not row.get("qso_date") or not row.get("time_on"):
@@ -1261,15 +1286,14 @@ class LogStore:
                 if not row.get("band") or not row.get("mode"):
                     invalid.append(f"Datensatz {index}: BAND oder MODE fehlt")
                     continue
-                natural_key = self._natural_key(row)
-                if natural_key in existing_keys:
+                if duplicate_matcher.find(row) is not None:
                     skipped += 1
                     continue
                 local_id = str(row.get("local_id") or "")
                 if not local_id or local_id in existing_ids:
                     row["local_id"] = str(uuid.uuid4())
                 existing_ids.add(row["local_id"])
-                existing_keys.add(natural_key)
+                duplicate_matcher.add(row)
                 imported.append(row)
             backup = self._backup_files([self.canonical_path], "before-adif-import")
             combined = existing + imported
@@ -1450,15 +1474,42 @@ class MetadataDB:
             self.conn.commit()
 
     def mark_pending_delete(self, local_id: str):
+        self.mark_pending_delete_many((local_id,))
+
+    def mark_pending_delete_many(self, local_ids: Iterable[str]) -> int:
+        requested = []
+        seen = set()
+        for value in local_ids:
+            local_id = str(value or "").strip()
+            if local_id and local_id not in seen:
+                requested.append(local_id)
+                seen.add(local_id)
+        if not requested:
+            return 0
+
+        changed = 0
+        now = utc_now_iso()
         with self.lock:
-            r = self.conn.execute("SELECT * FROM sync_meta WHERE local_id=?", (local_id,)).fetchone()
-            if not r:
-                return
-            if r["wavelog_id"] is None:
-                self.conn.execute("DELETE FROM sync_meta WHERE local_id=?", (local_id,))
-            else:
-                self.conn.execute("UPDATE sync_meta SET status='pending_delete',updated_at=? WHERE local_id=?", (utc_now_iso(), local_id))
+            for local_id in requested:
+                r = self.conn.execute(
+                    "SELECT wavelog_id FROM sync_meta WHERE local_id=?",
+                    (local_id,),
+                ).fetchone()
+                if not r:
+                    continue
+                if r["wavelog_id"] is None:
+                    self.conn.execute(
+                        "DELETE FROM sync_meta WHERE local_id=?",
+                        (local_id,),
+                    )
+                else:
+                    self.conn.execute(
+                        "UPDATE sync_meta SET status='pending_delete',updated_at=? WHERE local_id=?",
+                        (now, local_id),
+                    )
+                changed += 1
             self.conn.commit()
+        return changed
 
     def reconcile_index(self, local_qsos: list[dict[str, Any]]):
         ids = {q["local_id"] for q in local_qsos if q.get("local_id")}
@@ -1614,6 +1665,7 @@ class WavelogOnlineSettings:
     token: str
     station_id: int
     auto_sync: bool = False
+    auto_sync_delay_seconds: int = 300
     full_sync_on_start: bool = False
     full_sync_on_exit: bool = False
 
@@ -1624,11 +1676,18 @@ class WavelogOnlineSettings:
             station_id = int(raw_station_id)
         except ValueError:
             station_id = 0
+        raw_delay = str(get_setting("auto_sync_delay_seconds", "300") or "300").strip()
+        try:
+            auto_sync_delay_seconds = int(raw_delay)
+        except ValueError:
+            auto_sync_delay_seconds = 300
+        auto_sync_delay_seconds = min(3600, max(60, auto_sync_delay_seconds))
         return cls(
             base_url=str(get_setting("wavelog_url", "") or "").strip(),
             token=str(get_token() or "").strip(),
             station_id=station_id,
             auto_sync=str(get_setting("auto_sync_online", "0") or "0") == "1",
+            auto_sync_delay_seconds=auto_sync_delay_seconds,
             full_sync_on_start=str(get_setting("full_sync_on_start", "0") or "0") == "1",
             full_sync_on_exit=str(get_setting("full_sync_on_exit", "0") or "0") == "1",
         )

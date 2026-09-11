@@ -19,6 +19,8 @@ from logger_core import (
     qso_to_adif_fields,
 )
 
+from qso_duplicates import DEFAULT_TIME_TOLERANCE_SECONDS, QsoMatcher
+
 
 SETTING_ENABLED = "wsjtx_sync_enabled"  # legacy compatibility
 SETTING_LOG_PATH = "wsjtx_sync_log_path"
@@ -27,7 +29,6 @@ SETTING_ON_STARTUP = "wsjtx_sync_on_startup"
 SETTING_ON_SHUTDOWN = "wsjtx_sync_on_shutdown"
 SETTING_ON_MANUAL = "wsjtx_sync_on_manual"
 
-DEFAULT_TIME_TOLERANCE_SECONDS = 90
 _MISSING = "__WSJTX_SETTING_MISSING__"
 
 
@@ -335,84 +336,6 @@ def _valid_qso(qso: dict[str, Any]) -> bool:
         and qso.get("band")
         and qso.get("mode")
     )
-
-
-def _qso_datetime(qso: dict[str, Any]) -> datetime | None:
-    date = _normalize_date(qso.get("qso_date"))
-    time_on = _normalize_time(qso.get("time_on"))
-    try:
-        return datetime.strptime(date + time_on, "%Y-%m-%d%H%M%S")
-    except ValueError:
-        return None
-
-
-def _match_bucket(qso: dict[str, Any]) -> tuple[str, str, str]:
-    return (
-        str(qso.get("call") or "").strip().upper(),
-        str(qso.get("band") or "").strip().upper(),
-        str(qso.get("mode") or "").strip().upper(),
-    )
-
-
-def _station_compatible(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    a = str(left.get("station_call") or "").strip().upper()
-    b = str(right.get("station_call") or "").strip().upper()
-    return not (a and b and a != b)
-
-
-def _frequency_compatible(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    try:
-        a = float(str(left.get("freq") or "").replace(",", "."))
-        b = float(str(right.get("freq") or "").replace(",", "."))
-    except (TypeError, ValueError):
-        return True
-
-    return abs(a - b) <= 0.10
-
-
-class QsoMatcher:
-    def __init__(
-        self,
-        qsos: Iterable[dict[str, Any]],
-        tolerance_seconds: int = DEFAULT_TIME_TOLERANCE_SECONDS,
-    ):
-        self.tolerance_seconds = max(0, int(tolerance_seconds))
-        self.by_bucket: dict[
-            tuple[str, str, str],
-            list[tuple[datetime | None, dict[str, Any]]],
-        ] = {}
-
-        for qso in qsos:
-            self.add(qso)
-
-    def add(self, qso: dict[str, Any]) -> None:
-        self.by_bucket.setdefault(_match_bucket(qso), []).append(
-            (_qso_datetime(qso), qso)
-        )
-
-    def find(self, qso: dict[str, Any]) -> dict[str, Any] | None:
-        target_dt = _qso_datetime(qso)
-
-        for candidate_dt, candidate in self.by_bucket.get(_match_bucket(qso), []):
-            if not _station_compatible(qso, candidate):
-                continue
-            if not _frequency_compatible(qso, candidate):
-                continue
-
-            if target_dt is None or candidate_dt is None:
-                if (
-                    _normalize_date(qso.get("qso_date"))
-                    == _normalize_date(candidate.get("qso_date"))
-                    and _normalize_time(qso.get("time_on"))
-                    == _normalize_time(candidate.get("time_on"))
-                ):
-                    return candidate
-                continue
-
-            if abs((target_dt - candidate_dt).total_seconds()) <= self.tolerance_seconds:
-                return candidate
-
-        return None
 
 
 WSJTX_EXPORT_FIELDS = [

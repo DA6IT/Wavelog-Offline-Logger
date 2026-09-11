@@ -110,7 +110,7 @@ class WavelogOnlineFeatureMixin:
                 # next real application start, not immediately after saving.
                 self.startup_full_sync_pending = False
             if not was_online and not self.sync_busy:
-                self._request_auto_sync(delay_ms=600)
+                self._request_auto_sync()
             self._schedule_wavelog_check(60_000)
         else:
             self.startup_full_sync_pending = False
@@ -120,7 +120,7 @@ class WavelogOnlineFeatureMixin:
                 write_startup_log("Wavelog-Erreichbarkeitsprüfung: " + error)
             self._schedule_wavelog_check(15_000)
 
-    def _request_auto_sync(self, *, delay_ms: int = 1200):
+    def _request_auto_sync(self, *, delay_ms: int | None = None):
         if self.closing or self.close_requested or self.sync_progress_dialog is not None:
             return
         if any(profile_id == self.active_profile_id for profile_id, _local_id in self.external_enrichment_pending):
@@ -133,11 +133,12 @@ class WavelogOnlineFeatureMixin:
             candidate_count=candidate_count,
         ):
             return
+        # Batch semantics: the first new QSO starts the timer. Further QSOs
+        # join the same batch instead of postponing the upload indefinitely.
         if self.auto_sync_job is not None:
-            try:
-                self.after_cancel(self.auto_sync_job)
-            except Exception:
-                pass
+            return
+        if delay_ms is None:
+            delay_ms = settings.auto_sync_delay_seconds * 1000
         self.auto_sync_job = self.after(max(0, int(delay_ms)), self._run_auto_sync)
 
     def _run_auto_sync(self):
@@ -156,7 +157,7 @@ class WavelogOnlineFeatureMixin:
 
     def _local_sync_change(self):
         if self.wavelog_online:
-            self._request_auto_sync(delay_ms=1200)
+            self._request_auto_sync()
 
     def _start_new_qso_push(self):
         if self.sync_busy or self.closing or self.close_requested or self.sync_progress_dialog is not None:
@@ -205,7 +206,8 @@ class WavelogOnlineFeatureMixin:
             self._begin_close_sequence()
         else:
             # A QSO may have been logged while this small batch was running.
-            self._request_auto_sync(delay_ms=350)
+            # Start a fresh configured batch window for those newer records.
+            self._request_auto_sync()
 
     def _new_qso_push_failed(self, message: str):
         self.sync_busy = False

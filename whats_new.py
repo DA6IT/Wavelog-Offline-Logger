@@ -5,6 +5,13 @@ from __future__ import annotations
 # Avoid internal implementation terms, module names, APIs and developer jargon.
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
+    "0.20.2": (
+        "Der automatische Wavelog-Abgleich lässt sich jetzt verzögert ausführen; standardmäßig werden neue QSOs nach fünf Minuten gesammelt übertragen.",
+        "Mehrere QSOs können gemeinsam ausgewählt und deutlich schneller gelöscht werden. Bei bereits synchronisierten QSOs warnt der Logger klar vor der späteren Löschung in Wavelog.",
+        "Der Dublettenschutz für WSJT-X und externe digitale Logs wurde erweitert, damit wiederholte Abschlussmeldungen nicht unnötig doppelte oder dreifache QSOs erzeugen.",
+        "Auch bereits doppelte Einträge in einer WSJT-X-Logdatei werden beim Import zuverlässiger erkannt und übersprungen.",
+        "Vielen Dank an DO1DX für das hilfreiche Feedback und die Praxishinweise zu diesen Verbesserungen.",
+    ),
     "0.20.1": (
         "Die Vorschau von QSL-Karten wurde verbessert, damit sie noch zuverlässiger der später versendeten Karte entspricht.",
         "Änderungen an bereits bekannten QSOs werden jetzt zuverlässiger mit dem QSL Card Manager abgeglichen.",
@@ -66,6 +73,13 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 }
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
+    "0.20.2": (
+        "Automatic Wavelog synchronization can now be delayed; by default, new QSOs are collected and uploaded after five minutes.",
+        "Multiple QSOs can be selected and deleted together much faster. The Logger clearly warns when synchronized QSOs will also be removed from Wavelog during a later full sync.",
+        "Duplicate protection for WSJT-X and external digital logs has been improved so repeated final exchanges do not create unnecessary duplicate or triplicate QSOs.",
+        "Duplicates that already exist inside a WSJT-X log file are also detected and skipped more reliably during import.",
+        "Many thanks to DO1DX for the helpful feedback and practical input behind these improvements.",
+    ),
     "0.20.1": (
         "QSL card preview has been improved so it more reliably matches the card that is later sent.",
         "Changes to existing QSOs are now kept in sync with the QSL Card Manager more reliably.",

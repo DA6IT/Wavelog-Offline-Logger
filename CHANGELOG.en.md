@@ -2,6 +2,32 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.20.2 — 2026-09-11
+
+### Added
+
+- profile-specific configurable delay for automatic Wavelog uploads with choices from 1 to 60 minutes; the default is 5 minutes
+- multi-selection for QSO deletion with a combined safety prompt and a visible count of QSOs already linked to Wavelog
+- shared duplicate matching for WSJT-X synchronization, ADIF import and UDP logging
+
+### Changed
+
+- automatic synchronization now uses batch semantics: the first new QSO starts the timer and later QSOs do not keep postponing the upload
+- batch deletion reads and rewrites the local ADIF log only once, keeping deletion fast even for large logbooks
+- after deletion, the view stays near the next useful QSO instead of jumping to the top of the log
+- FT8/FT4 and other WSJT-family modes use tolerant matching for near-identical repeated contacts while other modes retain strict matching
+- duplicates that already exist inside the same imported WSJT-X ADIF file are detected during that import
+
+### Safety / Sync
+
+- remote deletion remains exclusive to a full synchronization; the normal delayed automatic push never deletes QSOs from Wavelog
+- deleting already synchronized QSOs now displays a clear warning that they will later be deleted from Wavelog
+- the local ADIF log remains the authoritative QSO data source
+
+### Thanks
+
+- Many thanks to **DO1DX** for the helpful feedback and practical input behind these improvements.
+
 ## 0.20.1 — 2026-09-09
 
 ### Fixed
