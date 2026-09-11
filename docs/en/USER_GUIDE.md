@@ -12,7 +12,9 @@ Open **Settings → General** to select **English** or **German**, Light or Dark
 
 On first start of v0.21.0, a dedicated notice is shown before any usage-statistics heartbeat is allowed. Closing the notice without choosing an option does not trigger a statistics transmission.
 
-![First-start usage-statistics notice](../screenshots/en/usage-statistics-notice.png) Save and restart the application after changing language or theme. These are app-wide preferences; station, Wavelog, CAT, cluster and UDP values remain profile-specific.
+![First-start usage-statistics notice](../screenshots/en/usage-statistics-notice.png)
+
+Save and restart the application after changing language or theme. These are app-wide preferences; station, Wavelog, CAT, cluster and UDP values remain profile-specific.
 
 Use the profile selector in the header to switch operating contexts. The app stops the old UDP listener before switching and starts the new profile's listener when its autostart option is enabled. A profile can be created, renamed, duplicated or deleted locally. Local profile deletion never deletes Wavelog data.
 
