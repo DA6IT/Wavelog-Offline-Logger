@@ -1043,6 +1043,11 @@ class QsoSyncFeatureMixin:
         reason: str = "manual",
         force_wsjtx: bool = False,
     ):
+        # Full reconciliation is intentionally available only through an
+        # explicit user action.  Automatic start/exit paths use
+        # ``_start_delta_sync`` and must not be able to reach this worker.
+        if automatic or reason != "manual":
+            return
         if self.sync_busy:
             return
         try:

@@ -125,6 +125,13 @@ class ShutdownDeltaSyncTests(unittest.TestCase):
         app.sync_now()
         self.assertEqual([{"automatic": False, "reason": "manual"}], calls)
 
+    def test_full_sync_rejects_automatic_or_shutdown_entrypoints(self):
+        app = object.__new__(QsoSyncFeatureMixin)
+        app.sync_busy = False
+        app._start_sync(automatic=True, reason="startup")
+        app._start_sync(automatic=False, reason="shutdown")
+        self.assertFalse(app.sync_busy)
+
     def test_cancelled_shutdown_delta_finalizes_close(self):
         app = _SyncProbe()
         app.sync_cancel_event.set()
