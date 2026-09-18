@@ -1,0 +1,41 @@
+name: Windows internal test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    if: github.ref == 'refs/heads/fullsync_improvement'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.10'
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.23.2'
+          cache: false
+
+      - name: Run selftests
+        shell: pwsh
+        run: python selftest.py
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: .\scripts\build-windows.ps1 -OutputDirectory dist -SkipTests
+
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-exe-internal-test
+          path: dist/*.exe
+          if-no-files-found: error
