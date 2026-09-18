@@ -326,7 +326,7 @@ settings_values = {
     "wavelog_url": "https://log.example",
     "station_profile_id": "7",
     "auto_sync_online": "1",
-    "full_sync_on_start": "1",
+    "delta_sync_on_start": "1",
     "full_sync_on_exit": "0",
 }
 online_settings = WavelogOnlineSettings.from_storage(
@@ -335,7 +335,7 @@ online_settings = WavelogOnlineSettings.from_storage(
 )
 assert online_settings.configured
 assert online_settings.auto_sync
-assert online_settings.full_sync_on_start and not online_settings.delta_sync_on_exit
+assert online_settings.delta_sync_on_start and not online_settings.delta_sync_on_exit
 assert online_settings.should_auto_sync(online=True, sync_busy=False, candidate_count=1)
 assert not online_settings.should_auto_sync(online=False, sync_busy=False, candidate_count=1)
 assert not online_settings.should_auto_sync(online=True, sync_busy=True, candidate_count=1)
@@ -343,7 +343,7 @@ assert not online_settings.should_auto_sync(online=True, sync_busy=False, candid
 disabled_settings = WavelogOnlineSettings.from_storage(lambda _key, default="": default, lambda: "")
 assert not disabled_settings.configured
 assert not disabled_settings.auto_sync
-assert not disabled_settings.full_sync_on_start and not disabled_settings.delta_sync_on_exit
+assert not disabled_settings.delta_sync_on_start and not disabled_settings.delta_sync_on_exit
 
 with TemporaryDirectory() as d:
     root = Path(d)

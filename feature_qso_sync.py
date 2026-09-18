@@ -762,10 +762,10 @@ class QsoSyncFeatureMixin:
         ):
             return
 
-        # Läuft ohnehin ein vollständiger Wavelog-Startsync, wird WSJT-X dort
-        # an der richtigen Stelle nach Wavelog -> LOCAL eingebunden.
+        # A configured Wavelog startup delta runs first so its small upload is
+        # not interleaved with the optional WSJT-X import.
         wavelog_settings = self._wavelog_online_settings()
-        if wavelog_settings.configured and wavelog_settings.full_sync_on_start:
+        if wavelog_settings.configured and wavelog_settings.delta_sync_on_start:
             return
 
         if self.sync_busy:
@@ -1034,6 +1034,10 @@ class QsoSyncFeatureMixin:
         if self.close_requested or reason == "shutdown":
             self._finalize_close()
         elif reason == "startup":
+            # The initial startup check deferred WSJT-X while the configured
+            # Wavelog delta was running. Resume that optional local import
+            # before scheduling ordinary online uploads.
+            self._maybe_startup_wsjtx_sync()
             self._request_auto_sync(delay_ms=600)
 
     def _start_sync(
@@ -1065,12 +1069,7 @@ class QsoSyncFeatureMixin:
         self.sync_operation = "full"
         self.sync_reason = reason
         self.sync_cancel_event = threading.Event()
-        if reason == "startup":
-            progress_text = "Vollständiger Start-Sync läuft …"
-        elif reason == "shutdown":
-            progress_text = "Vollständiger Abschluss-Sync läuft …"
-        else:
-            progress_text = "Automatische Synchronisierung läuft …" if automatic else "Synchronisierung läuft …"
+        progress_text = "Synchronisierung läuft …"
         self.status_var.set(progress_text)
         self.sync_label.configure(text=progress_text)
         self._show_sync_progress(reason, progress_text)

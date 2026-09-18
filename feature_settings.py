@@ -178,7 +178,7 @@ class SettingsFeatureMixin:
         self.set_station_profile = tk.StringVar()
         self.set_auto_sync_online = tk.BooleanVar(value=False)
         self.set_auto_sync_delay = tk.StringVar(value="5 min")
-        self.set_full_sync_on_start = tk.BooleanVar(value=False)
+        self.set_delta_sync_on_start = tk.BooleanVar(value=False)
         self.set_delta_sync_on_exit = tk.BooleanVar(value=False)
         ttk.Label(right, text="Wavelog URL", style="Card.TLabel").grid(row=2, column=0, sticky="w", pady=(5,3))
         ttk.Entry(right, textvariable=self.set_url).grid(row=3, column=0, sticky="ew")
@@ -220,7 +220,7 @@ class SettingsFeatureMixin:
         ttk.Checkbutton(
             right,
             text="Schnellen Delta-Sync beim App-Start ausführen",
-            variable=self.set_full_sync_on_start,
+            variable=self.set_delta_sync_on_start,
         ).grid(row=15, column=0, sticky="w", pady=(6, 0))
         ttk.Checkbutton(
             right,
@@ -599,10 +599,10 @@ class SettingsFeatureMixin:
             auto_sync_delay_seconds = 300
         auto_sync_delay_seconds = min(3600, max(60, auto_sync_delay_seconds))
         self.set_auto_sync_delay.set(f"{auto_sync_delay_seconds // 60} min")
-        self.set_full_sync_on_start.set(self.db.get_setting("full_sync_on_start", "0") == "1")
-        WavelogOnlineSettings.migrate_shutdown_sync_setting(
+        WavelogOnlineSettings.migrate_automatic_sync_settings(
             self.db.get_setting, self.db.set_setting,
         )
+        self.set_delta_sync_on_start.set(self.db.get_setting("delta_sync_on_start", "0") == "1")
         self.set_delta_sync_on_exit.set(self.db.get_setting("delta_sync_on_exit", "0") == "1")
         source = self.db.get_setting("callbook_source", CALLBOOK_SOURCE_WAVELOG).strip().lower()
         self.set_callbook_source.set(callbook_source_name(source, self.language))
@@ -681,7 +681,7 @@ class SettingsFeatureMixin:
             if auto_sync_delay_minutes not in (1, 2, 5, 10, 15, 30, 60):
                 raise ValueError("Die Auto-Sync-Verzögerung ist ungültig.")
             self.db.set_setting("auto_sync_delay_seconds", auto_sync_delay_minutes * 60)
-            self.db.set_setting("full_sync_on_start", "1" if self.set_full_sync_on_start.get() else "0")
+            self.db.set_setting("delta_sync_on_start", "1" if self.set_delta_sync_on_start.get() else "0")
             self.db.set_setting("delta_sync_on_exit", "1" if self.set_delta_sync_on_exit.get() else "0")
             source = CALLBOOK_SOURCE_LABELS.get(self.set_callbook_source.get(), CALLBOOK_SOURCE_WAVELOG)
             self.db.set_setting("callbook_source", source)

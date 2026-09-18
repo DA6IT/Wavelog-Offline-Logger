@@ -1804,18 +1804,38 @@ class WavelogOnlineSettings:
     station_id: int
     auto_sync: bool = False
     auto_sync_delay_seconds: int = 300
-    full_sync_on_start: bool = False
+    delta_sync_on_start: bool = False
     delta_sync_on_exit: bool = False
 
     @classmethod
-    def migrate_shutdown_sync_setting(cls, get_setting, set_setting) -> bool:
-        """Move the old shutdown-full-sync switch to the safe delta operation."""
-        delta_value = get_setting("delta_sync_on_exit", None)
+    def migrate_delta_sync_setting(cls, get_setting, set_setting, *, legacy_key: str, delta_key: str) -> bool:
+        """Copy a legacy automatic-sync preference to its delta successor once."""
+        delta_value = get_setting(delta_key, None)
         if delta_value is not None:
             return False
-        legacy_value = get_setting("full_sync_on_exit", "0")
-        set_setting("delta_sync_on_exit", "1" if str(legacy_value or "0") == "1" else "0")
+        legacy_value = get_setting(legacy_key, "0")
+        set_setting(delta_key, "1" if str(legacy_value or "0") == "1" else "0")
         return True
+
+    @classmethod
+    def migrate_automatic_sync_settings(cls, get_setting, set_setting) -> None:
+        """Preserve historical automatic-sync choices while moving to delta keys."""
+        cls.migrate_delta_sync_setting(
+            get_setting, set_setting,
+            legacy_key="full_sync_on_start", delta_key="delta_sync_on_start",
+        )
+        cls.migrate_delta_sync_setting(
+            get_setting, set_setting,
+            legacy_key="full_sync_on_exit", delta_key="delta_sync_on_exit",
+        )
+
+    @classmethod
+    def migrate_shutdown_sync_setting(cls, get_setting, set_setting) -> bool:
+        """Compatibility wrapper for callers that only migrate the exit switch."""
+        return cls.migrate_delta_sync_setting(
+            get_setting, set_setting,
+            legacy_key="full_sync_on_exit", delta_key="delta_sync_on_exit",
+        )
 
     @classmethod
     def from_storage(cls, get_setting, get_token) -> "WavelogOnlineSettings":
@@ -1836,7 +1856,10 @@ class WavelogOnlineSettings:
             station_id=station_id,
             auto_sync=str(get_setting("auto_sync_online", "0") or "0") == "1",
             auto_sync_delay_seconds=auto_sync_delay_seconds,
-            full_sync_on_start=str(get_setting("full_sync_on_start", "0") or "0") == "1",
+            delta_sync_on_start=(
+                str(get_setting("delta_sync_on_start", get_setting("full_sync_on_start", "0")) or "0")
+                == "1"
+            ),
             delta_sync_on_exit=(
                 str(get_setting("delta_sync_on_exit", get_setting("full_sync_on_exit", "0")) or "0")
                 == "1"

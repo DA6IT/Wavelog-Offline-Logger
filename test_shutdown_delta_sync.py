@@ -127,6 +127,39 @@ class ShutdownDeltaSyncTests(unittest.TestCase):
         self.assertEqual([], writes)
         self.assertFalse(WavelogOnlineSettings.from_storage(get_setting, lambda: "token").delta_sync_on_exit)
 
+    def test_historical_start_and_shutdown_settings_migrate_to_delta_once(self):
+        values = {"full_sync_on_start": "1", "full_sync_on_exit": "0"}
+        writes = []
+
+        def get_setting(key, default=""):
+            return values.get(key, default)
+
+        def set_setting(key, value):
+            values[key] = value
+            writes.append((key, value))
+
+        WavelogOnlineSettings.migrate_automatic_sync_settings(get_setting, set_setting)
+        self.assertEqual(
+            [("delta_sync_on_start", "1"), ("delta_sync_on_exit", "0")], writes,
+        )
+        settings = WavelogOnlineSettings.from_storage(get_setting, lambda: "token")
+        self.assertTrue(settings.delta_sync_on_start)
+        self.assertFalse(settings.delta_sync_on_exit)
+        WavelogOnlineSettings.migrate_automatic_sync_settings(get_setting, set_setting)
+        self.assertEqual(2, len(writes))
+
+    def test_explicit_start_delta_setting_wins_over_legacy_setting(self):
+        values = {
+            "full_sync_on_start": "1", "delta_sync_on_start": "0",
+            "delta_sync_on_exit": "0",
+        }
+
+        def get_setting(key, default=""):
+            return values.get(key, default)
+
+        WavelogOnlineSettings.migrate_automatic_sync_settings(get_setting, lambda *_args: self.fail())
+        self.assertFalse(WavelogOnlineSettings.from_storage(get_setting, lambda: "token").delta_sync_on_start)
+
     def test_manual_sync_still_starts_full_reconciliation(self):
         calls = []
         app = object.__new__(QsoSyncFeatureMixin)
@@ -140,6 +173,19 @@ class ShutdownDeltaSyncTests(unittest.TestCase):
         app._start_sync(automatic=True, reason="startup")
         app._start_sync(automatic=False, reason="shutdown")
         self.assertFalse(app.sync_busy)
+
+    def test_startup_delta_acknowledgement_resumes_deferred_wsjtx_import(self):
+        calls = []
+        app = cast(Any, object.__new__(QsoSyncFeatureMixin))
+        app.sync_progress_dialog = None
+        app.sync_reason = "startup"
+        app.close_requested = False
+        app._maybe_startup_wsjtx_sync = lambda: calls.append("wsjtx")
+        app._request_auto_sync = lambda **kwargs: calls.append(("auto", kwargs))
+
+        app._sync_progress_acknowledged()
+
+        self.assertEqual(["wsjtx", ("auto", {"delay_ms": 600})], calls)
 
     def test_cancelled_shutdown_delta_finalizes_close(self):
         app = _SyncProbe()

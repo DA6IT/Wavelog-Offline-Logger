@@ -473,7 +473,7 @@ try {
             "wavelog_url": "https://wavelog.example.invalid",
             "station_profile_id": "1",
             "auto_sync_online": "1",
-            "full_sync_on_start": "1",
+            "delta_sync_on_start": "1",
             "full_sync_on_exit": "1",
             "udp_log_autostart": "1",
             "callbook_source": "wavelog",
