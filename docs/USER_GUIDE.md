@@ -272,15 +272,15 @@ Die App prüft regelmäßig die konfigurierte Wavelog-API:
 
 Bei aktivierter Option werden im laufenden Betrieb ausschließlich neue, noch nie verknüpfte `LOCAL ONLY`-QSOs gepusht. Ein fehlgeschlagener oder mehrdeutiger Upload wird nicht blind wiederholt. Änderungen, Downloads, Löschungen und Konflikte sind Aufgabe des vollständigen Syncs.
 
-### 9.2 Vollständiger Sync beim Start oder Beenden
+### 9.2 Delta-Sync beim Start oder Beenden
 
 ![Laufender automatischer Sync](screenshots/sync-progress-running.png)
 
-Während eines automatischen Voll-Syncs sperrt ein Statusfenster die Bedienung. Beim Beenden werden CAT, DX-Cluster und UDP zuerst gestoppt, damit kein weiteres externes QSO eingeht.
+Beim automatischen Delta-Sync werden ausschließlich neue lokale QSOs hochgeladen; Downloads, Änderungen, Löschungen, Konflikte und Integritätsabgleiche werden dabei nicht ausgeführt. Diese vollständigen Abgleichoperationen bleiben dem manuellen Sync vorbehalten. Ein Statusfenster sperrt die Bedienung. Beim Beenden werden CAT, DX-Cluster und UDP zuerst gestoppt, damit kein weiteres externes QSO eingeht.
 
 ![Abgeschlossener automatischer Sync](screenshots/sync-progress-complete.png)
 
-Nach Abschluss zeigt das Fenster die Zusammenfassung. Erst **OK** gibt die App frei beziehungsweise beendet sie. Scheitert der Sync, bleiben die lokalen ADI-Daten erhalten und die Fehlermeldung wird im Fenster angezeigt.
+Nach Abschluss zeigt das Fenster die Zusammenfassung. Erst **OK** gibt die App frei beziehungsweise beendet sie. Scheitert der Sync, bleiben die lokalen ADI-Daten erhalten und die Fehlermeldung wird im Fenster angezeigt. Ein Abbruch des Delta-Abschluss-Syncs setzt das Beenden unmittelbar fort.
 
 ### ADIF importieren und exportieren
 

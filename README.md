@@ -19,7 +19,7 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - mehrere getrennte Stationsprofile
 - profilspezifischer Wavelog-API-v2-Sync mit sichtbaren Konflikten und Fehlerursachen
 - optionaler Online-Modus: nur neue QSOs nach konfigurierbarer Verzögerung pushen; Standard sind fünf Minuten
-- optionaler Voll-Sync beim App-Start und/oder Beenden
+- optionaler schneller Delta-Sync beim App-Start und/oder Beenden; der vollständige Sync bleibt manuell
 - bidirektionaler Abgleich von Wavelog-Contest-Sessions und deren QSO-Zuordnungen; Session-IDs werden automatisch übernommen
 - Callbook-Daten über Wavelog oder direkt über QRZ.com, einschließlich Stationsfoto
 - QRZ.com-Seiten direkt aus dem QSO-Formular und aus ausgewählten DX-Cluster-Spots öffnen

@@ -319,9 +319,9 @@ import ssl
 assert tls_context.verify_mode == ssl.CERT_REQUIRED
 print("STATION-SCOPED SYNC AND TLS SELFTEST OK")
 
-# Online mode has three independent profile options. During runtime it may
-# upload only never-linked LOCAL ONLY records; a full sync remains a separate
-# start/exit/manual operation.
+# Online mode has three independent profile options. During runtime and
+# automatic start/exit paths it uploads only never-linked LOCAL ONLY records;
+# a full sync remains a manual operation.
 settings_values = {
     "wavelog_url": "https://log.example",
     "station_profile_id": "7",

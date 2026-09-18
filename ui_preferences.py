@@ -224,6 +224,8 @@ ENGLISH = {
     "Vor dem Beenden wird das aktive Profil vollständig mit Wavelog abgeglichen.": "Before closing, only new local QSOs are uploaded using delta sync.",
     "Vor dem Beenden werden nur neue lokale QSOs per Delta-Sync hochgeladen.": "Before closing, only new local QSOs are uploaded using delta sync.",
     "Delta-Sync: neue QSOs werden hochgeladen": "Delta sync: uploading new QSOs",
+    "Delta-Abschluss-Sync abgebrochen; App wird geschlossen.": "Delta shutdown sync cancelled; the app is closing.",
+    "Delta-Sync fehlgeschlagen; QSOs bleiben lokal gespeichert.": "Delta sync failed; QSOs remain stored locally.",
     "Synchronisierung abgeschlossen": "Synchronization completed",
     "Synchronisierung fehlgeschlagen": "Synchronization failed",
     "Die App wird nach OK geschlossen.": "The app will close after you select OK.",

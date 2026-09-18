@@ -18,7 +18,7 @@ An offline-first desktop logger for amateur radio: log contacts in the field eve
 - xOTA sessions combining POTA, SOTA, WWFF, IOTA and COTA/WCA references
 - independent station profiles with profile-specific Wavelog API v2 synchronization
 - optional online mode that pushes only new QSOs after a configurable delay; the default is five minutes
-- optional full synchronization at application startup and/or shutdown
+- optional fast delta synchronization at application startup and/or shutdown; full synchronization remains manual
 - bidirectional Wavelog contest-session and QSO assignment synchronization
 - Wavelog or direct QRZ.com callbook data, including station photos
 - direct QRZ.com pages from the Log QSO form and selected DX Cluster spots
