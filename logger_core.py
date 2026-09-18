@@ -2713,6 +2713,10 @@ class SyncEngine:
                 self.db.set_status(local_id, "error", error=str(exc))
                 summary.errors += 1
             self._report_progress(progress_callback, "Delta-Sync: neue QSOs werden hochgeladen", index, len(candidates))
+        # A cancellation can arrive while the final upload is in flight.  Do
+        # not report a successful automatic shutdown sync in that case: the
+        # caller must take its cancellation path and finish closing.
+        self._check_cancel(cancel_event)
         return summary
 
     def _local_map(self) -> dict[str, dict[str, Any]]:

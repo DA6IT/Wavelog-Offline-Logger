@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from feature_lifecycle import LifecycleFeatureMixin
 from feature_qso_sync import QsoSyncFeatureMixin
-from logger_core import SyncEngine, WavelogOnlineSettings
+from logger_core import SyncEngine, WavelogError, WavelogOnlineSettings
 
 
 class _Status:
@@ -79,6 +79,15 @@ class _DeltaClient:
         return {"id": 123}
 
 
+class _CancellingDeltaClient:
+    def __init__(self, cancel_event):
+        self.cancel_event = cancel_event
+
+    def create_qso(self, _payload):
+        self.cancel_event.set()
+        return {"id": 123}
+
+
 class ShutdownDeltaSyncTests(unittest.TestCase):
     def test_shutdown_uses_delta_and_never_starts_full_sync(self):
         app = _LifecycleProbe()
@@ -145,6 +154,15 @@ class ShutdownDeltaSyncTests(unittest.TestCase):
             cast(Any, _DeltaStore()), cast(Any, _DeltaDb()), cast(Any, _DeltaClient()),
         ).push_new_only(1)
         self.assertEqual(1, summary.pushed)
+
+    def test_cancel_during_final_delta_upload_reaches_shutdown_cancel_path(self):
+        cancel_event = threading.Event()
+        with self.assertRaises(WavelogError):
+            SyncEngine(
+                cast(Any, _DeltaStore()),
+                cast(Any, _DeltaDb()),
+                cast(Any, _CancellingDeltaClient(cancel_event)),
+            ).push_new_only(1, cancel_event=cancel_event)
 
 
 if __name__ == "__main__":
