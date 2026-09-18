@@ -1788,6 +1788,22 @@ class WavelogClient:
         self.token = (token or "").strip()
         self.timeout = timeout
 
+    @staticmethod
+    def _wait_for_retry(delay: float, cancel_event: threading.Event | None,
+                        deadline: float | None) -> None:
+        """Wait in short intervals so cancellation and a deadline remain responsive."""
+        until = time.monotonic() + max(0.0, delay)
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise WavelogError("Synchronisierung wurde abgebrochen")
+            now = time.monotonic()
+            if deadline is not None and now >= deadline:
+                raise WavelogError("Synchronisierungs-Deadline überschritten")
+            remaining = until - now
+            if remaining <= 0:
+                return
+            time.sleep(min(0.1, remaining))
+
     def _url(self, resource: str, ident: int | None = None, params: dict[str, Any] | None = None) -> str:
         url = f"{self.base}/index.php/api/v2/{resource}"
         if ident is not None:
@@ -1821,8 +1837,12 @@ class WavelogClient:
                 timeout = self.timeout if deadline is None else max(0.1, min(self.timeout, deadline - time.monotonic()))
                 with secure_urlopen(req, timeout=timeout) as resp:
                     declared = resp.headers.get("Content-Length")
-                    if declared and int(declared) > self.MAX_RESPONSE_BYTES:
-                        raise WavelogError("Wavelog-Antwort ist zu groß")
+                    if declared:
+                        try:
+                            if int(declared) > self.MAX_RESPONSE_BYTES:
+                                raise WavelogError("Wavelog-Antwort ist zu groß")
+                        except ValueError as exc:
+                            raise WavelogError("Wavelog-Antwort enthält eine ungültige Content-Length") from exc
                     raw = resp.read(self.MAX_RESPONSE_BYTES + 1)
                     if len(raw) > self.MAX_RESPONSE_BYTES:
                         raise WavelogError("Wavelog-Antwort ist zu groß")
@@ -1837,7 +1857,7 @@ class WavelogClient:
                         delay = min(30.0, float(2 ** attempt))
                     if deadline is not None and time.monotonic() + delay >= deadline:
                         raise WavelogError("Synchronisierungs-Deadline überschritten") from e
-                    time.sleep(delay)
+                    self._wait_for_retry(delay, cancel_event, deadline)
                     continue
                 raw = e.read().decode("utf-8", errors="replace")
                 try:
@@ -1857,7 +1877,7 @@ class WavelogClient:
                 raise WavelogError(f"HTTP {e.code}: {msg}") from e
             except urllib.error.URLError as e:
                 if attempt < self.MAX_RETRIES:
-                    time.sleep(min(8.0, float(2 ** attempt)))
+                    self._wait_for_retry(min(8.0, float(2 ** attempt)), cancel_event, deadline)
                     continue
                 raise WavelogError(f"Verbindung fehlgeschlagen: {e.reason}") from e
         raise WavelogError("Wavelog-Anfrage konnte nicht abgeschlossen werden")
