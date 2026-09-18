@@ -11,6 +11,7 @@ import sqlite3
 import ssl
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1354,6 +1355,26 @@ class MetadataDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_sync_status ON sync_meta(status);
                 CREATE INDEX IF NOT EXISTS idx_sync_wid ON sync_meta(wavelog_id);
+                -- Control-plane migrations: existing ADIF/QSO records remain untouched.
+                CREATE TABLE IF NOT EXISTS sync_state (
+                    station_id INTEGER NOT NULL,
+                    profile_key TEXT NOT NULL DEFAULT '',
+                    phase TEXT NOT NULL DEFAULT 'idle',
+                    checkpoint TEXT NOT NULL DEFAULT '',
+                    baseline_watermark TEXT NOT NULL DEFAULT '',
+                    qsl_watermark TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(station_id, profile_key)
+                );
+                CREATE TABLE IF NOT EXISTS sync_change_journal (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    local_id TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    consumed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_sync_journal_pending ON sync_change_journal(consumed_at, id);
                 CREATE TABLE IF NOT EXISTS qsl_meta (
                     wavelog_id INTEGER PRIMARY KEY,
                     qrz TEXT NOT NULL DEFAULT 'unknown',
@@ -1397,6 +1418,56 @@ class MetadataDB:
             self.conn.execute(
                 "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, "" if value is None else str(value)),
+            )
+            self.conn.commit()
+
+    def get_sync_state(self, station_id: int, profile_key: str = "") -> dict[str, Any]:
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT * FROM sync_state WHERE station_id=? AND profile_key=?",
+                (int(station_id), str(profile_key)),
+            ).fetchone()
+            return dict(row) if row else {}
+
+    def set_sync_state(self, station_id: int, *, profile_key: str = "", phase: str = "idle",
+                       checkpoint: str = "", baseline_watermark: str = "", qsl_watermark: str = "") -> None:
+        """Commit a resume checkpoint after a successful local batch only."""
+        with self.lock:
+            self.conn.execute(
+                """INSERT INTO sync_state(station_id,profile_key,phase,checkpoint,baseline_watermark,qsl_watermark,updated_at)
+                   VALUES(?,?,?,?,?,?,?) ON CONFLICT(station_id,profile_key) DO UPDATE SET
+                   phase=excluded.phase,checkpoint=excluded.checkpoint,baseline_watermark=excluded.baseline_watermark,
+                   qsl_watermark=excluded.qsl_watermark,updated_at=excluded.updated_at""",
+                (int(station_id), str(profile_key), phase, checkpoint, baseline_watermark, qsl_watermark, utc_now_iso()),
+            )
+            self.conn.commit()
+
+    def journal_change(self, local_id: str, operation: str) -> None:
+        if not local_id:
+            return
+        with self.lock:
+            self.conn.execute(
+                "INSERT INTO sync_change_journal(local_id,operation,created_at) VALUES(?,?,?)",
+                (str(local_id), str(operation), utc_now_iso()),
+            )
+            self.conn.commit()
+
+    def pending_journal_changes(self, limit: int = 500) -> list[dict[str, Any]]:
+        with self.lock:
+            return [dict(row) for row in self.conn.execute(
+                "SELECT * FROM sync_change_journal WHERE consumed_at IS NULL ORDER BY id LIMIT ?",
+                (max(1, int(limit)),),
+            )]
+
+    def consume_journal_changes(self, change_ids: Iterable[int]) -> None:
+        ids = [int(value) for value in change_ids]
+        if not ids:
+            return
+        with self.lock:
+            now = utc_now_iso()
+            self.conn.executemany(
+                "UPDATE sync_change_journal SET consumed_at=? WHERE id=? AND consumed_at IS NULL",
+                [(now, value) for value in ids],
             )
             self.conn.commit()
 
@@ -1705,6 +1776,10 @@ class WavelogOnlineSettings:
 
 
 class WavelogClient:
+    MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+    MAX_PAGE_SIZE = 500
+    MAX_RETRIES = 3
+
     def __init__(self, base_url: str, token: str, timeout: int = 15):
         base = (base_url or "").strip().rstrip("/")
         if base.endswith("/index.php"):
@@ -1724,7 +1799,9 @@ class WavelogClient:
         return url
 
     def _request(self, method: str, resource: str, ident: int | None = None,
-                 params: dict[str, Any] | None = None, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+                 params: dict[str, Any] | None = None, payload: dict[str, Any] | None = None,
+                 *, cancel_event: threading.Event | None = None,
+                 deadline: float | None = None) -> dict[str, Any] | None:
         if not self.base.startswith(("http://", "https://")):
             raise WavelogError("Wavelog-URL muss mit http:// oder https:// beginnen")
         if not self.token:
@@ -1735,31 +1812,55 @@ class WavelogClient:
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(self._url(resource, ident, params), data=data, headers=headers, method=method)
-        try:
-            with secure_urlopen(req, timeout=self.timeout) as resp:
-                raw = resp.read()
+        for attempt in range(self.MAX_RETRIES + 1):
+            if cancel_event is not None and cancel_event.is_set():
+                raise WavelogError("Synchronisierung wurde abgebrochen")
+            if deadline is not None and time.monotonic() >= deadline:
+                raise WavelogError("Synchronisierungs-Deadline überschritten")
+            try:
+                timeout = self.timeout if deadline is None else max(0.1, min(self.timeout, deadline - time.monotonic()))
+                with secure_urlopen(req, timeout=timeout) as resp:
+                    declared = resp.headers.get("Content-Length")
+                    if declared and int(declared) > self.MAX_RESPONSE_BYTES:
+                        raise WavelogError("Wavelog-Antwort ist zu groß")
+                    raw = resp.read(self.MAX_RESPONSE_BYTES + 1)
+                    if len(raw) > self.MAX_RESPONSE_BYTES:
+                        raise WavelogError("Wavelog-Antwort ist zu groß")
                 if not raw:
                     return None
                 return json.loads(raw.decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            raw = e.read().decode("utf-8", errors="replace")
-            try:
-                j = json.loads(raw)
-                error = j.get("error") if isinstance(j, dict) else None
-                if isinstance(error, dict):
-                    code = str(error.get("code") or "").strip()
-                    message = str(error.get("message") or "").strip()
-                    details = error.get("details")
-                    msg = f"{code}: {message}" if code and message else (message or code or raw)
-                    if details not in (None, "", [], {}):
-                        msg += " · " + json.dumps(details, ensure_ascii=False, separators=(",", ":"))
-                else:
-                    msg = raw
-            except Exception:
-                msg = raw or str(e)
-            raise WavelogError(f"HTTP {e.code}: {msg}") from e
-        except urllib.error.URLError as e:
-            raise WavelogError(f"Verbindung fehlgeschlagen: {e.reason}") from e
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < self.MAX_RETRIES:
+                    try:
+                        delay = min(30.0, max(0.0, float(e.headers.get("Retry-After", ""))))
+                    except (TypeError, ValueError):
+                        delay = min(30.0, float(2 ** attempt))
+                    if deadline is not None and time.monotonic() + delay >= deadline:
+                        raise WavelogError("Synchronisierungs-Deadline überschritten") from e
+                    time.sleep(delay)
+                    continue
+                raw = e.read().decode("utf-8", errors="replace")
+                try:
+                    j = json.loads(raw)
+                    error = j.get("error") if isinstance(j, dict) else None
+                    if isinstance(error, dict):
+                        code = str(error.get("code") or "").strip()
+                        message = str(error.get("message") or "").strip()
+                        details = error.get("details")
+                        msg = f"{code}: {message}" if code and message else (message or code or raw)
+                        if details not in (None, "", [], {}):
+                            msg += " · " + json.dumps(details, ensure_ascii=False, separators=(",", ":"))
+                    else:
+                        msg = raw
+                except Exception:
+                    msg = raw or str(e)
+                raise WavelogError(f"HTTP {e.code}: {msg}") from e
+            except urllib.error.URLError as e:
+                if attempt < self.MAX_RETRIES:
+                    time.sleep(min(8.0, float(2 ** attempt)))
+                    continue
+                raise WavelogError(f"Verbindung fehlgeschlagen: {e.reason}") from e
+        raise WavelogError("Wavelog-Anfrage konnte nicht abgeschlossen werden")
 
     def token_info(self) -> dict[str, Any]:
         r = self._request("GET", "token") or {}
@@ -1789,22 +1890,38 @@ class WavelogClient:
         }
         return self._request("GET", "lookup", params=params) or {}
 
-    def list_qsos(self, *, since_id: int = 0, qso_since: str | None = None, qso_until: str | None = None,
-                  station_ids: Iterable[int] | None = None) -> list[dict[str, Any]]:
+    def iter_qso_pages(self, *, since_id: int = 0, qso_since: str | None = None, qso_until: str | None = None,
+                       station_ids: Iterable[int] | None = None, cancel_event: threading.Event | None = None,
+                       deadline: float | None = None) -> Iterable[list[dict[str, Any]]]:
+        """Yield bounded pages and reject empty/repeated pages before looping."""
         page = 1
-        out: list[dict[str, Any]] = []
+        seen_pages: set[str] = set()
         while True:
             station_filter = ",".join(str(int(value)) for value in (station_ids or []))
             params = {"since_id": since_id, "qso_since": qso_since, "qso_until": qso_until,
-                      "station_id": station_filter, "page": page, "per_page": 5000}
-            r = self._request("GET", "qso", params=params) or {}
+                      "station_id": station_filter, "page": page, "per_page": self.MAX_PAGE_SIZE}
+            r = self._request("GET", "qso", params=params, cancel_event=cancel_event, deadline=deadline) or {}
             data = r.get("data") or []
-            if isinstance(data, list):
-                out.extend(data)
+            if not isinstance(data, list):
+                raise WavelogError("Ungültige QSO-Seite von Wavelog")
             meta = r.get("meta") or {}
+            signature = hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+            if meta.get("has_more") and (not data or signature in seen_pages):
+                raise WavelogError("Wavelog-Paginierung liefert eine leere oder wiederholte Seite")
+            seen_pages.add(signature)
+            if data:
+                yield data
             if not meta.get("has_more"):
                 break
             page += 1
+
+    def list_qsos(self, *, since_id: int = 0, qso_since: str | None = None, qso_until: str | None = None,
+                  station_ids: Iterable[int] | None = None, cancel_event: threading.Event | None = None,
+                  deadline: float | None = None) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for rows in self.iter_qso_pages(since_id=since_id, qso_since=qso_since, qso_until=qso_until,
+                                        station_ids=station_ids, cancel_event=cancel_event, deadline=deadline):
+            out.extend(rows)
         return out
 
     def export_qsos_adif(self, *, qso_since: str | None = None, qso_until: str | None = None,
