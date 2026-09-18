@@ -29,10 +29,11 @@ class LifecycleFeatureMixin:
             if self.sync_operation == "wsjtx":
                 self.status_var.set("Beenden wartet auf den laufenden WSJT-X-Abgleich …")
             else:
-                self.status_var.set("Beenden wartet auf die laufende Wavelog-Übertragung …")
+                self.status_var.set("Laufende Wavelog-Übertragung wird sicher abgebrochen …")
+                self.cancel_active_sync()
                 self._show_sync_progress(
                     "shutdown",
-                    "Beenden wartet auf die laufende Wavelog-Übertragung …",
+                    "Laufende Wavelog-Übertragung wird sicher abgebrochen …",
                 )
             return
         settings = self._wavelog_online_settings()

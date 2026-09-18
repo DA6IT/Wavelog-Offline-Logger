@@ -61,11 +61,18 @@ class SyncProgressDialog(tk.Toplevel):
             justify="left", anchor="nw", wraplength=570,
         )
         self.status_label.pack(fill="both", expand=True, pady=(16, 12))
+        buttons = ttk.Frame(body, style="Card.TFrame")
+        buttons.pack(fill="x")
+        self.cancel_button = ttk.Button(
+            buttons, text="Abbrechen", style="Secondary.TButton",
+            command=parent.cancel_active_sync,
+        )
+        self.cancel_button.pack(side="left")
         self.ok_button = ttk.Button(
-            body, text="OK", style="Primary.TButton", state="disabled",
+            buttons, text="OK", style="Primary.TButton", state="disabled",
             command=parent._sync_progress_acknowledged,
         )
-        self.ok_button.pack(anchor="e")
+        self.ok_button.pack(side="right")
         self.set_running(reason, status_text)
         self.update_idletasks()
         x = parent.winfo_rootx() + max(0, (parent.winfo_width() - self.winfo_width()) // 2)
@@ -85,6 +92,7 @@ class SyncProgressDialog(tk.Toplevel):
         self.explanation.configure(text=self.parent._tr(explanation))
         self.status_label.configure(text=self.parent._tr(status_text), fg=theme.TEXT)
         self.ok_button.configure(state="disabled")
+        self.cancel_button.configure(state="normal")
         self.progress.configure(mode="indeterminate")
         self.progress.start(12)
 
@@ -101,7 +109,20 @@ class SyncProgressDialog(tk.Toplevel):
         self.explanation.configure(text=self.parent._tr(suffix))
         self.status_label.configure(text=self.parent._tr(details), fg=(theme.TEXT if success else theme.ERR))
         self.ok_button.configure(state="normal")
+        self.cancel_button.configure(state="disabled")
         self.ok_button.focus_set()
+
+    def set_progress(self, phase: str, current: int = 0, total: int = 0):
+        """Show a worker-reported phase without touching Tk from that worker."""
+        if total > 0:
+            self.progress.stop()
+            self.progress.configure(mode="determinate", maximum=total, value=min(current, total))
+            detail = f"{phase} ({current}/{total})"
+        else:
+            self.progress.configure(mode="indeterminate")
+            self.progress.start(12)
+            detail = phase
+        self.status_label.configure(text=self.parent._tr(detail))
 
 
 class ContestPresetDialog(tk.Toplevel):

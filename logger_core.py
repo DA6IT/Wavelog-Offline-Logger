@@ -1348,6 +1348,8 @@ class MetadataDB:
                     status TEXT NOT NULL DEFAULT 'pending',
                     last_synced_hash TEXT,
                     remote_hash TEXT,
+                    local_version INTEGER NOT NULL DEFAULT 0,
+                    conflict_reason TEXT NOT NULL DEFAULT '',
                     last_error TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -1355,6 +1357,7 @@ class MetadataDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_sync_status ON sync_meta(status);
                 CREATE INDEX IF NOT EXISTS idx_sync_wid ON sync_meta(wavelog_id);
+                CREATE INDEX IF NOT EXISTS idx_sync_unlinked ON sync_meta(wavelog_id, status, local_id);
                 -- Control-plane migrations: existing ADIF/QSO records remain untouched.
                 CREATE TABLE IF NOT EXISTS sync_state (
                     station_id INTEGER NOT NULL,
@@ -1362,6 +1365,7 @@ class MetadataDB:
                     phase TEXT NOT NULL DEFAULT 'idle',
                     checkpoint TEXT NOT NULL DEFAULT '',
                     baseline_watermark TEXT NOT NULL DEFAULT '',
+                    remote_watermark TEXT NOT NULL DEFAULT '',
                     qsl_watermark TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY(station_id, profile_key)
@@ -1400,6 +1404,17 @@ class MetadataDB:
                 self.conn.execute(
                     "ALTER TABLE qsl_meta ADD COLUMN clublog TEXT NOT NULL DEFAULT 'unknown'"
                 )
+            # CREATE TABLE IF NOT EXISTS is not an upgrade.  These additive,
+            # idempotent migrations never touch the ADIF/QSO data store.
+            state_columns = {str(row[1]).lower() for row in self.conn.execute("PRAGMA table_info(sync_state)")}
+            if "remote_watermark" not in state_columns:
+                self.conn.execute("ALTER TABLE sync_state ADD COLUMN remote_watermark TEXT NOT NULL DEFAULT ''")
+            meta_columns = {str(row[1]).lower() for row in self.conn.execute("PRAGMA table_info(sync_meta)")}
+            if "local_version" not in meta_columns:
+                self.conn.execute("ALTER TABLE sync_meta ADD COLUMN local_version INTEGER NOT NULL DEFAULT 0")
+            if "conflict_reason" not in meta_columns:
+                self.conn.execute("ALTER TABLE sync_meta ADD COLUMN conflict_reason TEXT NOT NULL DEFAULT ''")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_sync_unlinked ON sync_meta(wavelog_id, status, local_id)")
             # v0.5: "pending" from older builds means the same as LOCAL ONLY.
             self.conn.execute("UPDATE sync_meta SET status='local_only' WHERE status='pending' AND wavelog_id IS NULL")
             self.conn.commit()
@@ -1430,25 +1445,26 @@ class MetadataDB:
             return dict(row) if row else {}
 
     def set_sync_state(self, station_id: int, *, profile_key: str = "", phase: str = "idle",
-                       checkpoint: str = "", baseline_watermark: str = "", qsl_watermark: str = "") -> None:
+                       checkpoint: str = "", baseline_watermark: str = "", remote_watermark: str = "",
+                       qsl_watermark: str = "") -> None:
         """Commit a resume checkpoint after a successful local batch only."""
         with self.lock:
             self.conn.execute(
-                """INSERT INTO sync_state(station_id,profile_key,phase,checkpoint,baseline_watermark,qsl_watermark,updated_at)
-                   VALUES(?,?,?,?,?,?,?) ON CONFLICT(station_id,profile_key) DO UPDATE SET
+                """INSERT INTO sync_state(station_id,profile_key,phase,checkpoint,baseline_watermark,remote_watermark,qsl_watermark,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(station_id,profile_key) DO UPDATE SET
                    phase=excluded.phase,checkpoint=excluded.checkpoint,baseline_watermark=excluded.baseline_watermark,
-                   qsl_watermark=excluded.qsl_watermark,updated_at=excluded.updated_at""",
-                (int(station_id), str(profile_key), phase, checkpoint, baseline_watermark, qsl_watermark, utc_now_iso()),
+                   remote_watermark=excluded.remote_watermark,qsl_watermark=excluded.qsl_watermark,updated_at=excluded.updated_at""",
+                (int(station_id), str(profile_key), phase, checkpoint, baseline_watermark, remote_watermark, qsl_watermark, utc_now_iso()),
             )
             self.conn.commit()
 
-    def journal_change(self, local_id: str, operation: str) -> None:
+    def journal_change(self, local_id: str, operation: str, version: int = 1) -> None:
         if not local_id:
             return
         with self.lock:
             self.conn.execute(
-                "INSERT INTO sync_change_journal(local_id,operation,created_at) VALUES(?,?,?)",
-                (str(local_id), str(operation), utc_now_iso()),
+                "INSERT INTO sync_change_journal(local_id,operation,version,created_at) VALUES(?,?,?,?)",
+                (str(local_id), str(operation), max(1, int(version)), utc_now_iso()),
             )
             self.conn.commit()
 
@@ -1458,6 +1474,16 @@ class MetadataDB:
                 "SELECT * FROM sync_change_journal WHERE consumed_at IS NULL ORDER BY id LIMIT ?",
                 (max(1, int(limit)),),
             )]
+
+    def migration_summary(self) -> dict[str, Any]:
+        """Non-mutating preview suitable for a UI or automated migration gate."""
+        with self.lock:
+            return {
+                "schema": "sync-control-v2",
+                "sync_meta_rows": int(self.conn.execute("SELECT COUNT(*) FROM sync_meta").fetchone()[0]),
+                "unlinked_rows": int(self.conn.execute("SELECT COUNT(*) FROM sync_meta WHERE wavelog_id IS NULL").fetchone()[0]),
+                "pending_journal_rows": int(self.conn.execute("SELECT COUNT(*) FROM sync_change_journal WHERE consumed_at IS NULL").fetchone()[0]),
+            }
 
     def consume_journal_changes(self, change_ids: Iterable[int]) -> None:
         ids = [int(value) for value in change_ids]
@@ -1529,19 +1555,51 @@ class MetadataDB:
             r = self.conn.execute("SELECT * FROM sync_meta WHERE wavelog_id=?", (int(wid),)).fetchone()
             return dict(r) if r else None
 
+    def version_snapshot(self, local_ids: Iterable[str] | None = None) -> dict[str, int]:
+        """Capture local mutation versions before a remote sync starts."""
+        with self.lock:
+            if local_ids is None:
+                rows = self.conn.execute("SELECT local_id,local_version FROM sync_meta")
+            else:
+                ids = [str(value) for value in local_ids if value]
+                if not ids:
+                    return {}
+                rows = self.conn.execute(
+                    f"SELECT local_id,local_version FROM sync_meta WHERE local_id IN ({','.join('?' for _ in ids)})", ids  # nosec B608
+                )
+            return {str(row["local_id"]): int(row["local_version"] or 0) for row in rows}
+
+    def unchanged_since(self, local_id: str, snapshot_version: int | None) -> bool:
+        if snapshot_version is None:
+            return False
+        meta = self.get_meta(local_id)
+        return bool(meta and int(meta.get("local_version") or 0) == int(snapshot_version))
+
     def ensure_local(self, local_id: str, current_hash: str):
         now = utc_now_iso()
         with self.lock:
             r = self.conn.execute("SELECT * FROM sync_meta WHERE local_id=?", (local_id,)).fetchone()
             if not r:
                 self.conn.execute(
-                    "INSERT INTO sync_meta(local_id,status,created_at,updated_at) VALUES(?,'local_only',?,?)",
+                    "INSERT INTO sync_meta(local_id,status,local_version,created_at,updated_at) VALUES(?,'local_only',1,?,?)",
                     (local_id, now, now),
+                )
+                self.conn.execute(
+                    "INSERT INTO sync_change_journal(local_id,operation,version,created_at) VALUES(?,'create',1,?)",
+                    (local_id, now),
                 )
             else:
                 row = dict(r)
                 if row["status"] == "synced" and row.get("last_synced_hash") and current_hash != row["last_synced_hash"]:
-                    self.conn.execute("UPDATE sync_meta SET status='modified',updated_at=? WHERE local_id=?", (now, local_id))
+                    version = int(row.get("local_version") or 0) + 1
+                    self.conn.execute(
+                        "UPDATE sync_meta SET status='modified',local_version=?,updated_at=? WHERE local_id=?",
+                        (version, now, local_id),
+                    )
+                    self.conn.execute(
+                        "INSERT INTO sync_change_journal(local_id,operation,version,created_at) VALUES(?,'change',?,?)",
+                        (local_id, version, now),
+                    )
             self.conn.commit()
 
     def mark_pending_delete(self, local_id: str):
@@ -1563,20 +1621,29 @@ class MetadataDB:
         with self.lock:
             for local_id in requested:
                 r = self.conn.execute(
-                    "SELECT wavelog_id FROM sync_meta WHERE local_id=?",
+                    "SELECT wavelog_id,local_version FROM sync_meta WHERE local_id=?",
                     (local_id,),
                 ).fetchone()
                 if not r:
                     continue
                 if r["wavelog_id"] is None:
                     self.conn.execute(
+                        "INSERT INTO sync_change_journal(local_id,operation,version,created_at) VALUES(?,'delete',?,?)",
+                        (local_id, max(1, int(r["local_version"] or 0) + 1), now),
+                    )
+                    self.conn.execute(
                         "DELETE FROM sync_meta WHERE local_id=?",
                         (local_id,),
                     )
                 else:
+                    version = int(r["local_version"] or 0) + 1
                     self.conn.execute(
-                        "UPDATE sync_meta SET status='pending_delete',updated_at=? WHERE local_id=?",
-                        (now, local_id),
+                        "UPDATE sync_meta SET status='pending_delete',local_version=?,updated_at=? WHERE local_id=?",
+                        (version, now, local_id),
+                    )
+                    self.conn.execute(
+                        "INSERT INTO sync_change_journal(local_id,operation,version,created_at) VALUES(?,'delete',?,?)",
+                        (local_id, version, now),
                     )
                 changed += 1
             self.conn.commit()
@@ -1778,6 +1845,9 @@ class WavelogOnlineSettings:
 class WavelogClient:
     MAX_RESPONSE_BYTES = 16 * 1024 * 1024
     MAX_PAGE_SIZE = 500
+    # A remote ``has_more`` flag is untrusted.  This remains far beyond a
+    # practical logbook while putting a hard ceiling on a broken endpoint.
+    MAX_QSO_PAGES = 100_000
     MAX_RETRIES = 3
 
     def __init__(self, base_url: str, token: str, timeout: int = 15):
@@ -1912,11 +1982,33 @@ class WavelogClient:
 
     def iter_qso_pages(self, *, since_id: int = 0, qso_since: str | None = None, qso_until: str | None = None,
                        station_ids: Iterable[int] | None = None, cancel_event: threading.Event | None = None,
-                       deadline: float | None = None) -> Iterable[list[dict[str, Any]]]:
-        """Yield bounded pages and reject empty/repeated pages before looping."""
-        page = 1
+                       deadline: float | None = None, start_page: int = 1,
+                       max_pages: int | None = None) -> Iterable[list[dict[str, Any]]]:
+        """Yield bounded pages and reject untrusted pagination before looping.
+
+        ``start_page`` makes a persisted, successfully committed page checkpoint
+        resumable without retaining any remote rows in memory.  ``max_pages`` is
+        primarily useful for callers that intentionally split a long baseline
+        into batches; neither value can remove the global safety limit.
+        """
+        try:
+            page = max(1, int(start_page))
+        except (TypeError, ValueError) as exc:
+            raise WavelogError("Ungültiger QSO-Seiten-Checkpoint") from exc
+        try:
+            requested_pages = self.MAX_QSO_PAGES if max_pages is None else max(1, int(max_pages))
+        except (TypeError, ValueError) as exc:
+            raise WavelogError("Ungültiges QSO-Seitenlimit") from exc
+        page_limit = min(self.MAX_QSO_PAGES, requested_pages)
+        yielded_pages = 0
         seen_pages: set[str] = set()
         while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise WavelogError("Synchronisierung wurde abgebrochen")
+            if deadline is not None and time.monotonic() >= deadline:
+                raise WavelogError("Synchronisierungs-Deadline überschritten")
+            if yielded_pages >= page_limit:
+                raise WavelogError("Wavelog-Paginierung überschreitet das Seitenlimit")
             station_filter = ",".join(str(int(value)) for value in (station_ids or []))
             params = {"since_id": since_id, "qso_since": qso_since, "qso_until": qso_until,
                       "station_id": station_filter, "page": page, "per_page": self.MAX_PAGE_SIZE}
@@ -1931,6 +2023,7 @@ class WavelogClient:
             seen_pages.add(signature)
             if data:
                 yield data
+                yielded_pages += 1
             if not meta.get("has_more"):
                 break
             page += 1
@@ -2550,6 +2643,17 @@ class SyncEngine:
         self.db = db
         self.client = client
 
+    @staticmethod
+    def _check_cancel(cancel_event: threading.Event | None) -> None:
+        """Stop before a local or remote mutation when the UI requests it."""
+        if cancel_event is not None and cancel_event.is_set():
+            raise WavelogError("Synchronisierung wurde abgebrochen")
+
+    @staticmethod
+    def _report_progress(progress_callback, phase: str, current: int = 0, total: int = 0) -> None:
+        if progress_callback is not None:
+            progress_callback(phase, current, total)
+
     def push_new_only(self, station_profile_id: int) -> SyncSummary:
         """Upload new LOCAL ONLY QSOs without pulling, patching or deleting.
 
@@ -2744,11 +2848,19 @@ class SyncEngine:
             updated += 1
         return updated, errors
 
-    def sync(self, station_profile_id: int, station_map: dict[int, dict[str, Any]] | None = None) -> SyncSummary:
+    def sync(self, station_profile_id: int, station_map: dict[int, dict[str, Any]] | None = None,
+             *, cancel_event: threading.Event | None = None, progress_callback=None) -> SyncSummary:
         summary = SyncSummary()
         station_map = station_map or {}
+        self._check_cancel(cancel_event)
         locals_map = self._local_map()
+        # Remote fetches may take minutes.  Never apply their stale view over a
+        # local edit made after this point; the journal/version remains for the
+        # following delta run instead.
+        sync_snapshot = self.db.version_snapshot(locals_map)
+        journal_at_start = self.db.pending_journal_changes()
         allowed_station_ids = {int(station_profile_id), *self.db.xota_station_ids()}
+        self._report_progress(progress_callback, "Baseline wird geladen", 0, 0)
 
         # Clubstation safety: a normal member token intentionally sees only the
         # QSOs of its acting OPERATOR. In that case an absent QSO must NOT be
@@ -2770,10 +2882,17 @@ class SyncEngine:
         # Fetch the complete current Wavelog view first. This is what lets us
         # detect remote edits and deletions, not just newly created IDs.
         try:
-            all_remote_rows = self.client.list_qsos(since_id=0, station_ids=allowed_station_ids)
+            all_remote_rows = self.client.list_qsos(
+                since_id=0, station_ids=allowed_station_ids, cancel_event=cancel_event,
+            )
+        except WavelogError:
+            # Cancellation is not a successful, checkpointable partial sync.
+            raise
         except Exception:
             summary.errors += 1
             return summary
+
+        self._check_cancel(cancel_event)
 
         remote_rows = [row for row in all_remote_rows if remote_station_profile_id(row) in allowed_station_ids]
         excluded_remote_rows = [row for row in all_remote_rows if remote_station_profile_id(row) not in allowed_station_ids]
@@ -2807,7 +2926,11 @@ class SyncEngine:
         claimed_remote: set[int] = set()
 
         # 1) Reconcile records that are already linked to Wavelog.
-        for m in list(self.db.list_meta()):
+        linked_metas = list(self.db.list_meta())
+        self._report_progress(progress_callback, "Verknüpfte QSOs werden abgeglichen", 0, len(linked_metas))
+        for index, m in enumerate(linked_metas, 1):
+            self._check_cancel(cancel_event)
+            self._report_progress(progress_callback, "Verknüpfte QSOs werden abgeglichen", index, len(linked_metas))
             wid = m.get("wavelog_id")
             if not wid:
                 continue
@@ -2904,6 +3027,9 @@ class SyncEngine:
                     if local_changed:
                         self.db.set_status(lid, "conflict", wavelog_id=wid, error="remote_deleted")
                         summary.conflicts += 1
+                    elif not self.db.unchanged_since(lid, sync_snapshot.get(lid)):
+                        self.db.set_status(lid, "conflict", wavelog_id=wid, error="local_changed_during_sync")
+                        summary.conflicts += 1
                     else:
                         self.store.delete(lid)
                         self.db.delete_meta(lid)
@@ -2925,11 +3051,15 @@ class SyncEngine:
                                        last_synced_hash=local_now_hash, remote_hash=rh)
                     summary.patched += 1
                 elif remote_changed:
-                    updated = self._replace_local_from_remote(lid, remote, station_map)
-                    self.db.set_status(lid, "synced", wavelog_id=wid,
-                                       last_synced_hash=qso_hash(updated), remote_hash=remote_now_hash)
-                    locals_map[lid] = updated
-                    summary.remote_updated += 1
+                    if not self.db.unchanged_since(lid, sync_snapshot.get(lid)):
+                        self.db.set_status(lid, "conflict", wavelog_id=wid, error="local_changed_during_sync")
+                        summary.conflicts += 1
+                    else:
+                        updated = self._replace_local_from_remote(lid, remote, station_map)
+                        self.db.set_status(lid, "synced", wavelog_id=wid,
+                                           last_synced_hash=qso_hash(updated), remote_hash=remote_now_hash)
+                        locals_map[lid] = updated
+                        summary.remote_updated += 1
                 else:
                     # Establish/refresh the baseline for older metadata rows.
                     self.db.set_status(lid, "synced", wavelog_id=wid,
@@ -2941,7 +3071,11 @@ class SyncEngine:
         # 2) New/previously unlinked Wavelog records -> link to a matching
         # LOCAL ONLY QSO or create a new ADI record.
         locals_now = self.store.scan()
-        for wid, r in sorted(remote_by_id.items()):
+        remote_items = sorted(remote_by_id.items())
+        self._report_progress(progress_callback, "Neue Wavelog-QSOs werden übernommen", 0, len(remote_items))
+        for index, (wid, r) in enumerate(remote_items, 1):
+            self._check_cancel(cancel_event)
+            self._report_progress(progress_callback, "Neue Wavelog-QSOs werden übernommen", index, len(remote_items))
             if wid in claimed_remote or self.db.get_by_wavelog_id(wid):
                 continue
             candidates = []
@@ -2975,7 +3109,11 @@ class SyncEngine:
         # first upload from an earlier run). This happens after linking remote
         # rows so the same QSO is not duplicated.
         locals_map = {q["local_id"]: q for q in self.store.scan()}
-        for m in list(self.db.list_meta()):
+        upload_metas = list(self.db.list_meta())
+        self._report_progress(progress_callback, "Lokale Änderungen werden übertragen", 0, len(upload_metas))
+        for index, m in enumerate(upload_metas, 1):
+            self._check_cancel(cancel_event)
+            self._report_progress(progress_callback, "Lokale Änderungen werden übertragen", index, len(upload_metas))
             if m.get("wavelog_id") is not None:
                 continue
             if m.get("status") not in ("local_only", "pending", "error"):
@@ -2996,10 +3134,17 @@ class SyncEngine:
                 self.db.set_status(lid, "error", error=str(e))
                 summary.errors += 1
 
+        self._check_cancel(cancel_event)
+        self._report_progress(progress_callback, "QSL-Status wird aktualisiert", 0, 0)
         try:
             summary.qsl_updated, summary.qsl_errors = self._refresh_qsl_statuses(station_profile_id, allowed_station_ids)
         except Exception:
             summary.qsl_errors += 1
+        # Only consume changes that predate this run.  Edits made while the
+        # baseline was fetched retain a newer journal row for the next delta.
+        self.db.consume_journal_changes([change["id"] for change in journal_at_start])
+        self.db.set_sync_state(int(station_profile_id), phase="idle")
+        self._report_progress(progress_callback, "Synchronisierung abgeschlossen", 1, 1)
         return summary
 
     def status_for(self, local_id: str) -> str:

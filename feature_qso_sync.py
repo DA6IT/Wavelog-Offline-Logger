@@ -24,6 +24,7 @@ class QsoSyncFeatureMixin:
         self.sync_is_automatic = False
         self.sync_operation = ""
         self.sync_reason = ""
+        self.sync_cancel_event: threading.Event | None = None
         self.sync_progress_dialog: SyncProgressDialog | None = None
         self.startup_full_sync_pending = True
         self.external_enrichment_pending: set[tuple[str, str]] = set()
@@ -923,6 +924,20 @@ class QsoSyncFeatureMixin:
             return
         self.sync_progress_dialog = SyncProgressDialog(self, reason, status_text)
 
+    def _update_sync_progress(self, phase: str, current: int = 0, total: int = 0):
+        dialog = self.sync_progress_dialog
+        if dialog is not None and dialog.winfo_exists():
+            dialog.set_progress(phase, current, total)
+        suffix = f" ({current}/{total})" if total else ""
+        self.status_var.set(phase + suffix)
+        self.sync_label.configure(text=phase + suffix)
+
+    def cancel_active_sync(self):
+        """Request cancellation; the worker commits no new sync checkpoint."""
+        if self.sync_cancel_event is not None:
+            self.sync_cancel_event.set()
+            self.status_var.set("Synchronisierung wird nach dem aktuellen Schritt abgebrochen …")
+
     def _complete_sync_progress(self, success: bool, details: str) -> bool:
         dialog = self.sync_progress_dialog
         if dialog is None or not dialog.winfo_exists():
@@ -943,7 +958,7 @@ class QsoSyncFeatureMixin:
         self.sync_reason = ""
         if self.close_requested or reason == "shutdown":
             self._finalize_close()
-        else:
+        elif reason == "startup":
             self._request_auto_sync(delay_ms=600)
 
     def _start_sync(
@@ -969,6 +984,7 @@ class QsoSyncFeatureMixin:
         self.sync_is_automatic = automatic
         self.sync_operation = "full"
         self.sync_reason = reason
+        self.sync_cancel_event = threading.Event()
         if reason == "startup":
             progress_text = "Vollständiger Start-Sync läuft …"
         elif reason == "shutdown":
@@ -977,15 +993,20 @@ class QsoSyncFeatureMixin:
             progress_text = "Automatische Synchronisierung läuft …" if automatic else "Synchronisierung läuft …"
         self.status_var.set(progress_text)
         self.sync_label.configure(text=progress_text)
-        if reason in ("startup", "shutdown"):
-            self._show_sync_progress(reason, progress_text)
+        self._show_sync_progress(reason, progress_text)
 
         def worker():
             try:
                 stations = client.stations()
                 smap = {int(s.get("id")): s for s in stations if s.get("id") is not None}
                 engine = SyncEngine(self.store, self.db, client)
-                summary = engine.sync(station_id, smap)
+                def progress(phase: str, current: int, total: int):
+                    if not self.closing:
+                        self.after(0, lambda: self._update_sync_progress(phase, current, total))
+                summary = engine.sync(
+                    station_id, smap, cancel_event=self.sync_cancel_event,
+                    progress_callback=progress,
+                )
                 contest_summary = ContestSyncEngine(self.store, self.db, client).sync(station_id)
                 wsjtx_note = ""
                 try:
@@ -1035,6 +1056,7 @@ class QsoSyncFeatureMixin:
         self.sync_busy = False
         self.sync_is_automatic = False
         self.sync_operation = ""
+        self.sync_cancel_event = None
         self.db.set_setting("last_sync_at", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"))
         self._set_wavelog_mode_ui(True)
         self.status_var.set(("Auto-Sync fertig · " if automatic else "Sync fertig · ") + msg)
@@ -1054,6 +1076,7 @@ class QsoSyncFeatureMixin:
         self.sync_busy = False
         self.sync_is_automatic = False
         self.sync_operation = ""
+        self.sync_cancel_event = None
         has_progress = self.sync_progress_dialog is not None
         if automatic or has_progress:
             self.status_var.set("Auto-Sync fehlgeschlagen · QSOs bleiben LOCAL ONLY")
