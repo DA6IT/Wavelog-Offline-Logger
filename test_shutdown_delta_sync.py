@@ -104,6 +104,20 @@ class ShutdownDeltaSyncTests(unittest.TestCase):
         self.assertTrue(WavelogOnlineSettings.from_storage(get_setting, lambda: "token").delta_sync_on_exit)
         self.assertFalse(WavelogOnlineSettings.migrate_shutdown_sync_setting(get_setting, set_setting))
 
+    def test_explicit_delta_setting_wins_over_legacy_shutdown_setting(self):
+        values = {"full_sync_on_exit": "1", "delta_sync_on_exit": "0"}
+        writes = []
+
+        def get_setting(key, default=""):
+            return values.get(key, default)
+
+        def set_setting(key, value):
+            writes.append((key, value))
+
+        self.assertFalse(WavelogOnlineSettings.migrate_shutdown_sync_setting(get_setting, set_setting))
+        self.assertEqual([], writes)
+        self.assertFalse(WavelogOnlineSettings.from_storage(get_setting, lambda: "token").delta_sync_on_exit)
+
     def test_manual_sync_still_starts_full_reconciliation(self):
         calls = []
         app = object.__new__(QsoSyncFeatureMixin)
