@@ -9,7 +9,7 @@ from callbook import (
     CALLBOOK_SOURCE_DISABLED, CALLBOOK_SOURCE_QRZ, CALLBOOK_SOURCE_WAVELOG, CallbookError, QrzClient, lookup_candidate, normalize_wavelog_result,
 )
 from dx_cluster import DEFAULT_SPOTTER_HOST, DEFAULT_SPOTTER_PORT, DxClusterConfig, DxSpotterConfig
-from logger_core import WavelogClient
+from logger_core import WavelogClient, WavelogOnlineSettings
 from qsl_client import QSL_API_BASE, QslClient
 from ui_preferences import UiPreferences, save_ui_preferences
 from wsjtx_sync import WsjtxSyncSettingsPanel
@@ -178,8 +178,8 @@ class SettingsFeatureMixin:
         self.set_station_profile = tk.StringVar()
         self.set_auto_sync_online = tk.BooleanVar(value=False)
         self.set_auto_sync_delay = tk.StringVar(value="5 min")
-        self.set_full_sync_on_start = tk.BooleanVar(value=False)
-        self.set_full_sync_on_exit = tk.BooleanVar(value=False)
+        self.set_delta_sync_on_start = tk.BooleanVar(value=False)
+        self.set_delta_sync_on_exit = tk.BooleanVar(value=False)
         ttk.Label(right, text="Wavelog URL", style="Card.TLabel").grid(row=2, column=0, sticky="w", pady=(5,3))
         ttk.Entry(right, textvariable=self.set_url).grid(row=3, column=0, sticky="ew")
         ttk.Label(right, text="API-v2 Token", style="Card.TLabel").grid(row=4, column=0, sticky="w", pady=(8, 3))
@@ -219,13 +219,13 @@ class SettingsFeatureMixin:
         ).pack(side="left", padx=(10, 0))
         ttk.Checkbutton(
             right,
-            text="Vollständigen Sync beim App-Start ausführen",
-            variable=self.set_full_sync_on_start,
+            text="Schnellen Delta-Sync beim App-Start ausführen",
+            variable=self.set_delta_sync_on_start,
         ).grid(row=15, column=0, sticky="w", pady=(6, 0))
         ttk.Checkbutton(
             right,
-            text="Vollständigen Sync beim Beenden ausführen",
-            variable=self.set_full_sync_on_exit,
+            text="Schnellen Delta-Sync beim Beenden ausführen",
+            variable=self.set_delta_sync_on_exit,
         ).grid(row=16, column=0, sticky="w", pady=(6, 0))
         ttk.Label(
             right,
@@ -599,8 +599,11 @@ class SettingsFeatureMixin:
             auto_sync_delay_seconds = 300
         auto_sync_delay_seconds = min(3600, max(60, auto_sync_delay_seconds))
         self.set_auto_sync_delay.set(f"{auto_sync_delay_seconds // 60} min")
-        self.set_full_sync_on_start.set(self.db.get_setting("full_sync_on_start", "0") == "1")
-        self.set_full_sync_on_exit.set(self.db.get_setting("full_sync_on_exit", "0") == "1")
+        WavelogOnlineSettings.migrate_automatic_sync_settings(
+            self.db.get_setting, self.db.set_setting,
+        )
+        self.set_delta_sync_on_start.set(self.db.get_setting("delta_sync_on_start", "0") == "1")
+        self.set_delta_sync_on_exit.set(self.db.get_setting("delta_sync_on_exit", "0") == "1")
         source = self.db.get_setting("callbook_source", CALLBOOK_SOURCE_WAVELOG).strip().lower()
         self.set_callbook_source.set(callbook_source_name(source, self.language))
         self.set_callbook_auto.set(self.db.get_setting("callbook_auto_lookup", "1") == "1")
@@ -678,8 +681,8 @@ class SettingsFeatureMixin:
             if auto_sync_delay_minutes not in (1, 2, 5, 10, 15, 30, 60):
                 raise ValueError("Die Auto-Sync-Verzögerung ist ungültig.")
             self.db.set_setting("auto_sync_delay_seconds", auto_sync_delay_minutes * 60)
-            self.db.set_setting("full_sync_on_start", "1" if self.set_full_sync_on_start.get() else "0")
-            self.db.set_setting("full_sync_on_exit", "1" if self.set_full_sync_on_exit.get() else "0")
+            self.db.set_setting("delta_sync_on_start", "1" if self.set_delta_sync_on_start.get() else "0")
+            self.db.set_setting("delta_sync_on_exit", "1" if self.set_delta_sync_on_exit.get() else "0")
             source = CALLBOOK_SOURCE_LABELS.get(self.set_callbook_source.get(), CALLBOOK_SOURCE_WAVELOG)
             self.db.set_setting("callbook_source", source)
             self.db.set_setting("callbook_auto_lookup", "1" if self.set_callbook_auto.get() else "0")

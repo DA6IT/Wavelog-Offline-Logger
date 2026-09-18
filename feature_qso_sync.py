@@ -24,6 +24,7 @@ class QsoSyncFeatureMixin:
         self.sync_is_automatic = False
         self.sync_operation = ""
         self.sync_reason = ""
+        self.sync_cancel_event: threading.Event | None = None
         self.sync_progress_dialog: SyncProgressDialog | None = None
         self.startup_full_sync_pending = True
         self.external_enrichment_pending: set[tuple[str, str]] = set()
@@ -761,10 +762,10 @@ class QsoSyncFeatureMixin:
         ):
             return
 
-        # Läuft ohnehin ein vollständiger Wavelog-Startsync, wird WSJT-X dort
-        # an der richtigen Stelle nach Wavelog -> LOCAL eingebunden.
+        # A configured Wavelog startup delta runs first so its small upload is
+        # not interleaved with the optional WSJT-X import.
         wavelog_settings = self._wavelog_online_settings()
-        if wavelog_settings.configured and wavelog_settings.full_sync_on_start:
+        if wavelog_settings.configured and wavelog_settings.delta_sync_on_start:
             return
 
         if self.sync_busy:
@@ -915,6 +916,81 @@ class QsoSyncFeatureMixin:
     def sync_now(self):
         self._start_sync(automatic=False, reason="manual")
 
+    def _start_shutdown_delta_sync(self):
+        self._start_delta_sync(reason="shutdown")
+
+    def _start_delta_sync(self, *, reason: str):
+        """Upload only new QSOs automatically; never reconcile or inspect Wavelog."""
+        if self.sync_busy or self.closing:
+            return
+        settings = self._wavelog_online_settings()
+        self.sync_busy = True
+        self.sync_is_automatic = True
+        self.sync_operation = "delta"
+        self.sync_reason = reason
+        self.sync_cancel_event = threading.Event()
+        progress_text = (
+            "Delta-Abschluss-Sync läuft …"
+            if reason == "shutdown" else "Delta-Start-Sync läuft …"
+        )
+        self.status_var.set(progress_text)
+        self.sync_label.configure(text=progress_text)
+        self._show_sync_progress(reason, progress_text)
+
+        def progress(phase: str, current: int, total: int):
+            if not self.closing:
+                self.after(0, lambda: self._update_sync_progress(phase, current, total))
+
+        def worker():
+            try:
+                summary = SyncEngine(
+                    self.store, self.db, WavelogClient(settings.base_url, settings.token),
+                ).push_new_only(
+                    settings.station_id,
+                    cancel_event=self.sync_cancel_event,
+                    progress_callback=progress,
+                )
+                message = f"Delta-Sync: {summary.pushed} neue QSOs hochgeladen · Fehler {summary.errors}"
+                if not self.closing:
+                    self.after(0, lambda: self._delta_sync_finished(message, reason))
+            except Exception as exc:
+                message = str(exc)
+                if not self.closing:
+                    self.after(0, lambda: self._delta_sync_failed(message, reason))
+
+        threading.Thread(target=worker, name="wavelog-shutdown-delta-sync", daemon=True).start()
+
+    def _delta_sync_finished(self, message: str, reason: str):
+        self.sync_busy = False
+        self.sync_is_automatic = False
+        self.sync_operation = ""
+        self.sync_cancel_event = None
+        self.db.set_setting("last_sync_at", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"))
+        self.status_var.set(message)
+        self.refresh_qsos()
+        if self._complete_sync_progress(True, message):
+            return
+        self.sync_reason = ""
+        if reason == "shutdown":
+            self._finalize_close()
+
+    def _delta_sync_failed(self, message: str, reason: str):
+        cancelled = self.sync_cancel_event is not None and self.sync_cancel_event.is_set()
+        self.sync_busy = False
+        self.sync_is_automatic = False
+        self.sync_operation = ""
+        self.sync_cancel_event = None
+        if cancelled and reason == "shutdown":
+            self.status_var.set("Delta-Abschluss-Sync abgebrochen; App wird geschlossen.")
+            self._finalize_close()
+            return
+        self.status_var.set("Delta-Sync fehlgeschlagen; QSOs bleiben lokal gespeichert.")
+        write_startup_log("Delta-Sync fehlgeschlagen: " + message)
+        if reason == "shutdown":
+            self._finalize_close()
+        else:
+            self._complete_sync_progress(False, message)
+
     def _show_sync_progress(self, reason: str, status_text: str):
         dialog = self.sync_progress_dialog
         if dialog is not None and dialog.winfo_exists():
@@ -922,6 +998,20 @@ class QsoSyncFeatureMixin:
             dialog.lift()
             return
         self.sync_progress_dialog = SyncProgressDialog(self, reason, status_text)
+
+    def _update_sync_progress(self, phase: str, current: int = 0, total: int = 0):
+        dialog = self.sync_progress_dialog
+        if dialog is not None and dialog.winfo_exists():
+            dialog.set_progress(phase, current, total)
+        suffix = f" ({current}/{total})" if total else ""
+        self.status_var.set(phase + suffix)
+        self.sync_label.configure(text=phase + suffix)
+
+    def cancel_active_sync(self):
+        """Request cancellation; the worker commits no new sync checkpoint."""
+        if self.sync_cancel_event is not None:
+            self.sync_cancel_event.set()
+            self.status_var.set("Synchronisierung wird nach dem aktuellen Schritt abgebrochen …")
 
     def _complete_sync_progress(self, success: bool, details: str) -> bool:
         dialog = self.sync_progress_dialog
@@ -943,7 +1033,11 @@ class QsoSyncFeatureMixin:
         self.sync_reason = ""
         if self.close_requested or reason == "shutdown":
             self._finalize_close()
-        else:
+        elif reason == "startup":
+            # The initial startup check deferred WSJT-X while the configured
+            # Wavelog delta was running. Resume that optional local import
+            # before scheduling ordinary online uploads.
+            self._maybe_startup_wsjtx_sync()
             self._request_auto_sync(delay_ms=600)
 
     def _start_sync(
@@ -953,6 +1047,11 @@ class QsoSyncFeatureMixin:
         reason: str = "manual",
         force_wsjtx: bool = False,
     ):
+        # Full reconciliation is intentionally available only through an
+        # explicit user action.  Automatic start/exit paths use
+        # ``_start_delta_sync`` and must not be able to reach this worker.
+        if automatic or reason != "manual":
+            return
         if self.sync_busy:
             return
         try:
@@ -969,23 +1068,24 @@ class QsoSyncFeatureMixin:
         self.sync_is_automatic = automatic
         self.sync_operation = "full"
         self.sync_reason = reason
-        if reason == "startup":
-            progress_text = "Vollständiger Start-Sync läuft …"
-        elif reason == "shutdown":
-            progress_text = "Vollständiger Abschluss-Sync läuft …"
-        else:
-            progress_text = "Automatische Synchronisierung läuft …" if automatic else "Synchronisierung läuft …"
+        self.sync_cancel_event = threading.Event()
+        progress_text = "Synchronisierung läuft …"
         self.status_var.set(progress_text)
         self.sync_label.configure(text=progress_text)
-        if reason in ("startup", "shutdown"):
-            self._show_sync_progress(reason, progress_text)
+        self._show_sync_progress(reason, progress_text)
 
         def worker():
             try:
                 stations = client.stations()
                 smap = {int(s.get("id")): s for s in stations if s.get("id") is not None}
                 engine = SyncEngine(self.store, self.db, client)
-                summary = engine.sync(station_id, smap)
+                def progress(phase: str, current: int, total: int):
+                    if not self.closing:
+                        self.after(0, lambda: self._update_sync_progress(phase, current, total))
+                summary = engine.sync(
+                    station_id, smap, cancel_event=self.sync_cancel_event,
+                    progress_callback=progress,
+                )
                 contest_summary = ContestSyncEngine(self.store, self.db, client).sync(station_id)
                 wsjtx_note = ""
                 try:
@@ -1035,6 +1135,7 @@ class QsoSyncFeatureMixin:
         self.sync_busy = False
         self.sync_is_automatic = False
         self.sync_operation = ""
+        self.sync_cancel_event = None
         self.db.set_setting("last_sync_at", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"))
         self._set_wavelog_mode_ui(True)
         self.status_var.set(("Auto-Sync fertig · " if automatic else "Sync fertig · ") + msg)
@@ -1054,6 +1155,7 @@ class QsoSyncFeatureMixin:
         self.sync_busy = False
         self.sync_is_automatic = False
         self.sync_operation = ""
+        self.sync_cancel_event = None
         has_progress = self.sync_progress_dialog is not None
         if automatic or has_progress:
             self.status_var.set("Auto-Sync fehlgeschlagen · QSOs bleiben LOCAL ONLY")

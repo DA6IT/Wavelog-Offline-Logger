@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/USER_GUIDE.md)
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.21.0. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.21.1. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -11,7 +11,7 @@ Der Logger arbeitet **Offline-first**:
 1. Jedes neue QSO wird zuerst als ADI auf dem eigenen Rechner gespeichert.
 2. Ohne Internet oder ohne erreichbares Wavelog bleibt es als `LOCAL ONLY` erhalten.
 3. Bei erreichbarem Wavelog kann die App neue QSOs automatisch pushen.
-4. Ein vollständiger bidirektionaler Sync bleibt jederzeit manuell möglich und kann zusätzlich beim Start und/oder Beenden laufen.
+4. Ein vollständiger bidirektionaler Sync mit Integritätsprüfung bleibt jederzeit manuell möglich. Optionaler Delta-Sync beim Start und/oder Beenden überträgt nur neue lokale QSOs.
 
 Damit ist das Logbuch nicht von einer dauerhaften Internetverbindung abhängig. Wavelog-Daten werden bei einer lokalen Profil-Löschung niemals automatisch gelöscht.
 
@@ -122,12 +122,12 @@ Rechte Seite:
 - API-v2-Token im Format `wl2_…`
 - Wavelog-Stationsprofil
 - automatischer Push neuer QSOs im Online-Modus
-- vollständiger Sync beim App-Start
-- vollständiger Sync beim Beenden
+- schneller Delta-Sync beim App-Start
+- schneller Delta-Sync beim Beenden
 
 Für den Sync werden passende QSO- und Stationsrechte benötigt. Für Callbook-Abfragen über Wavelog wird zusätzlich `lookup:read` benötigt.
 
-Die drei Sync-Optionen sind unabhängig voneinander und gelten nur für das aktive Profil. Jedes lokale Logger-Profil ist fest mit dem dort ausgewählten Wavelog-Stationsprofil verknüpft. Beim Download werden nur dessen QSOs übernommen; das aktive Logbuch muss dazu in der Wavelog-Weboberfläche nicht umgestellt werden.
+Die drei Sync-Optionen sind unabhängig voneinander und gelten nur für das aktive Profil. Die schnellen Start-/Beenden-Abgleiche übertragen nur neue lokale QSOs, zeigen Fortschritt und Ergebnis und führen keine Downloads, Änderungen, Löschungen, Integritätsprüfung oder Konfliktauflösung durch. Dafür bleibt **Jetzt vollständig abgleichen** verfügbar; ein Abbruch dieses vollständigen Abgleichs behält seinen gespeicherten Stand für die Fortsetzung. Ältere automatische Start-/Beenden-Einstellungen werden sicher in die passenden Delta-Sync-Optionen überführt. Jedes lokale Logger-Profil ist fest mit dem dort ausgewählten Wavelog-Stationsprofil verknüpft. Beim Download werden nur dessen QSOs übernommen; das aktive Logbuch muss dazu in der Wavelog-Weboberfläche nicht umgestellt werden.
 
 ### 4.3 Callbook & Online-Dienste
 
@@ -272,15 +272,15 @@ Die App prüft regelmäßig die konfigurierte Wavelog-API:
 
 Bei aktivierter Option werden im laufenden Betrieb ausschließlich neue, noch nie verknüpfte `LOCAL ONLY`-QSOs gepusht. Ein fehlgeschlagener oder mehrdeutiger Upload wird nicht blind wiederholt. Änderungen, Downloads, Löschungen und Konflikte sind Aufgabe des vollständigen Syncs.
 
-### 9.2 Vollständiger Sync beim Start oder Beenden
+### 9.2 Delta-Sync beim Start oder Beenden
 
 ![Laufender automatischer Sync](screenshots/sync-progress-running.png)
 
-Während eines automatischen Voll-Syncs sperrt ein Statusfenster die Bedienung. Beim Beenden werden CAT, DX-Cluster und UDP zuerst gestoppt, damit kein weiteres externes QSO eingeht.
+Beim automatischen Delta-Sync werden ausschließlich neue lokale QSOs hochgeladen; Downloads, Änderungen, Löschungen, Konflikte und Integritätsabgleiche werden dabei nicht ausgeführt. Diese vollständigen Abgleichoperationen bleiben dem manuellen Sync vorbehalten. Ein Statusfenster sperrt die Bedienung. Beim Beenden werden CAT, DX-Cluster und UDP zuerst gestoppt, damit kein weiteres externes QSO eingeht.
 
 ![Abgeschlossener automatischer Sync](screenshots/sync-progress-complete.png)
 
-Nach Abschluss zeigt das Fenster die Zusammenfassung. Erst **OK** gibt die App frei beziehungsweise beendet sie. Scheitert der Sync, bleiben die lokalen ADI-Daten erhalten und die Fehlermeldung wird im Fenster angezeigt.
+Nach Abschluss zeigt das Fenster die Zusammenfassung. Erst **OK** gibt die App frei beziehungsweise beendet sie. Scheitert der Sync, bleiben die lokalen ADI-Daten erhalten und die Fehlermeldung wird im Fenster angezeigt. Ein Abbruch des Delta-Abschluss-Syncs setzt das Beenden unmittelbar fort.
 
 ### ADIF importieren und exportieren
 

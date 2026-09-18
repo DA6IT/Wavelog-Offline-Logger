@@ -125,7 +125,7 @@ class UsageStatsTests(unittest.TestCase):
             service.mark_notice_seen(enabled=True)
 
             with self.assertRaises(UsageStatsError):
-                service.send_heartbeat("0.21.0")
+                service.send_heartbeat("0.21.1")
 
         self.assertEqual(calls, [])
 

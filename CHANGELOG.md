@@ -2,6 +2,19 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.21.1] - 2026-09-18
+
+### Changed
+
+- der automatische Wavelog-Abgleich beim Start und Beenden verwendet jetzt einen schnellen Delta-Upload neuer lokaler QSOs statt eines vollständigen Abgleichs
+- der vollständige Abgleich einschließlich Integritätsprüfung bleibt eine bewusste manuelle Aktion
+- ältere automatische Start-/Beenden-Einstellungen werden sicher in die entsprechenden Delta-Sync-Einstellungen überführt, ohne eine ausdrücklich gewählte neue Einstellung zu überschreiben
+- der automatische Delta-Sync zeigt Fortschritt, Abbruch und Ergebnis; ein abgebrochener vollständiger Sync behält seinen gespeicherten Checkpoint und sein Journal für die Fortsetzung
+
+### Zuverlässigkeit
+
+- Sync-Snapshots schützen lokale Änderungen und die Konfliktbehandlung; die QSL-Statusverarbeitung bleibt vom QSO-Sync entkoppelt
+
 ## [0.21.0] - 2026-09-11
 
 ### Added
