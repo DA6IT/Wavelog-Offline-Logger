@@ -1,6 +1,6 @@
 # Wavelog Offline Logger – Architektur & Entwicklerhinweise
 
-> Stand: 0.21.0
+> Stand: 0.21.1
 > Ziel: große Funktionsbereiche getrennt entwickeln, ohne die zentrale `app.py` wieder wachsen zu lassen.
 
 ## Überblick
@@ -372,13 +372,13 @@ Der Verzeichnisname wird aus `appVersion` erzeugt.
 Beispiel:
 
 ```go
-appVersion = "0.21.0"
+appVersion = "0.21.1"
 ```
 
 ergibt:
 
 ```text
-app-v0210
+app-v0211
 ```
 
 Damit muss der Runtime-Pfad beim nächsten Release nicht mehr separat von Hand geändert werden.
@@ -412,13 +412,13 @@ Mindestens diese beiden Werte müssen übereinstimmen:
 `logger_core.py`:
 
 ```python
-VERSION = "0.21.0"
+VERSION = "0.21.1"
 ```
 
 `bootstrap_windows.go`:
 
 ```go
-appVersion = "0.21.0"
+appVersion = "0.21.1"
 ```
 
 Das Windows-Buildscript prüft diesen Zustand absichtlich und bricht bei einem Konflikt ab.

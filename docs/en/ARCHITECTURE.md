@@ -1,6 +1,6 @@
 # Wavelog Offline Logger — architecture and developer notes
 
-> Version: 0.21.0
+> Version: 0.21.1
 > Goal: keep large functional areas independently maintainable without growing `app.py` back into a monolith.
 
 ## Overview
@@ -106,7 +106,7 @@ The Windows executable is a Go launcher. `bootstrap_windows.go` embeds all `feat
 
 Non-feature modules such as `app_common.py`, `ui_theme.py`, `dialogs.py`, `wsjtx_sync.py`, `qsl_eqsl.py` and `usage_stats.py` must be embedded explicitly.
 
-The runtime directory is derived from `appVersion`. For example, `0.21.0` becomes `app-v0210`, so a new release does not require a second hard-coded runtime-path update.
+The runtime directory is derived from `appVersion`. For example, `0.21.1` becomes `app-v0211`, so a new release does not require a second hard-coded runtime-path update.
 
 Linux and macOS use PyInstaller with `app.py`; normal Python imports are discovered automatically, but real platform builds still need release smoke testing.
 
@@ -116,12 +116,12 @@ At minimum these values must match:
 
 ```python
 # logger_core.py
-VERSION = "0.21.0"
+VERSION = "0.21.1"
 ```
 
 ```go
 // bootstrap_windows.go
-appVersion = "0.21.0"
+appVersion = "0.21.1"
 ```
 
 The Windows build script verifies this relationship. `whats_new.py`, changelogs, user guides and release notes should be updated for every published version.

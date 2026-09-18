@@ -1,4 +1,4 @@
-# User guide — DA6IT.de Wavelog Offline Logger 0.21.0
+# User guide — DA6IT.de Wavelog Offline Logger 0.21.1
 
 [Deutsch](../USER_GUIDE.md) · **English**
 
@@ -52,7 +52,7 @@ POTA candidates use a locally cached official catalogue. Nearby markers up to 10
 
 Important states are `LOCAL ONLY`, `WAVELOG ✓`, changed, conflict and sync error. Select a row to see the stored reason. A conflict is resolved only by explicitly choosing the local or Wavelog version. Missing external ADI data is never interpreted as an automatic remote-deletion request.
 
-Online mode pushes only new, never-linked QSOs. Optional startup and shutdown delta syncs also upload only new local QSOs; they never download, edit, delete, reconcile integrity or resolve conflicts. Those complete reconciliation operations remain available through manual sync only. Automatic delta sync displays a blocking progress window and a final summary before the app becomes usable or closes. Cancelling a shutdown delta sync continues closing the app immediately.
+Online mode pushes only new, never-linked QSOs. Optional startup and shutdown delta syncs also upload only new local QSOs; they never download, edit, delete, reconcile integrity or resolve conflicts. Those complete reconciliation operations remain available through manual sync only. Automatic delta sync displays a blocking progress window and a final summary before the app becomes usable or closes. Cancelling a shutdown delta sync continues closing the app immediately. Existing automatic startup and shutdown settings are migrated safely to the matching delta-sync settings without overwriting an explicitly selected new option; a cancelled manual full sync retains its checkpoint and journal for resume.
 
 The QRZ, LoTW, eQSL, ClubLog and DCL columns show status supplied by Wavelog when available. Since v0.19.0, confirmation requests are restricted to station locations belonging to the active logger profile. ClubLog upload state is also read from Wavelog ADIF, while received confirmations preferably come from the confirmation API.
 

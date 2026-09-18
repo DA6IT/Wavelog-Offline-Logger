@@ -6,6 +6,13 @@ from __future__ import annotations
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
 
+    "0.21.1": (
+        "Der automatische Wavelog-Abgleich beim Start und Beenden überträgt jetzt nur neue lokale QSOs und ist dadurch schneller.",
+        "Der vollständige Abgleich mit Integritätsprüfung bleibt jederzeit bewusst manuell verfügbar.",
+        "Bestehende automatische Sync-Einstellungen werden sicher auf die neuen Schnellabgleiche übertragen.",
+        "Fortschritt und Ergebnis des Schnellabgleichs werden angezeigt; ein abgebrochener vollständiger Abgleich kann mit seinem gespeicherten Stand fortgesetzt werden.",
+        "Synchronisations-Snapshots schützen lokale Änderungen und Konflikte; QSL-Status bleibt vom QSO-Abgleich getrennt.",
+    ),
     "0.21.0": (
         "Im DX-Cluster und beim QSO-Log lässt sich das aktuelle Rufzeichen jetzt direkt auf QRZ.com öffnen.",
         "Der QSL Card Manager zeigt E-Mail-QSL-Empfehlungen, wenn eine Gegenstation bei eQSL nicht gefunden wird oder dort seit mehr als sechs Monaten kein aktueller Log-Upload erkennbar ist und eine E-Mail-Adresse verfügbar ist.",
@@ -82,6 +89,13 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
 
+    "0.21.1": (
+        "Automatic Wavelog synchronization at startup and shutdown now uploads only new local QSOs, so it finishes faster.",
+        "The complete synchronization with integrity checking remains available as an intentional manual action.",
+        "Existing automatic synchronization settings are migrated safely to the new fast synchronization options.",
+        "Fast synchronization shows progress and a result; a cancelled full synchronization can continue from its saved state.",
+        "Synchronization snapshots protect local changes and conflicts, while QSL status remains separate from QSO synchronization.",
+    ),
     "0.21.0": (
         "The DX Cluster and Log QSO pages can now open QRZ.com directly for the selected or currently entered callsign.",
         "The QSL Card Manager can recommend email QSLs when a station is missing from eQSL or has no recent log upload for more than six months and a usable email address is available.",

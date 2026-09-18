@@ -2,6 +2,19 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.21.1 — 2026-09-18
+
+### Changed
+
+- automatic Wavelog synchronization at application startup and shutdown now uses a fast delta upload of new local QSOs instead of a full reconciliation
+- the complete synchronization, including integrity reconciliation, remains an explicit manual action
+- legacy automatic start/shutdown settings are migrated safely to their corresponding delta-sync settings without overwriting an explicitly selected new setting
+- automatic delta synchronization provides progress, cancellation and a final result; a cancelled full synchronization retains its persisted checkpoint and journal for resume
+
+### Reliability
+
+- synchronization snapshots preserve local changes and conflict handling while the QSL status pipeline remains independent of QSO synchronization
+
 ## 0.21.0 — 2026-09-11
 
 ### Added
