@@ -2679,9 +2679,12 @@ class SyncEngine:
         This is the narrow online-mode operation. It intentionally performs no
         remote listing, QSL refresh, conflict resolution, PATCH or DELETE.
         """
+        self._check_cancel(cancel_event)
         summary = SyncSummary()
+        # The automatic path must not run the full local integrity/index
+        # reconciliation.  Its persistent candidate list is the checkpoint;
+        # scan only supplies the payload for those already queued records.
         local_qsos = self.store.scan()
-        self.db.reconcile_index(local_qsos)
         local_map = {q["local_id"]: q for q in local_qsos}
         candidates = self.db.list_new_upload_candidates()
         for index, meta in enumerate(candidates, start=1):

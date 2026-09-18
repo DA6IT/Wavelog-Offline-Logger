@@ -3,10 +3,11 @@ from __future__ import annotations
 import threading
 import unittest
 from types import SimpleNamespace
+from typing import Any, cast
 
 from feature_lifecycle import LifecycleFeatureMixin
 from feature_qso_sync import QsoSyncFeatureMixin
-from logger_core import WavelogOnlineSettings
+from logger_core import SyncEngine, WavelogOnlineSettings
 
 
 class _Status:
@@ -54,6 +55,30 @@ class _SyncProbe(QsoSyncFeatureMixin):
         self.finalized = True
 
 
+class _DeltaStore:
+    def scan(self):
+        return [{"local_id": "queued", "call": "DL1TEST"}]
+
+
+class _DeltaDb:
+    def list_new_upload_candidates(self):
+        return [{"local_id": "queued"}]
+
+    def reconcile_index(self, _qsos):
+        raise AssertionError("shutdown delta must not reconcile the local index")
+
+    def xota_station_id_for_qso(self, _local_id):
+        return None
+
+    def set_status(self, *_args, **_kwargs):
+        pass
+
+
+class _DeltaClient:
+    def create_qso(self, _payload):
+        return {"id": 123}
+
+
 class ShutdownDeltaSyncTests(unittest.TestCase):
     def test_shutdown_uses_delta_and_never_starts_full_sync(self):
         app = _LifecycleProbe()
@@ -93,6 +118,12 @@ class ShutdownDeltaSyncTests(unittest.TestCase):
         self.assertFalse(app.sync_busy)
         self.assertTrue(app.finalized)
         self.assertIn("abgebrochen", app.status_var.value)
+
+    def test_delta_upload_skips_full_integrity_reconciliation(self):
+        summary = SyncEngine(
+            cast(Any, _DeltaStore()), cast(Any, _DeltaDb()), cast(Any, _DeltaClient()),
+        ).push_new_only(1)
+        self.assertEqual(1, summary.pushed)
 
 
 if __name__ == "__main__":
