@@ -1805,7 +1805,17 @@ class WavelogOnlineSettings:
     auto_sync: bool = False
     auto_sync_delay_seconds: int = 300
     full_sync_on_start: bool = False
-    full_sync_on_exit: bool = False
+    delta_sync_on_exit: bool = False
+
+    @classmethod
+    def migrate_shutdown_sync_setting(cls, get_setting, set_setting) -> bool:
+        """Move the old shutdown-full-sync switch to the safe delta operation."""
+        delta_value = get_setting("delta_sync_on_exit", None)
+        if delta_value is not None:
+            return False
+        legacy_value = get_setting("full_sync_on_exit", "0")
+        set_setting("delta_sync_on_exit", "1" if str(legacy_value or "0") == "1" else "0")
+        return True
 
     @classmethod
     def from_storage(cls, get_setting, get_token) -> "WavelogOnlineSettings":
@@ -1827,7 +1837,10 @@ class WavelogOnlineSettings:
             auto_sync=str(get_setting("auto_sync_online", "0") or "0") == "1",
             auto_sync_delay_seconds=auto_sync_delay_seconds,
             full_sync_on_start=str(get_setting("full_sync_on_start", "0") or "0") == "1",
-            full_sync_on_exit=str(get_setting("full_sync_on_exit", "0") or "0") == "1",
+            delta_sync_on_exit=(
+                str(get_setting("delta_sync_on_exit", get_setting("full_sync_on_exit", "0")) or "0")
+                == "1"
+            ),
         )
 
     @property
@@ -2654,7 +2667,13 @@ class SyncEngine:
         if progress_callback is not None:
             progress_callback(phase, current, total)
 
-    def push_new_only(self, station_profile_id: int) -> SyncSummary:
+    def push_new_only(
+        self,
+        station_profile_id: int,
+        *,
+        cancel_event: threading.Event | None = None,
+        progress_callback=None,
+    ) -> SyncSummary:
         """Upload new LOCAL ONLY QSOs without pulling, patching or deleting.
 
         This is the narrow online-mode operation. It intentionally performs no
@@ -2664,7 +2683,10 @@ class SyncEngine:
         local_qsos = self.store.scan()
         self.db.reconcile_index(local_qsos)
         local_map = {q["local_id"]: q for q in local_qsos}
-        for meta in self.db.list_new_upload_candidates():
+        candidates = self.db.list_new_upload_candidates()
+        for index, meta in enumerate(candidates, start=1):
+            self._check_cancel(cancel_event)
+            self._report_progress(progress_callback, "Delta-Sync: neue QSOs werden hochgeladen", index - 1, len(candidates))
             local_id = meta["local_id"]
             qso = local_map.get(local_id)
             if not qso:
@@ -2687,6 +2709,7 @@ class SyncEngine:
             except Exception as exc:
                 self.db.set_status(local_id, "error", error=str(exc))
                 summary.errors += 1
+            self._report_progress(progress_callback, "Delta-Sync: neue QSOs werden hochgeladen", index, len(candidates))
         return summary
 
     def _local_map(self) -> dict[str, dict[str, Any]]:

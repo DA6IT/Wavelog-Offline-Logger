@@ -84,9 +84,9 @@ class SyncProgressDialog(tk.Toplevel):
     def set_running(self, reason: str, status_text: str):
         self.reason = reason
         explanation = (
-            "Vor der Bedienung wird das aktive Profil vollständig mit Wavelog abgeglichen."
+            "Vor der Bedienung werden nur neue lokale QSOs per Delta-Sync hochgeladen."
             if reason == "startup"
-            else "Vor dem Beenden wird das aktive Profil vollständig mit Wavelog abgeglichen."
+            else "Vor dem Beenden werden nur neue lokale QSOs per Delta-Sync hochgeladen."
         )
         self.heading.configure(text=self.parent._tr("Wavelog wird synchronisiert"), fg=theme.TEXT)
         self.explanation.configure(text=self.parent._tr(explanation))

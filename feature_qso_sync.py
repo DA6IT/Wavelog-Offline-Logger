@@ -916,6 +916,81 @@ class QsoSyncFeatureMixin:
     def sync_now(self):
         self._start_sync(automatic=False, reason="manual")
 
+    def _start_shutdown_delta_sync(self):
+        self._start_delta_sync(reason="shutdown")
+
+    def _start_delta_sync(self, *, reason: str):
+        """Upload only new QSOs automatically; never reconcile or inspect Wavelog."""
+        if self.sync_busy or self.closing:
+            return
+        settings = self._wavelog_online_settings()
+        self.sync_busy = True
+        self.sync_is_automatic = True
+        self.sync_operation = "delta"
+        self.sync_reason = reason
+        self.sync_cancel_event = threading.Event()
+        progress_text = (
+            "Delta-Abschluss-Sync läuft …"
+            if reason == "shutdown" else "Delta-Start-Sync läuft …"
+        )
+        self.status_var.set(progress_text)
+        self.sync_label.configure(text=progress_text)
+        self._show_sync_progress(reason, progress_text)
+
+        def progress(phase: str, current: int, total: int):
+            if not self.closing:
+                self.after(0, lambda: self._update_sync_progress(phase, current, total))
+
+        def worker():
+            try:
+                summary = SyncEngine(
+                    self.store, self.db, WavelogClient(settings.base_url, settings.token),
+                ).push_new_only(
+                    settings.station_id,
+                    cancel_event=self.sync_cancel_event,
+                    progress_callback=progress,
+                )
+                message = f"Delta-Sync: {summary.pushed} neue QSOs hochgeladen · Fehler {summary.errors}"
+                if not self.closing:
+                    self.after(0, lambda: self._delta_sync_finished(message, reason))
+            except Exception as exc:
+                message = str(exc)
+                if not self.closing:
+                    self.after(0, lambda: self._delta_sync_failed(message, reason))
+
+        threading.Thread(target=worker, name="wavelog-shutdown-delta-sync", daemon=True).start()
+
+    def _delta_sync_finished(self, message: str, reason: str):
+        self.sync_busy = False
+        self.sync_is_automatic = False
+        self.sync_operation = ""
+        self.sync_cancel_event = None
+        self.db.set_setting("last_sync_at", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"))
+        self.status_var.set(message)
+        self.refresh_qsos()
+        if self._complete_sync_progress(True, message):
+            return
+        self.sync_reason = ""
+        if reason == "shutdown":
+            self._finalize_close()
+
+    def _delta_sync_failed(self, message: str, reason: str):
+        cancelled = self.sync_cancel_event is not None and self.sync_cancel_event.is_set()
+        self.sync_busy = False
+        self.sync_is_automatic = False
+        self.sync_operation = ""
+        self.sync_cancel_event = None
+        if cancelled and reason == "shutdown":
+            self.status_var.set("Delta-Abschluss-Sync abgebrochen; App wird geschlossen.")
+            self._finalize_close()
+            return
+        self.status_var.set("Delta-Sync fehlgeschlagen; QSOs bleiben lokal gespeichert.")
+        write_startup_log("Delta-Sync fehlgeschlagen: " + message)
+        if reason == "shutdown":
+            self._finalize_close()
+        else:
+            self._complete_sync_progress(False, message)
+
     def _show_sync_progress(self, reason: str, status_text: str):
         dialog = self.sync_progress_dialog
         if dialog is not None and dialog.winfo_exists():

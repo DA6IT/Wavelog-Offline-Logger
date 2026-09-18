@@ -16,6 +16,9 @@ class WavelogOnlineFeatureMixin:
         self.auto_sync_job = None
 
     def _wavelog_online_settings(self) -> WavelogOnlineSettings:
+        WavelogOnlineSettings.migrate_shutdown_sync_setting(
+            self.db.get_setting, self.db.set_setting,
+        )
         return WavelogOnlineSettings.from_storage(self.db.get_setting, self.db.get_token)
 
     def _set_wavelog_mode_ui(self, online: bool, *, configured: bool = True):
@@ -103,7 +106,7 @@ class WavelogOnlineFeatureMixin:
             settings = self._wavelog_online_settings()
             if settings.full_sync_on_start and self.startup_full_sync_pending and not self.sync_busy:
                 self.startup_full_sync_pending = False
-                self._start_sync(automatic=True, reason="startup")
+                self._start_delta_sync(reason="startup")
             else:
                 # The start option applies only to the first successful probe
                 # of this app session. Enabling it later takes effect on the

@@ -37,10 +37,10 @@ class LifecycleFeatureMixin:
                 )
             return
         settings = self._wavelog_online_settings()
-        if settings.full_sync_on_exit and settings.configured and self.wavelog_online:
+        if settings.delta_sync_on_exit and settings.configured and self.wavelog_online:
             self.startup_full_sync_pending = False
-            self.status_var.set("Vollständiger Abschluss-Sync läuft …")
-            self._start_sync(automatic=True, reason="shutdown")
+            self.status_var.set("Delta-Abschluss-Sync läuft …")
+            self._start_shutdown_delta_sync()
             return
 
         try:
