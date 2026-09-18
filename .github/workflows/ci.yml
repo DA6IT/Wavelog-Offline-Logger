@@ -24,6 +24,7 @@ jobs:
       - name: Run selftests
         run: |
           python selftest.py
+          python -m unittest test_shutdown_delta_sync.py -v
           python -m unittest test_data_backup_security.py -v
           python -m unittest test_usage_stats.py test_qsl_eqsl.py -v
 
