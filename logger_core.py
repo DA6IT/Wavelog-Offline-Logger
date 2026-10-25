@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import zipfile
+from contextlib import contextmanager
 from ctypes import wintypes
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -24,9 +25,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from qso_duplicates import QsoMatcher
+from sync_write_buffer import SyncWriteBuffer
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.21.1"
+VERSION = "0.22.0"
 ADIF_VERSION = "3.1.7"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -522,6 +524,9 @@ class CountryDB:
         self.path = Path(path)
         self.exact: dict[str, CountryInfo] = {}
         self.prefixes: list[tuple[str, CountryInfo]] = []
+        # Longest-prefix index: prefix -> first entry in self.prefixes order.
+        self._prefix_index: dict[str, CountryInfo] = {}
+        self._max_prefix_len = 0
         self.loaded = False
         self._load()
 
@@ -598,6 +603,9 @@ class CountryDB:
         finish()
         # Longest prefix wins; exact calls are checked first.
         self.prefixes.sort(key=lambda x: len(x[0]), reverse=True)
+        for prefix, info in self.prefixes:
+            self._prefix_index.setdefault(prefix, info)
+        self._max_prefix_len = max((len(prefix) for prefix in self._prefix_index), default=0)
         self.loaded = bool(self.prefixes)
 
     def lookup(self, callsign: str) -> CountryInfo | None:
@@ -607,8 +615,12 @@ class CountryDB:
         if call in self.exact:
             return self.exact[call]
         # Exact portable/special entries can still exist for the full call.
-        for prefix, info in self.prefixes:
-            if call.startswith(prefix):
+        # Dictionary probes from the longest possible prefix down give the
+        # same result as scanning the length-sorted prefix list.
+        index = self._prefix_index
+        for length in range(min(len(call), self._max_prefix_len), 0, -1):
+            info = index.get(call[:length])
+            if info is not None:
                 return info
         return None
 
@@ -705,6 +717,9 @@ def unprotect_text(value: str | None) -> str:
 
 # ---------- ADIF ----------
 FIELD_RE = re.compile(r"<([^:>]+):(\d+)(?::[^>]*)?>", re.IGNORECASE)
+EOH_RE = re.compile(r"<EOH\s*>", re.IGNORECASE)
+EOR_RE = re.compile(r"<EOR\s*>", re.IGNORECASE)
+EOR_MARKER_RE = re.compile(r"<EOR", re.IGNORECASE)
 
 
 def adif_field(name: str, value: Any) -> str:
@@ -718,32 +733,36 @@ def adif_field(name: str, value: Any) -> str:
 
 def parse_adif(text: str) -> list[dict[str, str]]:
     # Ignore file header; parse each record between previous EOR/start and EOR.
+    # Search positions/end bounds are used instead of slicing ``text[pos:]``:
+    # slicing copied the remaining file once per record (quadratic runtime).
     pos = 0
-    eoh = re.search(r"<EOH\s*>", text, re.IGNORECASE)
+    eoh = EOH_RE.search(text)
     if eoh:
         pos = eoh.end()
     out: list[dict[str, str]] = []
+    search_field = FIELD_RE.search
+    search_eor = EOR_RE.search
     while True:
-        eor = re.search(r"<EOR\s*>", text[pos:], re.IGNORECASE)
+        eor = search_eor(text, pos)
         if not eor:
             break
-        end = pos + eor.start()
-        chunk = text[pos:end]
+        end = eor.start()
         fields: dict[str, str] = {}
-        p = 0
+        p = pos
         while True:
-            m = FIELD_RE.search(chunk, p)
+            m = search_field(text, p, end)
             if not m:
                 break
             name = m.group(1).upper().strip()
             length = int(m.group(2))
             start = m.end()
-            value = chunk[start:start + length]
+            # A declared length never reaches past this record's <EOR>.
+            value = text[start:min(start + length, end)]
             fields[name] = value
             p = start + length
         if fields:
             out.append(fields)
-        pos = pos + eor.end()
+        pos = eor.end()
     return out
 
 
@@ -903,6 +922,7 @@ class LogStore:
         self.lock = threading.RLock()
         self.migration_report: dict[str, Any] | None = None
         self._append_ready_paths: set[str] = set()
+        self._invalidate_cache()
         self._recover_pending_append(self.canonical_path)
         self._consolidate_existing_files()
 
@@ -918,6 +938,7 @@ class LogStore:
             if profile_key is not None:
                 self.profile_key = re.sub(r"[^A-Za-z0-9_-]", "", str(profile_key or ""))[:12]
             self._append_ready_paths.clear()
+            self._invalidate_cache()
             self._recover_pending_append(self.canonical_path)
             self._consolidate_existing_files()
 
@@ -939,21 +960,93 @@ class LogStore:
         except UnicodeDecodeError:
             return raw.decode("iso-8859-1")
 
-    def _read_file_strict(self, path: Path) -> list[dict[str, Any]]:
-        if not path.exists() or path.stat().st_size == 0:
-            return []
-        text = self._decode_adif(path)
-        fields = parse_adif(text)
-        if "<EOR" in text.upper() and not fields:
-            raise ValueError(f"ADIF-Datei kann nicht gelesen werden: {path.name}")
-        if "<EOR" not in text.upper() and text.strip():
-            raise ValueError(f"ADIF-Datei enthält keinen vollständigen QSO-Datensatz: {path.name}")
+    @staticmethod
+    def _records_from_fields(fields: Iterable[dict[str, str]], path: Path) -> list[dict[str, Any]]:
         records = []
         for values in fields:
             qso = adif_fields_to_qso(values)
             qso["_file"] = str(path)
             records.append(qso)
         return records
+
+    def _read_file_strict(self, path: Path) -> list[dict[str, Any]]:
+        """Always read from disk; used for post-write verification."""
+        if not path.exists() or path.stat().st_size == 0:
+            return []
+        text = self._decode_adif(path)
+        fields = parse_adif(text)
+        has_eor = EOR_MARKER_RE.search(text) is not None
+        if has_eor and not fields:
+            raise ValueError(f"ADIF-Datei kann nicht gelesen werden: {path.name}")
+        if not has_eor and text.strip():
+            raise ValueError(f"ADIF-Datei enthält keinen vollständigen QSO-Datensatz: {path.name}")
+        return self._records_from_fields(fields, path)
+
+    # ---- parsed-record cache -------------------------------------------
+    # Parsing a large ADIF dominates every scan/find/update.  The canonical
+    # file's parsed records are kept in memory and validated against the
+    # file's stat signature on every access, so external replacements or
+    # edits (restore, manual edit, another tool) are picked up.  Every write
+    # performed by this class invalidates or incrementally updates the cache.
+    # Cached dicts never leave the class; callers always receive copies.
+
+    @staticmethod
+    def _stat_key(path: Path) -> tuple[int, ...] | None:
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        return (st.st_size, st.st_mtime_ns, int(getattr(st, "st_ino", 0) or 0), st.st_ctime_ns)
+
+    def _invalidate_cache(self) -> None:
+        self._cache_path: str | None = None
+        self._cache_key: tuple[int, ...] | None = None
+        self._cache_records: list[dict[str, Any]] | None = None
+        self._cache_sorted: list[dict[str, Any]] | None = None
+        self._cache_by_id: dict[str, dict[str, Any]] | None = None
+
+    def _cached_records(self, path: Path) -> list[dict[str, Any]] | None:
+        if self._cache_records is None or self._cache_path != str(path):
+            return None
+        if self._stat_key(path) != self._cache_key:
+            self._invalidate_cache()
+            return None
+        return self._cache_records
+
+    def _set_cache(self, path: Path, key: tuple[int, ...] | None, records: list[dict[str, Any]]) -> None:
+        self._invalidate_cache()
+        if key is None or path != self.canonical_path:
+            return
+        self._cache_path = str(path)
+        self._cache_key = key
+        self._cache_records = records
+
+    def _load_records(self, path: Path, *, strict: bool) -> list[dict[str, Any]]:
+        """Parsed records in file order. The result must be treated read-only."""
+        cached = self._cached_records(path)
+        if cached is not None:
+            return cached
+        key_before = self._stat_key(path)
+        try:
+            records = self._read_file_strict(path)
+        except Exception:
+            if strict:
+                raise
+            return []
+        # Only cache when the file did not change while it was being read.
+        if key_before is not None and self._stat_key(path) == key_before:
+            self._set_cache(path, key_before, records)
+        return records
+
+    def _sorted_records(self, path: Path) -> list[dict[str, Any]]:
+        records = self._load_records(path, strict=False)
+        if records is self._cache_records:
+            if self._cache_sorted is None:
+                self._cache_sorted = sorted(
+                    records, key=lambda q: (q.get("qso_date", ""), q.get("time_on", "")), reverse=True,
+                )
+            return self._cache_sorted
+        return sorted(records, key=lambda q: (q.get("qso_date", ""), q.get("time_on", "")), reverse=True)
 
     def _read_file(self, path: Path) -> list[dict[str, Any]]:
         if not path.exists():
@@ -968,6 +1061,7 @@ class LogStore:
         key = self._append_key(path)
         journal = self._append_journal_path(path)
         if not recs:
+            self._invalidate_cache()
             if path.exists():
                 path.unlink()
             journal.unlink(missing_ok=True)
@@ -975,7 +1069,10 @@ class LogStore:
             return
         tmp = path.with_suffix(path.suffix + ".tmp")
         data = adif_header() + "".join(qso_to_adif_record(q) for q in recs)
-        tmp.write_text(data, encoding="utf-8", newline="\n")
+        self._invalidate_cache()
+        # fsync before the atomic replace: otherwise a power loss right after
+        # os.replace() can leave an empty/partial logbook on some filesystems.
+        self._write_binary_file_fsynced(tmp, data.encode("utf-8"))
         os.replace(tmp, path)
         journal.unlink(missing_ok=True)
         self._append_ready_paths.add(key)
@@ -1100,13 +1197,19 @@ class LogStore:
         self._append_ready_paths.add(self._append_key(path))
 
     def _append_record(self, path: Path, qso: dict[str, Any]) -> None:
+        self._append_records(path, [qso])
+
+    def _append_records(self, path: Path, qsos: list[dict[str, Any]]) -> None:
+        if not qsos:
+            return
         # Creating a new log remains an atomic full-file write.
         if not path.exists() or path.stat().st_size == 0:
-            self._write_file(path, [qso])
+            self._write_file(path, qsos)
             return
 
         self._recover_pending_append(path)
         self._ensure_append_ready(path)
+        cached = self._cached_records(path)
 
         original_size = path.stat().st_size
         prefix = b""
@@ -1115,14 +1218,26 @@ class LogStore:
             if handle.read(1) not in (b"\n", b"\r"):
                 prefix = b"\n"
 
-        payload = prefix + qso_to_adif_record(qso).encode("utf-8")
+        record_text = "".join(qso_to_adif_record(qso) for qso in qsos)
+        payload = prefix + record_text.encode("utf-8")
 
         # The sidecar journal preserves the previous file size and complete
         # record before touching the ADIF. A hard crash can therefore be
         # completed safely on the next scan/start instead of leaving a partial
         # QSO at the end of the log.
         self._write_append_journal(path, original_size, payload)
-        self._recover_pending_append(path)
+        try:
+            self._recover_pending_append(path)
+        except Exception:
+            self._invalidate_cache()
+            raise
+        if cached is not None:
+            # Keep the cache valid without re-reading the whole file: only the
+            # appended records are parsed.
+            cached.extend(self._records_from_fields(parse_adif(record_text), path))
+            self._set_cache(path, self._stat_key(path), cached)
+        else:
+            self._invalidate_cache()
 
     @staticmethod
     def _record_signature(qso: dict[str, Any]) -> str:
@@ -1193,43 +1308,93 @@ class LogStore:
     def scan(self) -> list[dict[str, Any]]:
         with self.lock:
             self._recover_pending_append(self.canonical_path)
-            out = self._read_file(self.canonical_path)
-            out.sort(key=lambda q: (q.get("qso_date", ""), q.get("time_on", "")), reverse=True)
-            return out
+            return [dict(q) for q in self._sorted_records(self.canonical_path)]
 
     def find(self, local_id: str) -> dict[str, Any] | None:
         with self.lock:
-            for q in self.scan():
+            path = self.canonical_path
+            self._recover_pending_append(path)
+            ordered = self._sorted_records(path)
+            if ordered is self._cache_sorted:
+                if self._cache_by_id is None:
+                    index: dict[str, dict[str, Any]] = {}
+                    for q in ordered:
+                        index.setdefault(q.get("local_id"), q)
+                    self._cache_by_id = index
+                hit = self._cache_by_id.get(local_id)
+                return dict(hit) if hit is not None else None
+            for q in ordered:
                 if q.get("local_id") == local_id:
-                    return q
+                    return dict(q)
         return None
 
-    def add(self, qso: dict[str, Any]) -> dict[str, Any]:
+    def count(self) -> int:
         with self.lock:
-            q = dict(qso)
-            q["local_id"] = q.get("local_id") or str(uuid.uuid4())
-            path = self.file_for(q)
-            self._append_record(path, q)
-            q["_file"] = str(path)
-            return q
+            self._recover_pending_append(self.canonical_path)
+            return len(self._load_records(self.canonical_path, strict=False))
+
+    def add(self, qso: dict[str, Any]) -> dict[str, Any]:
+        return self.add_many([qso])[0]
+
+    def add_many(self, qsos: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Append several QSOs with one journaled, fsynced append."""
+        with self.lock:
+            prepared = []
+            for qso in qsos:
+                q = dict(qso)
+                q["local_id"] = q.get("local_id") or str(uuid.uuid4())
+                prepared.append(q)
+            if not prepared:
+                return []
+            path = self.canonical_path
+            self._append_records(path, prepared)
+            for q in prepared:
+                q["_file"] = str(path)
+            return prepared
 
     def update(self, local_id: str, new_qso: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
-            old = self.find(local_id)
-            if not old:
+            path = self.canonical_path
+            self._recover_pending_append(path)
+            records = self._load_records(path, strict=False)
+            if not any(q.get("local_id") == local_id for q in records):
                 raise KeyError("QSO nicht gefunden")
-            old_path = Path(old["_file"])
             updated = dict(new_qso)
             updated["local_id"] = local_id
-            new_path = self.file_for(updated)
-            old_records = [q for q in self._read_file(old_path) if q.get("local_id") != local_id]
-            self._write_file(old_path, old_records)
-            target_records = self._read_file(new_path)
-            target_records = [q for q in target_records if q.get("local_id") != local_id]
-            target_records.append(updated)
-            self._write_file(new_path, target_records)
-            updated["_file"] = str(new_path)
+            # Same resulting order as before: the edited QSO moves to the end.
+            kept = [q for q in records if q.get("local_id") != local_id]
+            kept.append(updated)
+            self._write_file(path, kept)
+            updated["_file"] = str(path)
             return updated
+
+    def upsert_many(self, qsos: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Replace existing QSOs by local_id and append missing ones.
+
+        Equivalent to calling update() for existing and add() for missing
+        records, but with at most one verified full rewrite.
+        """
+        with self.lock:
+            by_id: dict[str, dict[str, Any]] = {}
+            for qso in qsos:
+                q = dict(qso)
+                q["local_id"] = q.get("local_id") or str(uuid.uuid4())
+                by_id.pop(q["local_id"], None)
+                by_id[q["local_id"]] = q
+            prepared = list(by_id.values())
+            if not prepared:
+                return []
+            path = self.canonical_path
+            self._recover_pending_append(path)
+            # Strict: never rewrite a log that could not be read completely.
+            records = self._load_records(path, strict=True)
+            if not any(q.get("local_id") in by_id for q in records):
+                return self.add_many(prepared)
+            kept = [q for q in records if q.get("local_id") not in by_id]
+            self._write_file(path, kept + prepared)
+            for q in prepared:
+                q["_file"] = str(path)
+            return prepared
 
     def delete_many(self, local_ids: Iterable[str]) -> list[str]:
         requested = []
@@ -1244,7 +1409,7 @@ class LogStore:
 
         with self.lock:
             self._recover_pending_append(self.canonical_path)
-            records = self._read_file(self.canonical_path)
+            records = self._load_records(self.canonical_path, strict=False)
             wanted = set(requested)
             deleted = {
                 str(row.get("local_id") or "")
@@ -1333,6 +1498,7 @@ class MetadataDB:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
+        self._bulk_depth = 0
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         with self.lock:
@@ -1423,6 +1589,27 @@ class MetadataDB:
         with self.lock:
             self.conn.close()
 
+    def _commit(self) -> None:
+        if self._bulk_depth == 0:
+            self.conn.commit()
+
+    @contextmanager
+    def bulk(self):
+        """Group many small metadata writes into one transaction/commit.
+
+        Holds the DB lock for the duration; keep network I/O outside.
+        Completed statements are committed even if the block raises, which
+        matches the previous one-commit-per-call behaviour.
+        """
+        with self.lock:
+            self._bulk_depth += 1
+            try:
+                yield self
+            finally:
+                self._bulk_depth -= 1
+                if self._bulk_depth == 0:
+                    self.conn.commit()
+
     def get_setting(self, key: str, default: str = "") -> str:
         with self.lock:
             r = self.conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
@@ -1434,7 +1621,7 @@ class MetadataDB:
                 "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, "" if value is None else str(value)),
             )
-            self.conn.commit()
+            self._commit()
 
     def get_sync_state(self, station_id: int, profile_key: str = "") -> dict[str, Any]:
         with self.lock:
@@ -1456,7 +1643,7 @@ class MetadataDB:
                    remote_watermark=excluded.remote_watermark,qsl_watermark=excluded.qsl_watermark,updated_at=excluded.updated_at""",
                 (int(station_id), str(profile_key), phase, checkpoint, baseline_watermark, remote_watermark, qsl_watermark, utc_now_iso()),
             )
-            self.conn.commit()
+            self._commit()
 
     def journal_change(self, local_id: str, operation: str, version: int = 1) -> None:
         if not local_id:
@@ -1466,7 +1653,7 @@ class MetadataDB:
                 "INSERT INTO sync_change_journal(local_id,operation,version,created_at) VALUES(?,?,?,?)",
                 (str(local_id), str(operation), max(1, int(version)), utc_now_iso()),
             )
-            self.conn.commit()
+            self._commit()
 
     def pending_journal_changes(self, limit: int = 500) -> list[dict[str, Any]]:
         with self.lock:
@@ -1495,7 +1682,7 @@ class MetadataDB:
                 "UPDATE sync_change_journal SET consumed_at=? WHERE id=? AND consumed_at IS NULL",
                 [(now, value) for value in ids],
             )
-            self.conn.commit()
+            self._commit()
 
     def get_token(self) -> str:
         return self.get_secret("wavelog_token")
@@ -1522,7 +1709,7 @@ class MetadataDB:
                    payload=excluded.payload,updated_at=excluded.updated_at""",
                 (call, source, payload, now),
             )
-            self.conn.commit()
+            self._commit()
 
     def get_callbook_cache(self, callsign: str, source: str, max_age_seconds: int = 604800) -> str | None:
         call = (callsign or "").strip().upper()
@@ -1600,7 +1787,7 @@ class MetadataDB:
                         "INSERT INTO sync_change_journal(local_id,operation,version,created_at) VALUES(?,'change',?,?)",
                         (local_id, version, now),
                     )
-            self.conn.commit()
+            self._commit()
 
     def mark_pending_delete(self, local_id: str):
         self.mark_pending_delete_many((local_id,))
@@ -1646,26 +1833,61 @@ class MetadataDB:
                         (local_id, version, now),
                     )
                 changed += 1
-            self.conn.commit()
+            self._commit()
         return changed
 
     def reconcile_index(self, local_qsos: list[dict[str, Any]]):
+        """Bulk equivalent of ensure_local() for every QSO plus orphan cleanup.
+
+        One metadata read and one commit instead of one query/commit per QSO.
+        """
         ids = {q["local_id"] for q in local_qsos if q.get("local_id")}
-        for q in local_qsos:
-            self.ensure_local(q["local_id"], qso_hash(q))
+        now = utc_now_iso()
         with self.lock:
-            rows = [dict(r) for r in self.conn.execute("SELECT * FROM sync_meta")]
-            for r in rows:
-                if r["local_id"] not in ids and r["status"] not in ("pending_delete",):
-                    if r["wavelog_id"] is None:
-                        self.conn.execute("DELETE FROM sync_meta WHERE local_id=?", (r["local_id"],))
+            # local_id -> [wavelog_id, status, last_synced_hash, local_version]
+            rows: dict[str, list[Any]] = {
+                str(r[0]): [r[1], r[2], r[3], r[4]]
+                for r in self.conn.execute(
+                    "SELECT local_id,wavelog_id,status,last_synced_hash,local_version FROM sync_meta"
+                ).fetchall()
+            }
+            for q in local_qsos:
+                local_id = q["local_id"]
+                row = rows.get(local_id)
+                if row is None:
+                    self.conn.execute(
+                        "INSERT INTO sync_meta(local_id,status,local_version,created_at,updated_at) VALUES(?,'local_only',1,?,?)",
+                        (local_id, now, now),
+                    )
+                    self.conn.execute(
+                        "INSERT INTO sync_change_journal(local_id,operation,version,created_at) VALUES(?,'create',1,?)",
+                        (local_id, now),
+                    )
+                    rows[local_id] = [None, "local_only", None, 1]
+                elif row[1] == "synced" and row[2]:
+                    if qso_hash(q) != row[2]:
+                        version = int(row[3] or 0) + 1
+                        self.conn.execute(
+                            "UPDATE sync_meta SET status='modified',local_version=?,updated_at=? WHERE local_id=?",
+                            (version, now, local_id),
+                        )
+                        self.conn.execute(
+                            "INSERT INTO sync_change_journal(local_id,operation,version,created_at) VALUES(?,'change',?,?)",
+                            (local_id, version, now),
+                        )
+                        row[1] = "modified"
+                        row[3] = version
+            for local_id, (wavelog_id, status, _hash, _version) in rows.items():
+                if local_id not in ids and status not in ("pending_delete",):
+                    if wavelog_id is None:
+                        self.conn.execute("DELETE FROM sync_meta WHERE local_id=?", (local_id,))
                     # A linked QSO missing from the current ADI scan is not an
                     # implicit delete request. The file may have been moved,
                     # damaged, or temporarily unreadable. Keep its metadata so
                     # SyncEngine can restore the local record from Wavelog.
                     # Only the explicit UI deletion path calls
                     # mark_pending_delete() and may delete remotely.
-            self.conn.commit()
+            self._commit()
 
     def set_status(self, local_id: str, status: str, *, wavelog_id: int | None = None,
                    last_synced_hash: str | None = None, remote_hash: str | None = None,
@@ -1688,7 +1910,7 @@ class MetadataDB:
             vals.append(local_id)
             # Column fragments in sets are fixed literals above; every value remains parameterized.
             self.conn.execute(f"UPDATE sync_meta SET {','.join(sets)} WHERE local_id=?", vals)  # nosec B608
-            self.conn.commit()
+            self._commit()
 
     def delete_meta(self, local_id: str):
         with self.lock:
@@ -1696,7 +1918,7 @@ class MetadataDB:
             if r and r["wavelog_id"] is not None:
                 self.conn.execute("DELETE FROM qsl_meta WHERE wavelog_id=?", (int(r["wavelog_id"]),))
             self.conn.execute("DELETE FROM sync_meta WHERE local_id=?", (local_id,))
-            self.conn.commit()
+            self._commit()
 
     def get_qsl_status(self, wavelog_id: int | None) -> dict[str, Any]:
         if not wavelog_id:
@@ -1704,6 +1926,15 @@ class MetadataDB:
         with self.lock:
             r = self.conn.execute("SELECT * FROM qsl_meta WHERE wavelog_id=?", (int(wavelog_id),)).fetchone()
             return dict(r) if r else {"qrz":"unknown","lotw":"unknown","eqsl":"unknown","clublog":"unknown","dcl":"unknown"}
+
+    def qsl_status_map(self) -> dict[int, dict[str, Any]]:
+        """All cached QSL rows keyed by Wavelog id (one query)."""
+        with self.lock:
+            return {
+                int(r["wavelog_id"]): dict(r)
+                for r in self.conn.execute("SELECT * FROM qsl_meta")
+                if r["wavelog_id"] is not None
+            }
 
     def set_qsl_status(self, wavelog_id: int, statuses: dict[str, str]):
         now = utc_now_iso()
@@ -1716,14 +1947,14 @@ class MetadataDB:
                    updated_at=excluded.updated_at""",
                 (int(wavelog_id), *vals, now),
             )
-            self.conn.commit()
+            self._commit()
 
     def delete_qsl_status(self, wavelog_id: int | None):
         if not wavelog_id:
             return
         with self.lock:
             self.conn.execute("DELETE FROM qsl_meta WHERE wavelog_id=?", (int(wavelog_id),))
-            self.conn.commit()
+            self._commit()
 
     def list_meta(self) -> list[dict[str, Any]]:
         with self.lock:
@@ -1789,7 +2020,7 @@ class MetadataDB:
                 "ON CONFLICT(local_id) DO UPDATE SET activation_uuid=excluded.activation_uuid,station_id=excluded.station_id",
                 (str(row[0]), local_id, int(station_id), utc_now_iso()),
             )
-            self.conn.commit()
+            self._commit()
 
 
 # ---------- Wavelog API ----------
@@ -2780,7 +3011,8 @@ class SyncEngine:
             return self.store.update(local_id, rq)
         return self.store.add(rq)
 
-    def _enrich_remote_identity_from_adif(self, remote_rows: list[dict[str, Any]], station_ids: Iterable[int] | None = None) -> None:
+    def _enrich_remote_identity_from_adif(self, remote_rows: list[dict[str, Any]],
+                                          station_ids: Iterable[int] | None = None) -> list[dict[str, str]] | None:
         """Fill OPERATOR/STATION_CALLSIGN when the compact JSON QSO object omits them.
 
         Wavelog's ADIF export carries the standard identity fields. Matching is
@@ -2790,7 +3022,7 @@ class SyncEngine:
         Failure is deliberately non-fatal: JSON sync can continue without it.
         """
         if not remote_rows:
-            return
+            return None
         dates = []
         for r in remote_rows:
             dt = str(r.get("qso_date") or "")[:10]
@@ -2800,7 +3032,7 @@ class SyncEngine:
         try:
             adif_rows = self.client.export_qsos_adif(qso_since=qso_since, station_ids=station_ids)
         except Exception:
-            return
+            return None
         by_key: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
         for r in sorted(remote_rows, key=lambda x: int(x.get("id") or 0)):
             by_key.setdefault(_remote_status_key(r), []).append(r)
@@ -2822,8 +3054,11 @@ class SyncEngine:
                 value = str(f.get(adif_name) or "").strip()
                 if value and not r.get(json_name):
                     r[json_name] = value
+        return adif_rows
 
-    def _refresh_qsl_statuses(self, station_profile_id: int, station_ids: Iterable[int] | None = None) -> tuple[int, int]:
+    def _refresh_qsl_statuses(self, station_profile_id: int, station_ids: Iterable[int] | None = None, *,
+                              remote_rows: list[dict[str, Any]] | None = None,
+                              adif_rows: list[dict[str, str]] | None = None) -> tuple[int, int]:
         """Refresh cached service status for linked Wavelog QSOs.
 
         Sent/upload state is read from Wavelog's ADIF export where present.
@@ -2837,20 +3072,31 @@ class SyncEngine:
         errors = 0
         updated = 0
         # Limit exports to the date range represented by the local synchronized set.
+        # Only the dates are needed here; a second integrity reconciliation is not.
         dates = []
-        local_map = self._local_map()
+        local_map = {q["local_id"]: q for q in self.store.scan()}
         for m in metas:
             q = local_map.get(m["local_id"])
             if q and q.get("qso_date"):
                 dates.append(str(q["qso_date"])[:10])
         qso_since = min(dates) if dates else None
 
-        try:
-            allowed = {int(value) for value in (station_ids or [station_profile_id])}
-            all_remote_rows = self.client.list_qsos(since_id=0, qso_since=qso_since, station_ids=allowed)
-            remote_rows = [row for row in all_remote_rows if remote_station_profile_id(row) in allowed]
-        except Exception:
-            return 0, 1
+        allowed = {int(value) for value in (station_ids or [station_profile_id])}
+        if remote_rows is not None:
+            # The full sync already downloaded this exact view in the same run
+            # (and nothing was pushed/patched afterwards); apply the same
+            # qso_since filter locally instead of downloading everything again.
+            remote_rows = [
+                row for row in remote_rows
+                if remote_station_profile_id(row) in allowed
+                and (not qso_since or str(row.get("qso_date") or "")[:10] >= qso_since)
+            ]
+        else:
+            try:
+                all_remote_rows = self.client.list_qsos(since_id=0, qso_since=qso_since, station_ids=allowed)
+                remote_rows = [row for row in all_remote_rows if remote_station_profile_id(row) in allowed]
+            except Exception:
+                return 0, 1
         remote_linked = [r for r in remote_rows if str(r.get("id") or "").isdigit() and int(r["id"]) in linked]
         by_key: dict[tuple[str,str,str,str], list[int]] = {}
         for r in sorted(remote_linked, key=lambda x: int(x.get("id") or 0)):
@@ -2865,7 +3111,14 @@ class SyncEngine:
             for wid in linked if wid in visible_ids
         }
         try:
-            adif_rows = self.client.export_qsos_adif(qso_since=qso_since, station_ids=allowed)
+            if adif_rows is not None:
+                since_compact = (qso_since or "").replace("-", "")
+                adif_rows = [
+                    f for f in adif_rows
+                    if not since_compact or str(f.get("QSO_DATE") or "").replace("-", "")[:8] >= since_compact
+                ]
+            else:
+                adif_rows = self.client.export_qsos_adif(qso_since=qso_since, station_ids=allowed)
             for f in adif_rows:
                 ids = by_key.get(_adif_status_key(f)) or []
                 if not ids:
@@ -2896,9 +3149,10 @@ class SyncEngine:
             # Typically means confirmation:read is missing. Keep ADIF sent states.
             errors += 1
 
-        for wid, st in statuses.items():
-            self.db.set_qsl_status(wid, st)
-            updated += 1
+        with self.db.bulk():
+            for wid, st in statuses.items():
+                self.db.set_qsl_status(wid, st)
+                updated += 1
         return updated, errors
 
     def sync(self, station_profile_id: int, station_map: dict[int, dict[str, Any]] | None = None,
@@ -2960,7 +3214,7 @@ class SyncEngine:
 
         # The compact JSON QSO representation may not expose all ADIF identity
         # fields. Supplement OPERATOR/STATION_CALLSIGN from the ADIF view.
-        self._enrich_remote_identity_from_adif(remote_rows, allowed_station_ids)
+        adif_rows = self._enrich_remote_identity_from_adif(remote_rows, allowed_station_ids)
 
         remote_by_id: dict[int, dict[str, Any]] = {}
         for r in remote_rows:
@@ -2979,6 +3233,8 @@ class SyncEngine:
         claimed_remote: set[int] = set()
 
         # 1) Reconcile records that are already linked to Wavelog.
+        # Local ADIF/metadata writes are batched; see sync_write_buffer.py.
+        writes = SyncWriteBuffer(self.store, self.db, qso_hash, summary)
         linked_metas = list(self.db.list_meta())
         self._report_progress(progress_callback, "Verknüpfte QSOs werden abgeglichen", 0, len(linked_metas))
         for index, m in enumerate(linked_metas, 1):
@@ -3031,11 +3287,10 @@ class SyncEngine:
                 # has it, restore it rather than silently deleting remote data.
                 if q is None:
                     if remote is not None:
-                        restored = self._replace_local_from_remote(lid, remote, station_map)
-                        self.db.set_status(lid, "synced", wavelog_id=wid,
-                                           last_synced_hash=qso_hash(restored), remote_hash=remote_hash(remote))
-                        locals_map[lid] = restored
-                        summary.remote_updated += 1
+                        writes.upsert(
+                            lid, remote_to_local(remote, self._station_for(remote, station_map)),
+                            wavelog_id=wid, remote_hash=remote_hash(remote), counter="remote_updated",
+                        )
                     else:
                         self.db.delete_meta(lid)
                     continue
@@ -3053,9 +3308,9 @@ class SyncEngine:
                             m.get("remote_hash") == legacy_remote_hash_v010(remote) and
                             (m.get("last_synced_hash") != local_now_hash or
                              m.get("remote_hash") != remote_now_hash_for_migration)):
-                        self.db.set_status(lid, "synced", wavelog_id=wid,
-                                           last_synced_hash=local_now_hash,
-                                           remote_hash=remote_now_hash_for_migration)
+                        writes.defer_status(lid, "synced", wavelog_id=wid,
+                                            last_synced_hash=local_now_hash,
+                                            remote_hash=remote_now_hash_for_migration)
                         continue
 
                 local_changed = bool(m.get("last_synced_hash") and local_now_hash != m.get("last_synced_hash"))
@@ -3084,10 +3339,8 @@ class SyncEngine:
                         self.db.set_status(lid, "conflict", wavelog_id=wid, error="local_changed_during_sync")
                         summary.conflicts += 1
                     else:
-                        self.store.delete(lid)
-                        self.db.delete_meta(lid)
+                        writes.delete(lid, wavelog_id=wid, snapshot=sync_snapshot.get(lid))
                         locals_map.pop(lid, None)
-                        summary.remote_deleted += 1
                     continue
 
                 remote_now_hash = remote_hash(remote)
@@ -3108,55 +3361,70 @@ class SyncEngine:
                         self.db.set_status(lid, "conflict", wavelog_id=wid, error="local_changed_during_sync")
                         summary.conflicts += 1
                     else:
-                        updated = self._replace_local_from_remote(lid, remote, station_map)
-                        self.db.set_status(lid, "synced", wavelog_id=wid,
-                                           last_synced_hash=qso_hash(updated), remote_hash=remote_now_hash)
-                        locals_map[lid] = updated
-                        summary.remote_updated += 1
+                        writes.upsert(
+                            lid, remote_to_local(remote, self._station_for(remote, station_map)),
+                            wavelog_id=wid, remote_hash=remote_now_hash, counter="remote_updated",
+                            snapshot=sync_snapshot.get(lid), check_snapshot=True,
+                        )
                 else:
                     # Establish/refresh the baseline for older metadata rows.
-                    self.db.set_status(lid, "synced", wavelog_id=wid,
-                                       last_synced_hash=local_now_hash, remote_hash=remote_now_hash)
+                    writes.defer_status(lid, "synced", wavelog_id=wid,
+                                        last_synced_hash=local_now_hash, remote_hash=remote_now_hash)
             except Exception as e:
                 self.db.set_status(lid, "error", wavelog_id=wid, error=str(e))
                 summary.errors += 1
+        writes.flush()
 
         # 2) New/previously unlinked Wavelog records -> link to a matching
         # LOCAL ONLY QSO or create a new ADI record.
         locals_now = self.store.scan()
         remote_items = sorted(remote_by_id.items())
+        # Unlinked LOCAL ONLY candidates, bucketed by the exact fields that
+        # _match_local() requires to be equal.  Bucket order preserves the
+        # previous scan order, so the first match is unchanged; matched
+        # records are removed so they cannot be linked twice.
+        linked_local_ids = {
+            str(meta.get("local_id")) for meta in self.db.list_meta() if meta.get("wavelog_id") is not None
+        }
+        candidate_buckets: dict[tuple[Any, Any, Any], list[dict[str, Any]]] = {}
+        for q in locals_now:
+            if q["local_id"] in linked_local_ids:
+                continue
+            key = ((q.get("call") or "").upper(), q.get("qso_date"), q.get("band"))
+            candidate_buckets.setdefault(key, []).append(q)
+        xota_ids = set(self.db.xota_station_ids())
+        writes = SyncWriteBuffer(self.store, self.db, qso_hash, summary, raise_errors=True)
+
+        def bind_xota(station_id: int | None, local_id: str):
+            if station_id in xota_ids:
+                return lambda: self.db.bind_xota_remote_qso(station_id, local_id)
+            return None
+
         self._report_progress(progress_callback, "Neue Wavelog-QSOs werden übernommen", 0, len(remote_items))
         for index, (wid, r) in enumerate(remote_items, 1):
             self._check_cancel(cancel_event)
             self._report_progress(progress_callback, "Neue Wavelog-QSOs werden übernommen", index, len(remote_items))
             if wid in claimed_remote or self.db.get_by_wavelog_id(wid):
                 continue
-            candidates = []
-            for q in locals_now:
-                meta = self.db.get_meta(q["local_id"])
-                if not meta or meta.get("wavelog_id") is None:
-                    candidates.append(q)
-            match = self._match_local(r, candidates)
+            rq = remote_to_local(r, {})
+            bucket = candidate_buckets.get((rq["call"], rq["qso_date"], rq["band"]), [])
+            match = self._match_local(r, bucket)
+            actual_station_id = remote_station_profile_id(r)
             if match:
+                bucket.remove(match)
                 # Wavelog becomes the synchronized representation of this QSO.
-                updated = self._replace_local_from_remote(match["local_id"], r, station_map)
-                self.db.set_status(match["local_id"], "synced", wavelog_id=wid,
-                                   last_synced_hash=qso_hash(updated), remote_hash=remote_hash(r))
-                actual_station_id = remote_station_profile_id(r)
-                if actual_station_id in set(self.db.xota_station_ids()):
-                    self.db.bind_xota_remote_qso(actual_station_id, match["local_id"])
-                locals_now = [updated if q.get("local_id") == match["local_id"] else q for q in locals_now]
-                summary.linked += 1
+                writes.upsert(
+                    match["local_id"], remote_to_local(r, self._station_for(r, station_map)),
+                    wavelog_id=wid, remote_hash=remote_hash(r), counter="linked",
+                    after=bind_xota(actual_station_id, match["local_id"]),
+                )
             else:
                 q = remote_to_local(r, self._station_for(r, station_map))
-                q = self.store.add(q)
-                self.db.set_status(q["local_id"], "synced", wavelog_id=wid,
-                                   last_synced_hash=qso_hash(q), remote_hash=remote_hash(r))
-                actual_station_id = remote_station_profile_id(r)
-                if actual_station_id in set(self.db.xota_station_ids()):
-                    self.db.bind_xota_remote_qso(actual_station_id, q["local_id"])
-                locals_now.append(q)
-                summary.pulled += 1
+                writes.upsert(
+                    q["local_id"], q, wavelog_id=wid, remote_hash=remote_hash(r), counter="pulled",
+                    after=bind_xota(actual_station_id, q["local_id"]),
+                )
+        writes.flush()
 
         # 3) Upload everything that is still LOCAL ONLY (including a failed
         # first upload from an earlier run). This happens after linking remote
@@ -3190,7 +3458,14 @@ class SyncEngine:
         self._check_cancel(cancel_event)
         self._report_progress(progress_callback, "QSL-Status wird aktualisiert", 0, 0)
         try:
-            summary.qsl_updated, summary.qsl_errors = self._refresh_qsl_statuses(station_profile_id, allowed_station_ids)
+            # Reuse this run's downloads unless Wavelog was changed by us
+            # afterwards (uploads/patches); then fetch the fresh view as before.
+            reuse = summary.pushed == 0 and summary.patched == 0
+            summary.qsl_updated, summary.qsl_errors = self._refresh_qsl_statuses(
+                station_profile_id, allowed_station_ids,
+                remote_rows=all_remote_rows if reuse else None,
+                adif_rows=adif_rows if reuse else None,
+            )
         except Exception:
             summary.qsl_errors += 1
         # Only consume changes that predate this run.  Edits made while the

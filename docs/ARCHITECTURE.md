@@ -1,6 +1,6 @@
 # Wavelog Offline Logger – Architektur & Entwicklerhinweise
 
-> Stand: 0.21.1
+> Stand: 0.22.0
 > Ziel: große Funktionsbereiche getrennt entwickeln, ohne die zentrale `app.py` wieder wachsen zu lassen.
 
 ## Überblick
@@ -372,13 +372,13 @@ Der Verzeichnisname wird aus `appVersion` erzeugt.
 Beispiel:
 
 ```go
-appVersion = "0.21.1"
+appVersion = "0.22.0"
 ```
 
 ergibt:
 
 ```text
-app-v0211
+app-v0220
 ```
 
 Damit muss der Runtime-Pfad beim nächsten Release nicht mehr separat von Hand geändert werden.
@@ -412,13 +412,13 @@ Mindestens diese beiden Werte müssen übereinstimmen:
 `logger_core.py`:
 
 ```python
-VERSION = "0.21.1"
+VERSION = "0.22.0"
 ```
 
 `bootstrap_windows.go`:
 
 ```go
-appVersion = "0.21.1"
+appVersion = "0.22.0"
 ```
 
 Das Windows-Buildscript prüft diesen Zustand absichtlich und bricht bei einem Konflikt ab.
@@ -666,6 +666,42 @@ normalisiert. Danach greift ebenfalls der schnelle Append-Pfad.
 
 Damit wächst der Aufwand eines normalen neuen QSOs nicht mehr mit der Größe des
 gesamten Logbuchs.
+
+### Parser, LogStore-Cache und gebündelter Sync (v0.22.0)
+
+Die Laufzeit darf bei großen Logbüchern nicht quadratisch mit der Anzahl der
+QSOs wachsen. Dafür gelten seit v0.22.0 zusätzlich:
+
+- `parse_adif()` sucht mit Start-/Endpositionen im Gesamttext und kopiert keine
+  Resttexte mehr pro Datensatz (vorher O(n²)).
+- `LogStore` hält die geparsten Datensätze der kanonischen ADIF-Datei im
+  Speicher. Gültigkeit wird bei jedem Zugriff über Größe, `mtime_ns`, Inode und
+  `ctime_ns` geprüft; externe Ersetzungen (Restore, andere Werkzeuge) werden so
+  erkannt. Eigene Schreibvorgänge invalidieren den Cache, Appends ergänzen ihn
+  inkrementell. Aufrufer erhalten immer Kopien.
+- `find()` nutzt einen Index, `update()` liest und schreibt genau einmal.
+  `add_many()` hängt mehrere QSOs in einem journalisierten Append an,
+  `upsert_many()` ersetzt/ergänzt mehrere QSOs mit höchstens einem
+  verifizierten Rewrite und verweigert den Rewrite einer unlesbaren Datei.
+- Vollständige Rewrites werden vor `os.replace()` mit `fsync()` gesichert.
+- `MetadataDB.bulk()` bündelt viele kleine Metadaten-Schreibvorgänge in einer
+  Transaktion; `reconcile_index()` arbeitet mit einer Abfrage und einem Commit.
+- `SyncEngine.sync()` sammelt lokale Ergebnisse je Phase in
+  `sync_write_buffer.py` und schreibt sie in Batches (ADIF zuerst, danach der
+  `synced`-Status). Unverknüpfte lokale QSOs werden nach Rufzeichen/Datum/Band
+  vorsortiert statt pro Remote-QSO alle lokalen QSOs abzufragen. Lokale
+  Änderungen während eines offenen Batches werden wie bisher zum Konflikt.
+- Wurden im selben Lauf keine QSOs hochgeladen oder gepatcht, verwendet der
+  QSL-Status-Refresh die bereits geladene QSO-Liste und den ADIF-Export.
+- `CountryDB.lookup()` nutzt einen Längstpräfix-Index.
+- Die DX-Cluster-Tabelle wird bei eingehenden Spots gebündelt neu aufgebaut
+  (eine Tk-Operation pro Zeile); die Worked-Before-Caches werden im
+  Logbuch-Worker berechnet.
+
+Regressionstests: `test_performance_paths.py`.
+
+`sync_write_buffer.py` ist ein Nicht-Feature-Modul und deshalb explizit im
+Windows-Bootstrap eingebettet.
 
 ## QSL Card Manager Integration (v0.20.0)
 

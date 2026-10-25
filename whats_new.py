@@ -6,6 +6,13 @@ from __future__ import annotations
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
 
+    "0.22.0": (
+        "Große Logbücher laden und aktualisieren deutlich schneller; das Bearbeiten und Löschen einzelner QSOs reagiert auch bei vielen tausend Einträgen sofort.",
+        "Der vollständige Wavelog-Abgleich ist bei großen Logbüchern erheblich schneller, besonders beim ersten Herunterladen eines bestehenden Wavelog-Logbuchs.",
+        "Beim vollständigen Abgleich werden die Daten von Wavelog nicht mehr unnötig doppelt geladen, wenn keine lokalen Änderungen übertragen wurden.",
+        "Die DX-Cluster-Liste bleibt auch bei sehr vielen eingehenden Spots flüssig, und die Länderzuordnung von Rufzeichen ist spürbar schneller.",
+        "Der WSJT-X-Abgleich übernimmt viele neue QSOs auf einmal schneller, und das Logbuch wird beim Speichern noch robuster gegen Stromausfälle geschützt.",
+    ),
     "0.21.1": (
         "Der automatische Wavelog-Abgleich beim Start und Beenden überträgt jetzt nur neue lokale QSOs und ist dadurch schneller.",
         "Der vollständige Abgleich mit Integritätsprüfung bleibt jederzeit bewusst manuell verfügbar.",
@@ -89,6 +96,13 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
 
+    "0.22.0": (
+        "Large logbooks load and refresh much faster; editing and deleting individual QSOs stays responsive even with many thousands of entries.",
+        "Complete Wavelog synchronization is considerably faster for large logbooks, especially when an existing Wavelog logbook is downloaded for the first time.",
+        "Complete synchronization no longer downloads Wavelog data twice when no local changes were uploaded.",
+        "The DX Cluster list stays smooth even with many incoming spots, and callsign country lookup is noticeably faster.",
+        "WSJT-X synchronization imports many new QSOs at once more quickly, and the logbook is protected even better against power loss while saving.",
+    ),
     "0.21.1": (
         "Automatic Wavelog synchronization at startup and shutdown now uploads only new local QSOs, so it finishes faster.",
         "The complete synchronization with integrity checking remains available as an intentional manual action.",

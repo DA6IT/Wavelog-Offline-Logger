@@ -72,7 +72,7 @@ class LifecycleFeatureMixin:
         self.shutdown_started = True
         self.closing = True
         self.wavelog_check_generation += 1
-        for job_name in ("wavelog_check_job", "auto_sync_job"):
+        for job_name in ("wavelog_check_job", "auto_sync_job", "dx_cluster_refresh_job"):
             job = getattr(self, job_name, None)
             if job is not None:
                 try:

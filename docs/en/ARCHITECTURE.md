@@ -1,6 +1,6 @@
 # Wavelog Offline Logger — architecture and developer notes
 
-> Version: 0.21.1
+> Version: 0.22.0
 > Goal: keep large functional areas independently maintainable without growing `app.py` back into a monolith.
 
 ## Overview
@@ -106,7 +106,7 @@ The Windows executable is a Go launcher. `bootstrap_windows.go` embeds all `feat
 
 Non-feature modules such as `app_common.py`, `ui_theme.py`, `dialogs.py`, `wsjtx_sync.py`, `qsl_eqsl.py` and `usage_stats.py` must be embedded explicitly.
 
-The runtime directory is derived from `appVersion`. For example, `0.21.1` becomes `app-v0211`, so a new release does not require a second hard-coded runtime-path update.
+The runtime directory is derived from `appVersion`. For example, `0.22.0` becomes `app-v0220`, so a new release does not require a second hard-coded runtime-path update.
 
 Linux and macOS use PyInstaller with `app.py`; normal Python imports are discovered automatically, but real platform builds still need release smoke testing.
 
@@ -116,12 +116,12 @@ At minimum these values must match:
 
 ```python
 # logger_core.py
-VERSION = "0.21.1"
+VERSION = "0.22.0"
 ```
 
 ```go
 // bootstrap_windows.go
-appVersion = "0.21.1"
+appVersion = "0.22.0"
 ```
 
 The Windows build script verifies this relationship. `whats_new.py`, changelogs, user guides and release notes should be updated for every published version.
@@ -153,6 +153,12 @@ For LogStore append changes:
 
 ```powershell
 python -m unittest test_logstore_append.py
+```
+
+For parser, LogStore cache, metadata or sync performance changes:
+
+```powershell
+python -m unittest test_performance_paths.py
 ```
 
 ## Navigation and QSO cache rules
@@ -215,3 +221,17 @@ Before release, cover at least:
 - Windows executable
 - Linux package
 - macOS application
+
+## Parser, LogStore cache and batched sync (v0.22.0)
+
+Runtime must not grow quadratically with the number of QSOs:
+
+- `parse_adif()` searches with start/end positions instead of copying the remaining text per record.
+- `LogStore` keeps the parsed records of the canonical ADI file in memory, validated on every access against size, `mtime_ns`, inode and `ctime_ns`. Own writes invalidate the cache, appends extend it incrementally, callers always receive copies.
+- `find()` uses an index, `update()` reads and writes exactly once, `add_many()` appends several QSOs in one journaled append and `upsert_many()` replaces/adds several QSOs with at most one verified rewrite (never for an unreadable file). Full rewrites are fsynced before `os.replace()`.
+- `MetadataDB.bulk()` groups many small metadata writes in one transaction; `reconcile_index()` uses one query and one commit.
+- `SyncEngine.sync()` collects local results per phase in `sync_write_buffer.py` and applies them in batches (ADIF first, then the `synced` status). Unlinked local QSOs are bucketed by call/date/band. Local edits during an open batch still become conflicts.
+- Without uploads or patches in the same run, the QSL status refresh reuses the downloaded QSO list and ADIF export.
+- `CountryDB.lookup()` uses a longest-prefix index; the DX Cluster table rebuild is coalesced and worked-before caches are computed in the logbook worker.
+
+Regression tests: `test_performance_paths.py`. `sync_write_buffer.py` is a non-feature module and is embedded explicitly in the Windows bootstrap.

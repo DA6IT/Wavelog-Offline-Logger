@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import sys
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -505,6 +507,7 @@ def sync_wsjtx_with_local(
     }
 
     # WSJT-X -> local master log.
+    pending_import: list[dict[str, Any]] = []
     for raw_incoming in raw_wsjtx_qsos:
         if not _belongs_to_active_station(raw_incoming, db):
             result.scope_skipped_from_wsjtx += 1
@@ -524,15 +527,23 @@ def sync_wsjtx_with_local(
         incoming_id = str(candidate.get("local_id") or "")
 
         if not incoming_id or incoming_id in existing_ids:
-            candidate["local_id"] = ""
+            # Assigned here (instead of inside store.add) so the batch below
+            # can be matched against later WSJT-X records before writing.
+            candidate["local_id"] = str(uuid.uuid4())
 
-        saved = store.add(candidate)
-        db.ensure_local(saved["local_id"], qso_hash(saved))
-
-        existing_ids.add(str(saved["local_id"]))
-        normalized_saved = _normalize_qso(saved, db)
-        local_matcher.add(normalized_saved)
+        pending_import.append(candidate)
+        existing_ids.add(str(candidate["local_id"]))
+        local_matcher.add(_normalize_qso(candidate, db))
         result.imported_to_local += 1
+
+    if pending_import:
+        # One journaled append and one metadata transaction for the whole
+        # import instead of an fsync + commit per QSO.
+        saved_rows = store.add_many(pending_import)
+        bulk = getattr(db, "bulk", None)
+        with (bulk() if bulk is not None else contextlib.nullcontext()):
+            for saved in saved_rows:
+                db.ensure_local(saved["local_id"], qso_hash(saved))
 
     # Local master log -> selected WSJT-X profile.
     merged_local = [_normalize_qso(qso, db) for qso in store.scan()]

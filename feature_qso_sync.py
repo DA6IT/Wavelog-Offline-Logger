@@ -242,6 +242,12 @@ class QsoSyncFeatureMixin:
 
                 # QSL metadata is read in the worker as well. Even with many
                 # linked QSOs this can no longer freeze navigation.
+                # One bulk query instead of get_qsl_status() per linked QSO.
+                all_qsl = db.qsl_status_map()
+                unknown_qsl = {
+                    "qrz": "unknown", "lotw": "unknown", "eqsl": "unknown",
+                    "clublog": "unknown", "dcl": "unknown",
+                }
                 qsl_by_wid: dict[int, dict] = {}
                 for meta in metas:
                     wid = meta.get("wavelog_id")
@@ -252,7 +258,7 @@ class QsoSyncFeatureMixin:
                     except (TypeError, ValueError):
                         continue
                     if wid_int not in qsl_by_wid:
-                        qsl_by_wid[wid_int] = db.get_qsl_status(wid_int)
+                        qsl_by_wid[wid_int] = all_qsl.get(wid_int) or dict(unknown_qsl)
 
                 qsl_card_status_by_local = (
                     QslStorage(
@@ -336,6 +342,9 @@ class QsoSyncFeatureMixin:
                     if meta.get("status") in ("modified", "conflict", "error", "pending_delete")
                 )
                 last = db.get_setting("last_sync_at", "")
+                # Worked-before caches for logging/DX cluster are computed
+                # here instead of on the Tk thread.
+                worked_cache = self._compute_dx_cluster_worked_cache(qsos)
 
                 result = {
                     "qsos": qsos,
@@ -349,6 +358,7 @@ class QsoSyncFeatureMixin:
                     "last_sync": last,
                     "profile_id": profile_id,
                     "db": db,
+                    "worked_cache": worked_cache,
                 }
                 if not self.closing:
                     self.after(0, lambda: self._qso_refresh_ready(generation, result))
@@ -401,7 +411,7 @@ class QsoSyncFeatureMixin:
 
         # These caches are useful to the logging/DX-cluster pages too. Updating
         # them from the already parsed QSO list avoids another ADIF scan.
-        self._update_dx_cluster_worked_cache(qsos)
+        self._apply_dx_cluster_worked_cache(result["worked_cache"])
         self._remember_last_spottable_from_cache(qsos)
         self._apply_qso_summary()
 

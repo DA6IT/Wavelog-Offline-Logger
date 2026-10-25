@@ -2,6 +2,21 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.22.0] - 2026-10-25
+
+### Changed
+
+- große Logbücher werden deutlich schneller eingelesen; Logbuchansicht, Suche nach einzelnen QSOs, Bearbeiten und Löschen bleiben auch bei vielen tausend QSOs flüssig
+- der vollständige Wavelog-Abgleich verarbeitet neue, geänderte, gelöschte und wiederherzustellende QSOs gebündelt und ist dadurch bei großen Logbüchern erheblich schneller, besonders beim ersten Herunterladen eines bestehenden Wavelog-Logbuchs
+- der vollständige Abgleich lädt QSO-Liste und ADIF-Export für den QSL-Status nur noch einmal, wenn im selben Lauf keine QSOs hochgeladen oder geändert wurden
+- Abgleich der lokalen Sync-Informationen beim Laden des Logbuchs in einem Schritt
+- DX-Cluster: schnellere Länderzuordnung, gebündelte Aktualisierung der Spot-Liste bei vielen eingehenden Spots; die Worked-Before-Auswertung läuft im Hintergrund
+- der WSJT-X-Abgleich übernimmt neue QSOs gesammelt
+
+### Zuverlässigkeit
+
+- vollständig neu geschriebene Logbuchdateien werden vor dem Ersetzen dauerhaft auf den Datenträger geschrieben
+
 ## [0.21.1] - 2026-09-18
 
 ### Changed

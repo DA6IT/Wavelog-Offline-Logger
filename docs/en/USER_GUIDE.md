@@ -1,4 +1,4 @@
-# User guide — DA6IT.de Wavelog Offline Logger 0.21.1
+# User guide — DA6IT.de Wavelog Offline Logger 0.22.0
 
 [Deutsch](../USER_GUIDE.md) · **English**
 
