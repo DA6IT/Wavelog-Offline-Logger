@@ -6,7 +6,7 @@ from pathlib import Path
 from tkinter import messagebox, simpledialog
 from app_common import write_startup_log
 from dialogs import ProfileDeleteDialog, ProfileManagerDialog
-from logger_core import LogStore, MetadataDB, ProfileManager
+from logger_core import LogStore, MetadataDB, ProfileManager, utc_now_iso
 from xota import ActivationReferenceService, ReverseGeocodeService, XotaRepository
 
 
@@ -54,10 +54,14 @@ class ProfilesFeatureMixin:
         ready = threading.Event()
         self._profile_index_ready = ready
 
+        ready.error = None
+
         def worker():
             try:
-                db.reconcile_index(store.scan())
+                scan_started = utc_now_iso()
+                db.reconcile_index(store.scan(), scan_started=scan_started)
             except Exception as exc:
+                ready.error = exc
                 write_startup_log("Profil-Index konnte nicht abgeglichen werden: " + repr(exc))
             finally:
                 ready.set()
@@ -79,8 +83,15 @@ class ProfilesFeatureMixin:
     def _wait_profile_index(self, timeout: float = 120.0) -> None:
         """Block a worker thread (never the Tk thread) until the index is ready."""
         ready = getattr(self, "_profile_index_ready", None)
-        if ready is not None:
-            ready.wait(timeout)
+        if ready is None:
+            return
+        if not ready.wait(timeout) or getattr(ready, "error", None) is not None:
+            # Background reconcile failed or hangs: reconcile here so no
+            # upload/sync runs on an unreconciled index. Errors propagate to
+            # the caller's normal error handling.
+            scan_started = utc_now_iso()
+            self.db.reconcile_index(self.store.scan(), scan_started=scan_started)
+            ready.error = None
 
     def _current_profile(self) -> dict:
         return self.profile_manager.get(self.active_profile_id) or {"id": self.active_profile_id, "name": "Profil"}
@@ -109,6 +120,7 @@ class ProfilesFeatureMixin:
             return
         if (
             self.sync_busy
+            or getattr(self, "_qso_write_running", False)
             or getattr(self, "qsl_sync_busy", False)
             or getattr(self, "qsl_mail_busy", False)
             or getattr(self, "qsl_background_busy", False)

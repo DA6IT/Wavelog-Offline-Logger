@@ -12,7 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 from app_common import write_startup_log
 from dialogs import EditDialog, SyncProgressDialog
 from dx_cluster import normalize_worked_mode
-from logger_core import ContestSyncEngine, SyncEngine, WavelogClient, qso_hash
+from logger_core import ContestSyncEngine, SyncEngine, WavelogClient, qso_hash, utc_now_iso
 from qsl_storage import QslStorage
 from qso_tree_view import apply_row_diff, insert_row, plan_row_diff
 from wsjtx_sync import format_wsjtx_result, load_wsjtx_settings, should_wsjtx_sync_for_reason, sync_wsjtx_with_local
@@ -53,6 +53,10 @@ class QsoSyncFeatureMixin:
         self._qso_tree_rows: list[tuple[str, str, tuple]] | None = []
         self._qso_tree_render_rows: list[tuple[str, str, tuple]] = []
         self._qso_write_running = False
+        self._qso_write_thread: threading.Thread | None = None
+        # Rows removed from the view while their deletion is still written;
+        # a refresh that scanned before the write must not show them again.
+        self._qso_hidden_ids: set[str] = set()
         self._qso_cached_summary: dict[str, object] = {}
 
     def _build_qsos_page(self):
@@ -233,11 +237,12 @@ class QsoSyncFeatureMixin:
         def worker():
             try:
                 self._wait_profile_index()
+                scan_started = utc_now_iso()
                 qsos = store.scan()
 
                 # Keep sync metadata consistent, but do this away from the Tk
                 # thread. MetadataDB uses check_same_thread=False + its own lock.
-                db.reconcile_index(qsos)
+                db.reconcile_index(qsos, scan_started=scan_started)
 
                 # One bulk query for sync_meta instead of get_meta() per QSO.
                 metas = db.list_meta()
@@ -410,6 +415,8 @@ class QsoSyncFeatureMixin:
             if q.get("local_id")
         }
         self._qso_cached_rows = list(result["rows"])
+        if self._qso_hidden_ids:
+            self._qso_hidden_ids.intersection_update(self._qso_cached_by_id)
         self._qso_cached_meta_by_id = dict(result["meta_by_id"])
         self._qso_cached_qsl_by_wid = dict(result["qsl_by_wid"])
         self._qso_cached_fastlog_worked_keys = set(result["fastlog_worked_keys"])
@@ -489,7 +496,8 @@ class QsoSyncFeatureMixin:
         if self._qso_tree_generation == self._qso_cache_generation:
             return
 
-        rows = [row for row in self._qso_cached_rows if row[0]]
+        hidden = self._qso_hidden_ids
+        rows = [row for row in self._qso_cached_rows if row[0] and row[0] not in hidden]
         if self._qso_tree_rows is not None and self._qso_tree_rows:
             ops = plan_row_diff(self._qso_tree_rows, rows)
             if ops is not None:
@@ -548,8 +556,9 @@ class QsoSyncFeatureMixin:
             self._qso_tree_render_rows = []
         rendered = self._qso_tree_render_rows
 
+        hidden = self._qso_hidden_ids
         for row in rows[start:end]:
-            if not row[0]:
+            if not row[0] or row[0] in hidden:
                 continue
             try:
                 insert_row(self.tree, "end", row)
@@ -814,13 +823,19 @@ class QsoSyncFeatureMixin:
             return deleted
 
         def done(deleted_ids):
+            # Deleted ids stay hidden until a refresh without them arrives
+            # (see _qso_refresh_ready); ids that were not deleted reappear.
+            self._qso_hidden_ids.difference_update(set(local_ids) - set(deleted_ids or ()))
             self._qso_restore_selection = anchor
             self.refresh_qsos()
             if deleted_ids:
                 self.status_var.set(f"{len(deleted_ids)} QSO(s) lokal gelöscht")
                 self._local_sync_change()
+            else:
+                self.status_var.set("Keine QSOs gelöscht")
 
         def failed(exc):
+            self._qso_hidden_ids.difference_update(local_ids)
             self.refresh_qsos()
             messagebox.showerror("QSOs löschen", str(exc), parent=self)
 
@@ -828,6 +843,7 @@ class QsoSyncFeatureMixin:
 
     def _remove_tree_rows_now(self, local_ids: list[str], anchor: str | None) -> None:
         wanted = set(local_ids)
+        self._qso_hidden_ids.update(wanted)
         existing = [lid for lid in local_ids if self.tree.exists(lid)]
         if existing:
             self.tree.delete(*existing)
@@ -844,22 +860,42 @@ class QsoSyncFeatureMixin:
         self._qso_write_running = True
         self._sync_selection_changed()
 
+        def finish(callback, value):
+            try:
+                self._finish_qso_write()
+            finally:
+                callback(value)
+
         def worker():
+            # Not a daemon thread: the interpreter must not end in the middle
+            # of an ADIF rewrite. Closing waits for it (_wait_qso_write).
             try:
                 result = write()
             except Exception as exc:
                 error = exc
                 if not self.closing:
-                    self.after(0, lambda: (self._finish_qso_write(), failed(error)))
+                    self.after(0, lambda: finish(failed, error))
                 return
             if not self.closing:
-                self.after(0, lambda: (self._finish_qso_write(), done(result)))
+                self.after(0, lambda: finish(done, result))
 
-        threading.Thread(target=worker, name=name, daemon=True).start()
+        thread = threading.Thread(target=worker, name=name)
+        self._qso_write_thread = thread
+        thread.start()
 
     def _finish_qso_write(self) -> None:
         self._qso_write_running = False
-        self._sync_selection_changed()
+        self._qso_write_thread = None
+        try:
+            self._sync_selection_changed()
+        except tk.TclError:
+            pass
+
+    def _wait_qso_write(self, timeout: float = 120.0) -> None:
+        """Block until a background ADIF write has finished (used on shutdown)."""
+        thread = getattr(self, "_qso_write_thread", None)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout)
 
     def configure_wsjtx_sync(self):
         if hasattr(self, "settings_notebook") and hasattr(self, "settings_wsjtx_tab"):

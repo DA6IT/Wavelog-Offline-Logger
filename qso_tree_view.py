@@ -33,6 +33,8 @@ def plan_row_diff(old: Sequence[Row], new: Sequence[Row], *, max_ops: int = DEFA
     if [iid for iid in old_ids if iid in new_set] != [iid for iid in new_ids if iid in old_set]:
         return None  # reordered rows: full rebuild is simpler and safe
     ops: list[tuple] = [("delete", iid) for iid in old_ids if iid not in new_set]
+    if len(ops) > max_ops:
+        return None
     old_by_id = {row[0]: row for row in old}
     for index, row in enumerate(new):
         previous = old_by_id.get(row[0])
@@ -45,14 +47,19 @@ def plan_row_diff(old: Sequence[Row], new: Sequence[Row], *, max_ops: int = DEFA
     return ops
 
 
+def _text(values: Iterable[Any]) -> tuple[str, ...]:
+    # Same display as ttk's insert(values=...): every cell as text.
+    return tuple(str(value) for value in values)
+
+
 def insert_row(tree: Any, index: Any, row: Row) -> None:
     iid, tag, values = row
-    tree.tk.call(tree._w, "insert", "", index, "-id", iid, "-values", tuple(values), "-tags", (tag,))
+    tree.tk.call(tree._w, "insert", "", index, "-id", iid, "-values", _text(values), "-tags", (tag,))
 
 
 def update_row(tree: Any, row: Row) -> None:
     iid, tag, values = row
-    tree.tk.call(tree._w, "item", iid, "-values", tuple(values), "-tags", (tag,))
+    tree.tk.call(tree._w, "item", iid, "-values", _text(values), "-tags", (tag,))
 
 
 def apply_row_diff(tree: Any, ops: Iterable[tuple]) -> None:

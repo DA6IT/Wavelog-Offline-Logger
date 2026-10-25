@@ -304,7 +304,7 @@ class LazyWorkedHistory:
     ``get()`` returns exactly what the eager version produced.
     """
 
-    def __init__(self, refs: dict[str, list[dict]] | None = None):
+    def __init__(self, refs: dict[str, list[tuple[str, str, str, str]]] | None = None):
         self._refs = refs or {}
         self._built: dict[str, list[dict[str, str]]] = {}
 
@@ -315,14 +315,11 @@ class LazyWorkedHistory:
         rows = self._refs.get(call)
         if rows is None:
             return default
+        # rows hold (qso_date, time_on, band, mode) text tuples captured by
+        # the worker, so later changes to cached QSO dicts cannot leak in.
         history = [
-            {
-                "qso_date": str(qso.get("qso_date") or ""),
-                "time_on": str(qso.get("time_on") or ""),
-                "band": str(qso.get("band") or ""),
-                "mode": str(qso.get("mode") or ""),
-            }
-            for qso in rows
+            {"qso_date": qso_date, "time_on": time_on, "band": band, "mode": mode}
+            for qso_date, time_on, band, mode in rows
         ]
         history.sort(
             key=lambda item: (item["qso_date"], re.sub(r"[^0-9]", "", item["time_on"])), reverse=True,

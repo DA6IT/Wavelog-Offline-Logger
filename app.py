@@ -93,7 +93,10 @@ class LoggerApp(
 
         self._build_interface()
         self._interface_built = True
-        self._start_pending_profile_index()
+        # The profile index starts once the window has been presented (its
+        # first layout is the most expensive Tk step); fallback if the
+        # presentation is skipped.
+        self.after(2500, self._start_pending_profile_index)
         self._schedule_startup_tasks()
         write_startup_log(f"{APP_NAME} {VERSION} gestartet")
 

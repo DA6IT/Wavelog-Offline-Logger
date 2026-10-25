@@ -1900,10 +1900,13 @@ class MetadataDB:
                                     last_synced_hash=local_hash, remote_hash=remote_hash)
             self.conn.execute("DELETE FROM sync_pending_apply WHERE local_id=?", (local_id,))
 
-    def reconcile_index(self, local_qsos: list[dict[str, Any]]):
+    def reconcile_index(self, local_qsos: list[dict[str, Any]], *, scan_started: str | None = None):
         """Bulk equivalent of ensure_local() for every QSO plus orphan cleanup.
 
         One metadata read and one commit instead of one query/commit per QSO.
+        ``scan_started`` (``utc_now_iso()`` taken before the scan) protects
+        metadata rows created after that point: their QSO may have been
+        saved after the snapshot and must not be treated as an orphan.
         """
         ids = {q["local_id"] for q in local_qsos if q.get("local_id")}
         now = utc_now_iso()
@@ -1927,11 +1930,11 @@ class MetadataDB:
         local_by_id = {q["local_id"]: q for q in local_qsos}
         with self.lock:
             self._resolve_pending_apply(local_by_id, hash_for)
-            # local_id -> [wavelog_id, status, last_synced_hash, local_version]
+            # local_id -> [wavelog_id, status, last_synced_hash, local_version, created_at]
             rows: dict[str, list[Any]] = {  # read after pending resolution
-                str(r[0]): [r[1], r[2], r[3], r[4]]
+                str(r[0]): [r[1], r[2], r[3], r[4], r[5]]
                 for r in self.conn.execute(
-                    "SELECT local_id,wavelog_id,status,last_synced_hash,local_version FROM sync_meta"
+                    "SELECT local_id,wavelog_id,status,last_synced_hash,local_version,created_at FROM sync_meta"
                 ).fetchall()
             }
             for q in local_qsos:
@@ -1946,7 +1949,7 @@ class MetadataDB:
                         "INSERT INTO sync_change_journal(local_id,operation,version,created_at) VALUES(?,'create',1,?)",
                         (local_id, now),
                     )
-                    rows[local_id] = [None, "local_only", None, 1]
+                    rows[local_id] = [None, "local_only", None, 1, now]
                 elif row[1] == "synced" and row[2]:
                     if hash_for(q) != row[2]:
                         version = int(row[3] or 0) + 1
@@ -1960,8 +1963,10 @@ class MetadataDB:
                         )
                         row[1] = "modified"
                         row[3] = version
-            for local_id, (wavelog_id, status, _hash, _version) in rows.items():
+            for local_id, (wavelog_id, status, _hash, _version, created_at) in rows.items():
                 if local_id not in ids and status not in ("pending_delete",):
+                    if scan_started is not None and created_at and str(created_at) >= scan_started:
+                        continue  # created after the snapshot was taken
                     if wavelog_id is None:
                         self.conn.execute("DELETE FROM sync_meta WHERE local_id=?", (local_id,))
                     # A linked QSO missing from the current ADI scan is not an
@@ -3063,8 +3068,9 @@ class SyncEngine:
         return summary
 
     def _local_map(self) -> dict[str, dict[str, Any]]:
+        scan_started = utc_now_iso()
         qsos = self.store.scan()
-        self.db.reconcile_index(qsos)
+        self.db.reconcile_index(qsos, scan_started=scan_started)
         return {q["local_id"]: q for q in qsos}
 
     @staticmethod

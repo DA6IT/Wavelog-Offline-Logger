@@ -724,11 +724,17 @@ Heartbeat auf dem Tk-Thread). Regeln:
   ttk-Optionsformatierung.
 - **Löschen und Bearbeiten** schreiben die ADIF in einem Worker
   (`_run_qso_write`). Gelöschte Zeilen verschwinden sofort; Löschen/Bearbeiten
-  sind gesperrt, bis der Schreibvorgang abgeschlossen ist. Die Reihenfolge
-  „ADIF zuerst, danach `mark_pending_delete_many`“ bleibt unverändert.
+  sind gesperrt, bis der Schreibvorgang abgeschlossen ist; Beenden und
+  Profilwechsel warten darauf (kein Daemon-Thread, `_wait_qso_write` vor
+  `db.close()`). Die Reihenfolge „ADIF zuerst, danach
+  `mark_pending_delete_many`“ bleibt unverändert. Gelöschte IDs bleiben
+  ausgeblendet, bis ein Refresh ohne sie eintrifft.
 - **Profil-Index beim Start/Profilwechsel:** `reconcile_index()` läuft in einem
-  Worker, beim Start erst nach dem Aufbau des Fensters (sonst blockiert er die
-  Metadaten-Sperre während des Widget-Aufbaus). Logbuch-Refresh, Delta-Upload
+  Worker, beim Start erst nachdem das Fenster angezeigt und das erste Layout
+  abgeschlossen ist (sonst blockieren Metadaten-Sperre und GIL den
+  Fensteraufbau). Scheitert er, wiederholt ihn der wartende Worker synchron.
+  `reconcile_index(scan_started=…)` löscht keine Metadaten-Zeilen, die nach
+  Beginn des Scans angelegt wurden (QSO während des Scans gespeichert). Logbuch-Refresh, Delta-Upload
   und vollständiger Abgleich warten im Worker auf `_profile_index_ready`; die
   frühere Garantie „Index abgeglichen vor jedem automatischen Upload“ bleibt.
 - **CTY.DAT** wird im Hintergrund geladen; `CountryDB.lookup()` wartet bis zum

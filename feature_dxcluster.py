@@ -435,7 +435,7 @@ class DxClusterFeatureMixin:
         countries: set[tuple[str, str, str]] = set()
         worked_counts: Counter[tuple[str, str, str]] = Counter()
         call_totals: Counter[str] = Counter()
-        history_refs: dict[str, list[dict]] = {}
+        history_refs: dict[str, list[tuple[str, str, str, str]]] = {}
         # Per-run memos: large logs repeat the same calls and mode/band pairs.
         country_memo: dict[str, str] = {}
         mode_memo: dict[tuple[str, str], str] = {}
@@ -444,7 +444,10 @@ class DxClusterFeatureMixin:
             call = str(qso.get("call") or "").strip().upper()
             if call:
                 call_totals[call] += 1
-                history_refs.setdefault(call, []).append(qso)
+                history_refs.setdefault(call, []).append((
+                    str(qso.get("qso_date") or ""), str(qso.get("time_on") or ""),
+                    str(qso.get("band") or ""), str(qso.get("mode") or ""),
+                ))
             country = str(qso.get("country") or "").strip()
             if not country and call:
                 country = country_memo.get(call)

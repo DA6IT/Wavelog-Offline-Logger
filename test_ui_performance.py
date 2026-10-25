@@ -65,6 +65,7 @@ class RowDiffTests(TestCase):
         self.assertIsNone(plan_row_diff(old, old + [make_row(99), make_row(99)]))
         self.assertIsNone(plan_row_diff(old, [make_row(i) for i in range(100, 200)], max_ops=50))
         self.assertEqual(plan_row_diff(old, old), [])
+        self.assertIsNone(plan_row_diff(old, [], max_ops=5))  # mass delete -> rebuild
 
 
 def _tk_root():
@@ -98,6 +99,9 @@ class TreeviewApplyTests(TestCase):
         ]
         expected = [(iid, (tag,), tuple(str(v) for v in values)) for iid, tag, values in new]
         self.assertEqual(shown, expected)
+        insert_row(tree, "end", ("raw", "local", (True, 7, None, "x")))
+        self.assertEqual(tree.set("raw", "a"), "True")
+        self.assertEqual(tree.set("raw", "b"), "7")
         tree.destroy()
 
 
@@ -164,7 +168,7 @@ class WorkedCacheTests(TestCase):
         self.assertEqual(len(data["worked_history"]), len(history))
 
     def test_lazy_history_default_and_memo(self):
-        lazy = LazyWorkedHistory({"DL1ABC": [{"qso_date": "2026-01-01", "time_on": "1200"}]})
+        lazy = LazyWorkedHistory({"DL1ABC": [("2026-01-01", "1200", "20m", "FT8")]})
         self.assertIsNone(lazy.get("X"))
         first = lazy.get("DL1ABC")
         self.assertIs(first, lazy.get("DL1ABC"))
@@ -192,6 +196,54 @@ class ListMetaTests(TestCase):
             self.assertEqual(db.list_meta(), reference)
             self.assertIsInstance(db.conn.execute("SELECT 1").fetchone(), sqlite3.Row)
             db.close()
+
+
+class ReconcileSnapshotTests(TestCase):
+    def test_rows_created_after_scan_start_are_not_orphans(self):
+        from logger_core import utc_now_iso
+        with TemporaryDirectory() as temp:
+            db = MetadataDB(Path(temp) / "m.sqlite")
+            self.addCleanup(db.close)
+            db.ensure_local("old", "h")
+            with db.lock:
+                db.conn.execute("UPDATE sync_meta SET created_at='2000-01-01T00:00:00+00:00' WHERE local_id='old'")
+                db.conn.commit()
+            scan_started = utc_now_iso()
+            db.ensure_local("saved-during-scan", "h")  # QSO saved after the snapshot
+            db.reconcile_index([], scan_started=scan_started)
+            ids = {row["local_id"] for row in db.list_meta()}
+            self.assertEqual(ids, {"saved-during-scan"})
+            db.reconcile_index([])  # without a snapshot time: old behaviour
+            self.assertEqual(db.list_meta(), [])
+
+
+class ProfileIndexWaitTests(TestCase):
+    def test_failed_background_reconcile_is_repeated_by_waiting_worker(self):
+        import threading
+        from feature_profiles import ProfilesFeatureMixin
+        calls = []
+        ready = threading.Event(); ready.error = RuntimeError("boom"); ready.set()
+        fake = SimpleNamespace(
+            _profile_index_ready=ready,
+            store=SimpleNamespace(scan=lambda: [{"local_id": "a"}]),
+            db=SimpleNamespace(reconcile_index=lambda qsos, scan_started=None: calls.append(qsos)),
+        )
+        ProfilesFeatureMixin._wait_profile_index(fake, timeout=0.1)
+        self.assertEqual(calls, [[{"local_id": "a"}]])
+        self.assertIsNone(ready.error)
+        ProfilesFeatureMixin._wait_profile_index(fake, timeout=0.1)
+        self.assertEqual(len(calls), 1)  # healthy index: no extra reconcile
+
+
+class CloseWaitsForWriteTests(TestCase):
+    def test_close_sequence_is_postponed_while_a_write_runs(self):
+        from feature_lifecycle import LifecycleFeatureMixin
+        scheduled = []
+        status = SimpleNamespace(set=lambda text: None)
+        fake = SimpleNamespace(closing=False, _qso_write_running=True, status_var=status,
+                               after=lambda ms, fn: scheduled.append(ms), _begin_close_sequence=None)
+        LifecycleFeatureMixin._begin_close_sequence(fake)
+        self.assertEqual(scheduled, [100])
 
 
 if __name__ == "__main__":

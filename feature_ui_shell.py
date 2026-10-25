@@ -68,6 +68,10 @@ class UiShellFeatureMixin:
     def _finish_window_presentation(self):
         if self.closing:
             return
+        # Start the profile index only after the first layout has settled:
+        # a busy worker during the first draw makes every Tk->Python callback
+        # wait for the GIL and freezes the freshly shown window.
+        self.after_idle(self._start_pending_profile_index)
         try:
             self.attributes("-topmost", False)
             self.lift()
