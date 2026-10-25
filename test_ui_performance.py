@@ -200,21 +200,25 @@ class ListMetaTests(TestCase):
 
 class ReconcileSnapshotTests(TestCase):
     def test_rows_created_after_scan_start_are_not_orphans(self):
-        from logger_core import utc_now_iso
         with TemporaryDirectory() as temp:
             db = MetadataDB(Path(temp) / "m.sqlite")
-            self.addCleanup(db.close)
-            db.ensure_local("old", "h")
-            with db.lock:
-                db.conn.execute("UPDATE sync_meta SET created_at='2000-01-01T00:00:00+00:00' WHERE local_id='old'")
-                db.conn.commit()
-            scan_started = utc_now_iso()
-            db.ensure_local("saved-during-scan", "h")  # QSO saved after the snapshot
-            db.reconcile_index([], scan_started=scan_started)
-            ids = {row["local_id"] for row in db.list_meta()}
-            self.assertEqual(ids, {"saved-during-scan"})
-            db.reconcile_index([])  # without a snapshot time: old behaviour
-            self.assertEqual(db.list_meta(), [])
+            try:
+                self._check_snapshot_guard(db)
+            finally:
+                db.close()  # before TemporaryDirectory cleanup (Windows)
+
+    def _check_snapshot_guard(self, db):
+        from logger_core import utc_now_iso
+        db.ensure_local("old", "h")
+        with db.lock:
+            db.conn.execute("UPDATE sync_meta SET created_at='2000-01-01T00:00:00+00:00' WHERE local_id='old'")
+            db.conn.commit()
+        scan_started = utc_now_iso()
+        db.ensure_local("saved-during-scan", "h")  # QSO saved after the snapshot
+        db.reconcile_index([], scan_started=scan_started)
+        self.assertEqual({row["local_id"] for row in db.list_meta()}, {"saved-during-scan"})
+        db.reconcile_index([])  # without a snapshot time: old behaviour
+        self.assertEqual(db.list_meta(), [])
 
 
 class ProfileIndexWaitTests(TestCase):
