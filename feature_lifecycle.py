@@ -16,6 +16,12 @@ class LifecycleFeatureMixin:
     def _begin_close_sequence(self):
         if self.closing:
             return
+        if getattr(self, "_qso_write_running", False):
+            # A delete/edit is still being written; finish it before the
+            # shutdown sync and before the metadata database is closed.
+            self.status_var.set("Beenden wartet, bis die letzte Änderung gespeichert ist …")
+            self.after(100, self._begin_close_sequence)
+            return
         if not self.close_services_stopped:
             self.close_services_stopped = True
             # Freeze external input before the final sync so UDP cannot append
@@ -72,7 +78,7 @@ class LifecycleFeatureMixin:
         self.shutdown_started = True
         self.closing = True
         self.wavelog_check_generation += 1
-        for job_name in ("wavelog_check_job", "auto_sync_job"):
+        for job_name in ("wavelog_check_job", "auto_sync_job", "dx_cluster_refresh_job"):
             job = getattr(self, job_name, None)
             if job is not None:
                 try:
@@ -87,7 +93,9 @@ class LifecycleFeatureMixin:
             self._stop_dx_cluster_runtime(update_ui=False)
             self._stop_dx_spotter_runtime(update_ui=False)
             self._stop_udp_log_runtime(update_ui=False)
-            # Every database operation is committed immediately.
+            # Every database operation is committed immediately. A running
+            # delete/edit write must complete before the database closes.
+            self._wait_qso_write()
             if not self.sync_busy:
                 self.db.close()
         except Exception as e:

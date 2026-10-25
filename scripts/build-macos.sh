@@ -35,7 +35,7 @@ HAMLIB_DIR="${PROJECT_ROOT}/build/embedded/hamlib/macos-${ARCH}"
 "${SCRIPT_DIR}/prepare-hamlib-macos.sh" "${HAMLIB_DIR}"
 
 "${PYTHON_BIN}" -m pip install --disable-pip-version-check \
-  "pyinstaller==6.17.0" "Pillow==12.3.0" "truststore==0.10.4" "certifi==2026.6.17"
+  "pyinstaller==6.17.0" "Pillow==13.0.0" "truststore==0.10.4" "certifi==2026.10.19"
 
 BUILD_DIR="${PROJECT_ROOT}/build/pyinstaller-macos-${ARCH}"
 PACKAGE_DIR="${BUILD_DIR}/package"

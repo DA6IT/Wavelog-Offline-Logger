@@ -43,7 +43,7 @@ class LogbookFeatureMixin:
         self.qrz_client_credentials: tuple[str, str] | None = None
         self.callbook_autofill: dict[str, str] = {}
         self.callbook_last_call = ""
-        self.country_db = CountryDB(Path(__file__).resolve().parent / "cty.dat")
+        self.country_db = CountryDB(Path(__file__).resolve().parent / "cty.dat", background=True)
         self.current_country = None
 
     def _build_log_page(self):

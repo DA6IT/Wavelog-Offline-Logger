@@ -30,6 +30,10 @@ If a manual Windows Hamlib update fails, the previous runtime remains active. Ch
 
 Save language/theme under **Settings → General**, close the app normally and restart it. If reporting a layout issue, include OS scaling, display resolution and app window size.
 
+## Closing right after deleting takes a moment
+
+Deleted or edited QSOs are written to the logbook in the background. The app closes only after that write has finished so that no change is lost. Switching profiles is locked until then and can be repeated a moment later.
+
 ## Reporting a problem
 
 Include OS, app version, exact steps and exact error text. Remove API tokens, passwords, personal ADI records and profile databases before sharing logs or screenshots.

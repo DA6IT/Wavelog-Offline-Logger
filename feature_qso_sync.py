@@ -12,8 +12,9 @@ from tkinter import filedialog, messagebox, ttk
 from app_common import write_startup_log
 from dialogs import EditDialog, SyncProgressDialog
 from dx_cluster import normalize_worked_mode
-from logger_core import ContestSyncEngine, SyncEngine, WavelogClient, qso_hash
+from logger_core import ContestSyncEngine, SyncEngine, WavelogClient, qso_hash, utc_now_iso
 from qsl_storage import QslStorage
+from qso_tree_view import apply_row_diff, insert_row, plan_row_diff
 from wsjtx_sync import format_wsjtx_result, load_wsjtx_settings, should_wsjtx_sync_for_reason, sync_wsjtx_with_local
 from ui_theme import theme
 
@@ -47,6 +48,15 @@ class QsoSyncFeatureMixin:
         self._qso_cached_qsl_by_wid: dict[int, dict] = {}
         self._qso_cached_fastlog_worked_keys: set[tuple[str, str, str]] = set()
         self._qso_cached_rows: list[tuple[str, str, tuple]] = []
+        # Rows currently shown in the Treeview (None while a full rebuild is
+        # still running in batches). Enables incremental updates.
+        self._qso_tree_rows: list[tuple[str, str, tuple]] | None = []
+        self._qso_tree_render_rows: list[tuple[str, str, tuple]] = []
+        self._qso_write_running = False
+        self._qso_write_thread: threading.Thread | None = None
+        # Rows removed from the view while their deletion is still written;
+        # a refresh that scanned before the write must not show them again.
+        self._qso_hidden_ids: set[str] = set()
         self._qso_cached_summary: dict[str, object] = {}
 
     def _build_qsos_page(self):
@@ -226,11 +236,13 @@ class QsoSyncFeatureMixin:
 
         def worker():
             try:
+                self._wait_profile_index()
+                scan_started = utc_now_iso()
                 qsos = store.scan()
 
                 # Keep sync metadata consistent, but do this away from the Tk
                 # thread. MetadataDB uses check_same_thread=False + its own lock.
-                db.reconcile_index(qsos)
+                db.reconcile_index(qsos, scan_started=scan_started)
 
                 # One bulk query for sync_meta instead of get_meta() per QSO.
                 metas = db.list_meta()
@@ -242,6 +254,12 @@ class QsoSyncFeatureMixin:
 
                 # QSL metadata is read in the worker as well. Even with many
                 # linked QSOs this can no longer freeze navigation.
+                # One bulk query instead of get_qsl_status() per linked QSO.
+                all_qsl = db.qsl_status_map()
+                unknown_qsl = {
+                    "qrz": "unknown", "lotw": "unknown", "eqsl": "unknown",
+                    "clublog": "unknown", "dcl": "unknown",
+                }
                 qsl_by_wid: dict[int, dict] = {}
                 for meta in metas:
                     wid = meta.get("wavelog_id")
@@ -252,7 +270,7 @@ class QsoSyncFeatureMixin:
                     except (TypeError, ValueError):
                         continue
                     if wid_int not in qsl_by_wid:
-                        qsl_by_wid[wid_int] = db.get_qsl_status(wid_int)
+                        qsl_by_wid[wid_int] = all_qsl.get(wid_int) or dict(unknown_qsl)
 
                 qsl_card_status_by_local = (
                     QslStorage(
@@ -262,13 +280,22 @@ class QsoSyncFeatureMixin:
 
                 rows: list[tuple[str, str, tuple]] = []
                 fastlog_worked_keys: set[tuple[str, str, str]] = set()
+                # Formatting memos: identical inputs repeat thousands of times.
+                mode_memo: dict[tuple[str, str], str] = {}
+                qsl_display_memo: dict[int, tuple[str, ...]] = {}
+                unknown_display = tuple(
+                    self._display_qsl_status("unknown") for _service in range(5)
+                )
                 for q in qsos:
                     local_id = str(q.get("local_id") or "")
                     qso_call = str(q.get("call") or "").strip().upper()
                     qso_band = str(q.get("band") or "").strip()
-                    qso_mode = normalize_worked_mode(
-                        str(q.get("mode") or ""), band=qso_band,
-                    )
+                    raw_mode = str(q.get("mode") or "")
+                    qso_mode = mode_memo.get((raw_mode, qso_band))
+                    if qso_mode is None:
+                        qso_mode = mode_memo[(raw_mode, qso_band)] = normalize_worked_mode(
+                            raw_mode, band=qso_band,
+                        )
                     if qso_call and qso_band and qso_mode:
                         fastlog_worked_keys.add((qso_call, qso_band, qso_mode))
                     meta = meta_by_id.get(local_id)
@@ -279,17 +306,20 @@ class QsoSyncFeatureMixin:
                         tm = f"{tm[:2]}:{tm[2:4]}:{tm[4:6]}"
 
                     wid = meta.get("wavelog_id") if meta else None
-                    try:
-                        qsl = qsl_by_wid.get(int(wid)) if wid is not None else None
-                    except (TypeError, ValueError):
-                        qsl = None
-                    qsl = qsl or {
-                        "qrz": "unknown",
-                        "lotw": "unknown",
-                        "eqsl": "unknown",
-                        "clublog": "unknown",
-                        "dcl": "unknown",
-                    }
+                    qsl_display = unknown_display
+                    if wid is not None:
+                        try:
+                            wid_int = int(wid)
+                        except (TypeError, ValueError):
+                            wid_int = None
+                        if wid_int is not None:
+                            qsl_display = qsl_display_memo.get(wid_int)
+                            if qsl_display is None:
+                                qsl = qsl_by_wid.get(wid_int) or {}
+                                qsl_display = qsl_display_memo[wid_int] = tuple(
+                                    self._display_qsl_status(qsl.get(service) if qsl else "unknown")
+                                    for service in ("qrz", "lotw", "eqsl", "clublog", "dcl")
+                                )
 
                     rows.append((
                         local_id,
@@ -313,11 +343,7 @@ class QsoSyncFeatureMixin:
                                     or {}
                                 ).get("payload")
                             ),
-                            self._display_qsl_status(qsl.get("qrz")),
-                            self._display_qsl_status(qsl.get("lotw")),
-                            self._display_qsl_status(qsl.get("eqsl")),
-                            self._display_qsl_status(qsl.get("clublog")),
-                            self._display_qsl_status(qsl.get("dcl")),
+                            *qsl_display,
                         ),
                     ))
 
@@ -336,6 +362,9 @@ class QsoSyncFeatureMixin:
                     if meta.get("status") in ("modified", "conflict", "error", "pending_delete")
                 )
                 last = db.get_setting("last_sync_at", "")
+                # Worked-before caches for logging/DX cluster are computed
+                # here instead of on the Tk thread.
+                worked_cache = self._compute_dx_cluster_worked_cache(qsos)
 
                 result = {
                     "qsos": qsos,
@@ -349,6 +378,7 @@ class QsoSyncFeatureMixin:
                     "last_sync": last,
                     "profile_id": profile_id,
                     "db": db,
+                    "worked_cache": worked_cache,
                 }
                 if not self.closing:
                     self.after(0, lambda: self._qso_refresh_ready(generation, result))
@@ -385,6 +415,8 @@ class QsoSyncFeatureMixin:
             if q.get("local_id")
         }
         self._qso_cached_rows = list(result["rows"])
+        if self._qso_hidden_ids:
+            self._qso_hidden_ids.intersection_update(self._qso_cached_by_id)
         self._qso_cached_meta_by_id = dict(result["meta_by_id"])
         self._qso_cached_qsl_by_wid = dict(result["qsl_by_wid"])
         self._qso_cached_fastlog_worked_keys = set(result["fastlog_worked_keys"])
@@ -401,7 +433,7 @@ class QsoSyncFeatureMixin:
 
         # These caches are useful to the logging/DX-cluster pages too. Updating
         # them from the already parsed QSO list avoids another ADIF scan.
-        self._update_dx_cluster_worked_cache(qsos)
+        self._apply_dx_cluster_worked_cache(result["worked_cache"])
         self._remember_last_spottable_from_cache(qsos)
         self._apply_qso_summary()
 
@@ -464,6 +496,29 @@ class QsoSyncFeatureMixin:
         if self._qso_tree_generation == self._qso_cache_generation:
             return
 
+        hidden = self._qso_hidden_ids
+        rows = [row for row in self._qso_cached_rows if row[0] and row[0] not in hidden]
+        if self._qso_tree_rows is not None and self._qso_tree_rows:
+            ops = plan_row_diff(self._qso_tree_rows, rows)
+            if ops is not None:
+                # Add/edit/delete/status changes: touch only the changed rows
+                # instead of rebuilding thousands of Treeview items.
+                try:
+                    apply_row_diff(self.tree, ops)
+                except tk.TclError:
+                    ops = None
+                if ops is not None:
+                    self._qso_tree_rows = rows
+                    self._qso_tree_generation = self._qso_cache_generation
+                    restore = self._qso_restore_selection
+                    if restore and self.tree.exists(restore):
+                        self.tree.selection_set(restore)
+                        self.tree.focus(restore)
+                        self.tree.see(restore)
+                    self._qso_restore_selection = None
+                    self._sync_selection_changed()
+                    return
+
         selected = self._qso_restore_selection or self.selected_id()
         try:
             yview = self.tree.yview()
@@ -472,6 +527,7 @@ class QsoSyncFeatureMixin:
 
         self._qso_render_generation += 1
         render_generation = self._qso_render_generation
+        self._qso_tree_rows = None
         self.tree.delete(*self.tree.get_children())
 
         # Render in chunks. Tk gets control back between chunks, so even a
@@ -494,14 +550,19 @@ class QsoSyncFeatureMixin:
             return
 
         rows = self._qso_cached_rows
-        batch_size = 200
+        batch_size = 400
         end = min(len(rows), start + batch_size)
+        if start == 0:
+            self._qso_tree_render_rows = []
+        rendered = self._qso_tree_render_rows
 
-        for local_id, tag, values in rows[start:end]:
-            if not local_id:
+        hidden = self._qso_hidden_ids
+        for row in rows[start:end]:
+            if not row[0] or row[0] in hidden:
                 continue
             try:
-                self.tree.insert("", "end", iid=local_id, tags=(tag,), values=values)
+                insert_row(self.tree, "end", row)
+                rendered.append(row)
             except tk.TclError:
                 # A duplicate/corrupt id should not make the complete view fail.
                 continue
@@ -518,6 +579,7 @@ class QsoSyncFeatureMixin:
             return
 
         self._qso_tree_generation = self._qso_cache_generation
+        self._qso_tree_rows = list(rendered)
         if selected and self.tree.exists(selected):
             self.tree.selection_set(selected)
             self.tree.focus(selected)
@@ -596,7 +658,8 @@ class QsoSyncFeatureMixin:
                     f"{selection_count} QSOs löschen"
                     if selection_count > 1
                     else "QSO löschen"
-                )
+                ),
+                state="disabled" if getattr(self, "_qso_write_running", False) else "normal",
             )
         local_id = self.selected_id()
         meta = self.db.get_meta(local_id) if local_id else None
@@ -621,6 +684,11 @@ class QsoSyncFeatureMixin:
             self.sync_detail_label.configure(text=self._tr("QSO auswählen, um Sync-Details anzuzeigen."), fg=theme.MUTED)
 
     def edit_selected_qso(self):
+        if self._qso_write_running:
+            # The previous change is still being written; the cached QSO
+            # would be stale until the following refresh.
+            self.status_var.set("Änderung wird noch gespeichert …")
+            return
         lid = self.selected_id()
         if not lid:
             return
@@ -638,15 +706,31 @@ class QsoSyncFeatureMixin:
                                                        "contest_id","stx","srx","stx_string","srx_string")}
             q.update(profile)
             q.update(self._country_fields_for_call(q.get("call", "")))
-            updated = self.store.update(local_id, q)
-            self.db.ensure_local(local_id, qso_hash(updated))
+        except Exception as e:
+            messagebox.showerror("Bearbeiten fehlgeschlagen", str(e), parent=self)
+            return
+        store, db = self.store, self.db
+        self.status_var.set(f"QSO {q.get('call', '')} wird gespeichert …")
+
+        def write():
+            updated = store.update(local_id, q)
+            db.ensure_local(local_id, qso_hash(updated))
+            return updated
+
+        def done(updated):
             self.refresh_qsos()
             self.status_var.set(f"QSO {updated['call']} geändert")
             self._local_sync_change()
-        except Exception as e:
-            messagebox.showerror("Bearbeiten fehlgeschlagen", str(e), parent=self)
+
+        def failed(exc):
+            self.refresh_qsos()
+            messagebox.showerror("Bearbeiten fehlgeschlagen", str(exc), parent=self)
+
+        self._run_qso_write("qso-edit", write, done, failed)
 
     def delete_selected_qso(self):
+        if self._qso_write_running:
+            return
         local_ids = list(self.selected_ids())
         if not local_ids:
             return
@@ -725,22 +809,93 @@ class QsoSyncFeatureMixin:
                         anchor = item_id
                         break
 
-        try:
+        # The rows disappear immediately; the ADIF rewrite (seconds for very
+        # large logs) runs in the background so the window stays responsive.
+        self._remove_tree_rows_now(local_ids, anchor)
+        self.status_var.set(f"{len(local_ids)} QSO(s) werden gelöscht …")
+        store, db = self.store, self.db
+
+        def write():
             # First persist the local ADIF removal. Only after that do linked
             # QSOs become explicit remote-delete candidates.
-            deleted_ids = self.store.delete_many(local_ids)
-            self.db.mark_pending_delete_many(deleted_ids)
-        except Exception as exc:
+            deleted = store.delete_many(local_ids)
+            db.mark_pending_delete_many(deleted)
+            return deleted
+
+        def done(deleted_ids):
+            # Deleted ids stay hidden until a refresh without them arrives
+            # (see _qso_refresh_ready); ids that were not deleted reappear.
+            self._qso_hidden_ids.difference_update(set(local_ids) - set(deleted_ids or ()))
+            self._qso_restore_selection = anchor
+            self.refresh_qsos()
+            if deleted_ids:
+                self.status_var.set(f"{len(deleted_ids)} QSO(s) lokal gelöscht")
+                self._local_sync_change()
+            else:
+                self.status_var.set("Keine QSOs gelöscht")
+
+        def failed(exc):
+            self._qso_hidden_ids.difference_update(local_ids)
             self.refresh_qsos()
             messagebox.showerror("QSOs löschen", str(exc), parent=self)
-            return
 
-        if not deleted_ids:
-            return
-        self._qso_restore_selection = anchor
-        self.refresh_qsos()
-        self.status_var.set(f"{len(deleted_ids)} QSO(s) lokal gelöscht")
-        self._local_sync_change()
+        self._run_qso_write("qso-delete", write, done, failed)
+
+    def _remove_tree_rows_now(self, local_ids: list[str], anchor: str | None) -> None:
+        wanted = set(local_ids)
+        self._qso_hidden_ids.update(wanted)
+        existing = [lid for lid in local_ids if self.tree.exists(lid)]
+        if existing:
+            self.tree.delete(*existing)
+        if self._qso_tree_rows is not None:
+            self._qso_tree_rows = [row for row in self._qso_tree_rows if row[0] not in wanted]
+        if anchor and self.tree.exists(anchor):
+            self.tree.selection_set(anchor)
+            self.tree.focus(anchor)
+            self.tree.see(anchor)
+        self._sync_selection_changed()
+
+    def _run_qso_write(self, name: str, write, done, failed) -> None:
+        """Run a local ADIF/metadata write off the Tk thread, then call back on Tk."""
+        self._qso_write_running = True
+        self._sync_selection_changed()
+
+        def finish(callback, value):
+            try:
+                self._finish_qso_write()
+            finally:
+                callback(value)
+
+        def worker():
+            # Not a daemon thread: the interpreter must not end in the middle
+            # of an ADIF rewrite. Closing waits for it (_wait_qso_write).
+            try:
+                result = write()
+            except Exception as exc:
+                error = exc
+                if not self.closing:
+                    self.after(0, lambda: finish(failed, error))
+                return
+            if not self.closing:
+                self.after(0, lambda: finish(done, result))
+
+        thread = threading.Thread(target=worker, name=name)
+        self._qso_write_thread = thread
+        thread.start()
+
+    def _finish_qso_write(self) -> None:
+        self._qso_write_running = False
+        self._qso_write_thread = None
+        try:
+            self._sync_selection_changed()
+        except tk.TclError:
+            pass
+
+    def _wait_qso_write(self, timeout: float = 120.0) -> None:
+        """Block until a background ADIF write has finished (used on shutdown)."""
+        thread = getattr(self, "_qso_write_thread", None)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout)
 
     def configure_wsjtx_sync(self):
         if hasattr(self, "settings_notebook") and hasattr(self, "settings_wsjtx_tab"):
@@ -943,6 +1098,7 @@ class QsoSyncFeatureMixin:
 
         def worker():
             try:
+                self._wait_profile_index()
                 summary = SyncEngine(
                     self.store, self.db, WavelogClient(settings.base_url, settings.token),
                 ).push_new_only(
@@ -1076,6 +1232,7 @@ class QsoSyncFeatureMixin:
 
         def worker():
             try:
+                self._wait_profile_index()
                 stations = client.stations()
                 smap = {int(s.get("id")): s for s in stations if s.get("id") is not None}
                 engine = SyncEngine(self.store, self.db, client)

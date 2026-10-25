@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
     [string]$TruststoreVersion = '0.10.4',
-    [string]$CertifiVersion = '2026.6.17'
+    [string]$CertifiVersion = '2026.10.19'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,7 +33,7 @@ $packages = @(
     @{
         Name = 'certifi'; Version = $CertifiVersion
         FileName = "certifi-$CertifiVersion-py3-none-any.whl"
-        Sha256 = '2227dcbaafe0d2f59279d1762ddddc37783ed4354594f194ffc31d20f41fc3db'
+        Sha256 = '42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b'  # pragma: allowlist secret (public PyPI wheel SHA-256)
     }
 )
 

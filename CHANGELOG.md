@@ -2,6 +2,29 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.22.0] - 2026-10-25
+
+### Changed
+
+- große Logbücher werden deutlich schneller eingelesen; Logbuchansicht, Suche nach einzelnen QSOs, Bearbeiten und Löschen bleiben auch bei vielen tausend QSOs flüssig
+- der vollständige Wavelog-Abgleich verarbeitet neue, geänderte, gelöschte und wiederherzustellende QSOs gebündelt und ist dadurch bei großen Logbüchern erheblich schneller, besonders beim ersten Herunterladen eines bestehenden Wavelog-Logbuchs
+- der vollständige Abgleich lädt QSO-Liste und ADIF-Export für den QSL-Status nur noch einmal, wenn im selben Lauf keine QSOs hochgeladen oder geändert wurden
+- Abgleich der lokalen Sync-Informationen beim Laden des Logbuchs in einem Schritt
+- DX-Cluster: schnellere Länderzuordnung, gebündelte Aktualisierung der Spot-Liste bei vielen eingehenden Spots; die Worked-Before-Auswertung läuft im Hintergrund
+- der WSJT-X-Abgleich übernimmt neue QSOs gesammelt
+- Programmstart: das Fenster erscheint bei großen Logbüchern deutlich früher, das Logbuch wird danach im Hintergrund eingelesen
+- Logbuchansicht: nach Speichern, Bearbeiten oder Löschen werden nur die betroffenen Zeilen aktualisiert statt der ganzen Liste; gelöschte QSOs verschwinden sofort, das Schreiben der Logdatei läuft im Hintergrund
+- Fenstergröße ändern, Statistik öffnen und Hintergrundaktualisierungen verursachen spürbar weniger Ruckler
+
+### Zuverlässigkeit
+
+- vollständig neu geschriebene Logbuchdateien werden vor dem Ersetzen dauerhaft auf den Datenträger geschrieben
+- ein unterbrochener vollständiger Abgleich (z. B. Stromausfall) wird beim nächsten Start sauber abgeschlossen, ohne doppelte Uploads oder unnötige Konflikte
+
+### Sicherheit
+
+- mitgelieferte Bibliotheken aktualisiert: Pillow 13.0.0 und certifi 2026.10.19
+
 ## [0.21.1] - 2026-09-18
 
 ### Changed

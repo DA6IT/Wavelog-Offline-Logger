@@ -32,6 +32,7 @@ An offline-first desktop logger for amateur radio: log contacts in the field eve
 - complete German and English UI, Light and Dark themes
 - verified in-app updater; confirmed Windows updates install automatically
 - ZIP backup and restore for profiles, settings, ADI logs and metadata
+- fast even with large logbooks of many thousands of QSOs: loading, editing, deleting and complete Wavelog synchronization stay responsive
 - responsive layouts with scrollable long device settings on small windows and release checks at several window sizes
 - Windows x64, macOS Apple Silicon/Intel, Debian/Ubuntu, AppImage and Arch packages
 

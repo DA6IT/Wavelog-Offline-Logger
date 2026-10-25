@@ -242,9 +242,12 @@ class StatsFeatureMixin:
         self._stats_pending_key = key
         self.stats_hint.configure(text="Statistiken werden berechnet …")
 
-        qsos = [dict(q) for q in getattr(self, "_qso_cached_qsos", [])]
-        meta_by_id = dict(getattr(self, "_qso_cached_meta_by_id", {}))
-        qsl_by_wid = dict(getattr(self, "_qso_cached_qsl_by_wid", {}))
+        # The shared cache lists/dicts are replaced (never mutated) on refresh
+        # and the worker only reads them (enrichment copies each QSO), so no
+        # copy of every QSO is needed on the Tk thread.
+        qsos = getattr(self, "_qso_cached_qsos", [])
+        meta_by_id = getattr(self, "_qso_cached_meta_by_id", {})
+        qsl_by_wid = getattr(self, "_qso_cached_qsl_by_wid", {})
         now = datetime.now(timezone.utc)
         country_db = self.country_db
 
@@ -269,8 +272,9 @@ class StatsFeatureMixin:
 
                 enriched = []
                 for original in filtered:
-                    q = dict(original)
+                    q = original
                     if not q.get("country") and q.get("call"):
+                        q = dict(original)  # copy only when enriching
                         info = country_db.lookup(q.get("call", ""))
                         if info:
                             q["country"] = info.country

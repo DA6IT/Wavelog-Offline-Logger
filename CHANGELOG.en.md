@@ -2,6 +2,29 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.22.0 — 2026-10-25
+
+### Changed
+
+- large logbooks are read much faster; the logbook view, single-QSO lookups, editing and deleting stay responsive even with many thousands of QSOs
+- complete Wavelog synchronization processes new, changed, deleted and restored QSOs in batches and is therefore considerably faster for large logbooks, especially when an existing Wavelog logbook is downloaded for the first time
+- complete synchronization downloads the QSO list and ADIF export for QSL status only once when no QSOs were uploaded or changed in the same run
+- local synchronization information is reconciled in a single step when the logbook is loaded
+- DX Cluster: faster country lookup and coalesced spot-list updates for busy clusters; worked-before evaluation runs in the background
+- WSJT-X synchronization imports new QSOs in one batch
+- startup: with large logbooks the window appears much sooner; the logbook is read in the background afterwards
+- logbook view: after saving, editing or deleting, only the affected rows are updated instead of the whole list; deleted QSOs disappear immediately while the logbook file is written in the background
+- resizing the window, opening statistics and background refreshes cause noticeably less stutter
+
+### Reliability
+
+- fully rewritten logbook files are flushed to disk before they replace the previous file
+- an interrupted complete synchronization (e.g. power loss) is finished cleanly on the next start without duplicate uploads or unnecessary conflicts
+
+### Security
+
+- bundled libraries updated: Pillow 13.0.0 and certifi 2026.10.19
+
 ## 0.21.1 — 2026-09-18
 
 ### Changed

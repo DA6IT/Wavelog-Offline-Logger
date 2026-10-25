@@ -40,7 +40,7 @@ bootstrapper. macOS and Linux packages are likewise built with CPython.
 
 ## Pillow
 
-Release packages include Pillow 12.3.0 for displaying QRZ station photos.
+Release packages include Pillow 13.0.0 for displaying QRZ station photos.
 Pillow is distributed under the MIT-CMU license.
 
 - Project: https://github.com/python-pillow/Pillow
@@ -57,7 +57,7 @@ Truststore is distributed under the MIT license.
 
 ## Certifi
 
-Release packages include certifi 2026.6.17 as a verified CA-bundle fallback for
+Release packages include certifi 2026.10.19 as a verified CA-bundle fallback for
 portable Python runtimes. Certifi is distributed under the Mozilla Public
 License 2.0.
 

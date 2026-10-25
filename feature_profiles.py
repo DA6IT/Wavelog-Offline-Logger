@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import messagebox, simpledialog
+from app_common import write_startup_log
 from dialogs import ProfileDeleteDialog, ProfileManagerDialog
-from logger_core import LogStore, MetadataDB, ProfileManager
+from logger_core import LogStore, MetadataDB, ProfileManager, utc_now_iso
 from xota import ActivationReferenceService, ReverseGeocodeService, XotaRepository
 
 
@@ -38,7 +40,58 @@ class ProfilesFeatureMixin:
             self.xota_repository,
             self.db.get_setting("xota_reverse_geocode_url", ""),
         )
-        self.db.reconcile_index(self.store.scan())
+        self._start_profile_index()
+
+    def _start_profile_index(self) -> None:
+        """Reconcile ADIF and sync metadata off the Tk thread.
+
+        This used to run synchronously while the window was being built
+        (seconds for very large logbooks). Delta uploads and the logbook
+        refresh wait for this event, so the previous ordering guarantee
+        (index reconciled before any automatic upload) is unchanged.
+        """
+        store, db = self.store, self.db
+        ready = threading.Event()
+        self._profile_index_ready = ready
+
+        ready.error = None
+
+        def worker():
+            try:
+                scan_started = utc_now_iso()
+                db.reconcile_index(store.scan(), scan_started=scan_started)
+            except Exception as exc:
+                ready.error = exc
+                write_startup_log("Profil-Index konnte nicht abgeglichen werden: " + repr(exc))
+            finally:
+                ready.set()
+
+        thread = threading.Thread(target=worker, name="profile-index", daemon=True)
+        if getattr(self, "_interface_built", False):
+            thread.start()
+        else:
+            # At startup the reconcile holds the metadata lock for a while;
+            # start it once the window is built so widget setup (which reads
+            # settings from the same DB) is not blocked by it.
+            self._pending_profile_index_thread = thread
+
+    def _start_pending_profile_index(self) -> None:
+        thread = self.__dict__.pop("_pending_profile_index_thread", None)
+        if thread is not None:
+            thread.start()
+
+    def _wait_profile_index(self, timeout: float = 120.0) -> None:
+        """Block a worker thread (never the Tk thread) until the index is ready."""
+        ready = getattr(self, "_profile_index_ready", None)
+        if ready is None:
+            return
+        if not ready.wait(timeout) or getattr(ready, "error", None) is not None:
+            # Background reconcile failed or hangs: reconcile here so no
+            # upload/sync runs on an unreconciled index. Errors propagate to
+            # the caller's normal error handling.
+            scan_started = utc_now_iso()
+            self.db.reconcile_index(self.store.scan(), scan_started=scan_started)
+            ready.error = None
 
     def _current_profile(self) -> dict:
         return self.profile_manager.get(self.active_profile_id) or {"id": self.active_profile_id, "name": "Profil"}
@@ -67,6 +120,7 @@ class ProfilesFeatureMixin:
             return
         if (
             self.sync_busy
+            or getattr(self, "_qso_write_running", False)
             or getattr(self, "qsl_sync_busy", False)
             or getattr(self, "qsl_mail_busy", False)
             or getattr(self, "qsl_background_busy", False)

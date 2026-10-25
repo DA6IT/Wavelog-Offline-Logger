@@ -296,6 +296,44 @@ def normalize_worked_mode(mode: str, frequency_hz: int = 0, band: str = "") -> s
     return value
 
 
+class LazyWorkedHistory:
+    """Per-call QSO history built on first access instead of for every call.
+
+    The logbook refresh previously created a history dict for each of the
+    logbook's QSOs although only the currently entered callsign is shown.
+    ``get()`` returns exactly what the eager version produced.
+    """
+
+    def __init__(self, refs: dict[str, list[tuple[str, str, str, str]]] | None = None):
+        self._refs = refs or {}
+        self._built: dict[str, list[dict[str, str]]] = {}
+
+    def get(self, call: str, default=None):
+        built = self._built.get(call)
+        if built is not None:
+            return built
+        rows = self._refs.get(call)
+        if rows is None:
+            return default
+        # rows hold (qso_date, time_on, band, mode) text tuples captured by
+        # the worker, so later changes to cached QSO dicts cannot leak in.
+        history = [
+            {"qso_date": qso_date, "time_on": time_on, "band": band, "mode": mode}
+            for qso_date, time_on, band, mode in rows
+        ]
+        history.sort(
+            key=lambda item: (item["qso_date"], re.sub(r"[^0-9]", "", item["time_on"])), reverse=True,
+        )
+        self._built[call] = history
+        return history
+
+    def __contains__(self, call: object) -> bool:
+        return call in self._refs
+
+    def __len__(self) -> int:
+        return len(self._refs)
+
+
 SPOTTER_REGION_OPTIONS = (
     "Alle", "Europa", "Nordamerika", "Südamerika",
     "Asien/Pazifik", "Afrika", "Unbekannt",

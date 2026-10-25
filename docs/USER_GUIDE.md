@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](en/USER_GUIDE.md)
 
-Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.21.1. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
+Dieses Handbuch beschreibt den DA6IT.de Wavelog Offline Logger ab Version 0.22.0. Die Screenshots wurden automatisch mit isolierten Demo-Daten erzeugt. Sie enthalten keine privaten ADI-Dateien, API-Tokens oder echten Zugangsdaten.
 
 ## 1. Grundprinzip
 
@@ -257,7 +257,7 @@ Die Tabelle zeigt lokale QSOs und deren Zustand:
 - `KONFLIKT` – lokal und in Wavelog unterschiedlich geändert
 - `SYNC-FEHLER` – Übertragung nicht eindeutig erfolgreich
 
-Ein QSO kann lokal bearbeitet oder gelöscht werden. Bei einem Konflikt entscheidet der Benutzer ausdrücklich zwischen lokaler und Wavelog-Version. Ein außerhalb der App fehlendes lokales ADI-QSO ist kein automatischer Auftrag, es aus Wavelog zu löschen.
+Ein QSO kann lokal bearbeitet oder gelöscht werden. Gelöschte QSOs verschwinden sofort aus der Liste; das Logbuch wird im Hintergrund gespeichert. Bis dieser Speichervorgang abgeschlossen ist – bei großen Logbüchern meist unter einer Sekunde –, sind weiteres Löschen, Bearbeiten und der Profilwechsel kurz gesperrt, und beim Beenden wartet das Programm darauf. Bei einem Konflikt entscheidet der Benutzer ausdrücklich zwischen lokaler und Wavelog-Version. Ein außerhalb der App fehlendes lokales ADI-QSO ist kein automatischer Auftrag, es aus Wavelog zu löschen.
 
 Bei `SYNC-FEHLER` zeigt die Detailzeile unter der Tabelle die gespeicherte technische Ursache des ausgewählten QSOs. Eine Stationsprofil-Abweichung wird dort ausdrücklich genannt. Sie wird nicht automatisch repariert oder gelöscht.
 

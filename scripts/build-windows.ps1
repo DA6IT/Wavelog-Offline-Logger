@@ -95,9 +95,9 @@ try {
     if (-not $pythonPackages.StartsWith($expectedPackagesRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Unsicherer Python-Paketpfad: $pythonPackages"
     }
-    & (Join-Path $PSScriptRoot 'prepare-pillow-windows.ps1') -OutputDirectory $pythonPackages -PillowVersion '12.3.0'
+    & (Join-Path $PSScriptRoot 'prepare-pillow-windows.ps1') -OutputDirectory $pythonPackages -PillowVersion '13.0.0'
     & (Join-Path $PSScriptRoot 'prepare-network-trust-windows.ps1') -OutputDirectory $pythonPackages `
-        -TruststoreVersion '0.10.4' -CertifiVersion '2026.6.17'
+        -TruststoreVersion '0.10.4' -CertifiVersion '2026.10.19'
 
     & (Join-Path $PSScriptRoot 'prepare-hamlib-windows.ps1')
     if ($LASTEXITCODE -ne 0) {

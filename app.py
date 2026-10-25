@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import traceback
 import tkinter as tk
 from tkinter import messagebox
@@ -61,6 +62,11 @@ class LoggerApp(
 
     def __init__(self) -> None:
         super().__init__()
+        # Background workers (logbook refresh, ADIF writes, sync) compete with
+        # the Tk thread for the GIL. A shorter switch interval lets the UI
+        # thread get it back sooner, which removes most visible stutter while
+        # those workers run on large logbooks.
+        sys.setswitchinterval(0.001)
 
         # Shared application context.
         self._vars: dict[str, tk.StringVar] = {}
@@ -86,6 +92,11 @@ class LoggerApp(
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self._build_interface()
+        self._interface_built = True
+        # The profile index starts once the window has been presented (its
+        # first layout is the most expensive Tk step); fallback if the
+        # presentation is skipped.
+        self.after(2500, self._start_pending_profile_index)
         self._schedule_startup_tasks()
         write_startup_log(f"{APP_NAME} {VERSION} gestartet")
 

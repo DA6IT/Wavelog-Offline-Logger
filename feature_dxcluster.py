@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 from dx_cluster import (
-    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DxClusterClient, DxClusterConfig, DxClusterError, DxSpotterConfig, SPOTTER_REGION_OPTIONS, normalize_worked_mode, select_dx_spot_candidate, spot_comment_with_mode, spot_sort_value, spotter_region_for_continent, worked_flags,
+    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DxClusterClient, DxClusterConfig, DxClusterError, DxSpotterConfig, LazyWorkedHistory, SPOTTER_REGION_OPTIONS, normalize_worked_mode, select_dx_spot_candidate, spot_comment_with_mode, spot_sort_value, spotter_region_for_continent, worked_flags,
 )
 from logger_core import BANDS, MODES, band_from_mhz
 from ui_theme import theme
@@ -34,8 +34,9 @@ class DxClusterFeatureMixin:
         self.dx_cluster_worked_countries: set[tuple[str, str, str]] = set()
         self.qso_worked_counts: Counter[tuple[str, str, str]] = Counter()
         self.qso_worked_call_totals: Counter[str] = Counter()
-        self.qso_worked_history: dict[str, list[dict[str, str]]] = {}
+        self.qso_worked_history: LazyWorkedHistory = LazyWorkedHistory()
         self.dx_cluster_filter_job = None
+        self.dx_cluster_refresh_job = None
         self.dx_cluster_session_received = 0
         self.dx_cluster_last_spot_utc: datetime | None = None
         self.dx_cluster_seen_keys: set[tuple] = set()
@@ -372,8 +373,21 @@ class DxClusterFeatureMixin:
                     old_spot.spotter, old_spot.call, old_spot.frequency_hz,
                     old_spot.time_utc, old_spot.comment,
                 ))
-        self._refresh_dx_cluster_spots()
+        # Busy clusters deliver many spots per second; coalesce the full
+        # table rebuild instead of re-rendering for every single spot.
+        self._schedule_dx_cluster_refresh()
         self.status_var.set(f"Neuer Live-DX-Spot: {spot.call} · {spot.frequency_mhz} MHz")
+
+    def _schedule_dx_cluster_refresh(self, delay_ms: int = 300):
+        if self.closing or self.dx_cluster_refresh_job is not None:
+            return
+        self.dx_cluster_refresh_job = self.after(delay_ms, self._run_scheduled_dx_cluster_refresh)
+
+    def _run_scheduled_dx_cluster_refresh(self):
+        self.dx_cluster_refresh_job = None
+        if self.closing:
+            return
+        self._refresh_dx_cluster_spots()
 
     def _clear_dx_cluster_spots(self):
         self.dx_cluster_spots.clear()
@@ -413,36 +427,51 @@ class DxClusterFeatureMixin:
         self.dx_cluster_filter_job = self.after(10_000, self._dx_cluster_filter_tick)
 
     def _update_dx_cluster_worked_cache(self, qsos: list[dict]):
+        self._apply_dx_cluster_worked_cache(self._compute_dx_cluster_worked_cache(qsos))
+
+    def _compute_dx_cluster_worked_cache(self, qsos: list[dict]) -> dict:
+        """Pure computation; safe to run in the logbook refresh worker thread."""
         calls: set[tuple[str, str, str]] = set()
         countries: set[tuple[str, str, str]] = set()
         worked_counts: Counter[tuple[str, str, str]] = Counter()
         call_totals: Counter[str] = Counter()
-        worked_history: dict[str, list[dict[str, str]]] = {}
+        history_refs: dict[str, list[tuple[str, str, str, str]]] = {}
+        # Per-run memos: large logs repeat the same calls and mode/band pairs.
+        country_memo: dict[str, str] = {}
+        mode_memo: dict[tuple[str, str], str] = {}
+        lookup = self.country_db.lookup
         for qso in qsos:
             call = str(qso.get("call") or "").strip().upper()
             if call:
                 call_totals[call] += 1
-                worked_history.setdefault(call, []).append({
-                    "qso_date": str(qso.get("qso_date") or ""),
-                    "time_on": str(qso.get("time_on") or ""),
-                    "band": str(qso.get("band") or ""),
-                    "mode": str(qso.get("mode") or ""),
-                })
+                history_refs.setdefault(call, []).append((
+                    str(qso.get("qso_date") or ""), str(qso.get("time_on") or ""),
+                    str(qso.get("band") or ""), str(qso.get("mode") or ""),
+                ))
             country = str(qso.get("country") or "").strip()
             if not country and call:
-                info = self.country_db.lookup(call)
-                country = info.country if info else ""
-            frequency_hz = 0
-            try:
-                frequency_hz = int(round(float(str(qso.get("freq") or "0").replace(",", ".")) * 1_000_000))
-            except (TypeError, ValueError):
-                pass
+                country = country_memo.get(call)
+                if country is None:
+                    info = lookup(call)
+                    country = country_memo[call] = info.country if info else ""
+            raw_mode = str(qso.get("mode") or "")
             band = str(qso.get("band") or "").strip()
-            if not band and frequency_hz:
-                band = band_from_mhz(frequency_hz / 1_000_000) or ""
-            mode = normalize_worked_mode(
-                str(qso.get("mode") or ""), frequency_hz, band,
-            )
+            if band:
+                # The frequency only matters without a band (band derivation
+                # and SSB sideband), so it is not parsed here.
+                mode_key = (raw_mode, band)
+                mode = mode_memo.get(mode_key)
+                if mode is None:
+                    mode = mode_memo[mode_key] = normalize_worked_mode(raw_mode, 0, band)
+            else:
+                frequency_hz = 0
+                try:
+                    frequency_hz = int(round(float(str(qso.get("freq") or "0").replace(",", ".")) * 1_000_000))
+                except (TypeError, ValueError):
+                    pass
+                if frequency_hz:
+                    band = band_from_mhz(frequency_hz / 1_000_000) or ""
+                mode = normalize_worked_mode(raw_mode, frequency_hz, band)
             if not band or not mode:
                 continue
             if call:
@@ -450,13 +479,18 @@ class DxClusterFeatureMixin:
                 worked_counts[(call, band, mode)] += 1
             if country:
                 countries.add((country, band, mode))
-        self.dx_cluster_worked_calls = calls
-        self.dx_cluster_worked_countries = countries
-        self.qso_worked_counts = worked_counts
-        self.qso_worked_call_totals = call_totals
-        for history in worked_history.values():
-            history.sort(key=lambda item: (item["qso_date"], re.sub(r"[^0-9]", "", item["time_on"])), reverse=True)
-        self.qso_worked_history = worked_history
+        worked_history = LazyWorkedHistory(history_refs)
+        return {
+            "calls": calls, "countries": countries, "worked_counts": worked_counts,
+            "call_totals": call_totals, "worked_history": worked_history,
+        }
+
+    def _apply_dx_cluster_worked_cache(self, data: dict):
+        self.dx_cluster_worked_calls = data["calls"]
+        self.dx_cluster_worked_countries = data["countries"]
+        self.qso_worked_counts = data["worked_counts"]
+        self.qso_worked_call_totals = data["call_totals"]
+        self.qso_worked_history = data["worked_history"]
         self._update_qso_worked_status()
         if hasattr(self, "dx_cluster_tree"):
             self._refresh_dx_cluster_spots()
@@ -543,26 +577,25 @@ class DxClusterFeatureMixin:
                 spot.call, dx_country, spot.band, spot.mode,
                 self.dx_cluster_worked_calls, self.dx_cluster_worked_countries,
             )
-            line_number = len(self.dx_cluster_visible_ids) + 2
-            self.dx_cluster_tree.insert("end", self._dx_cluster_table_cell((spot.time_utc + "Z") if spot.time_utc else "—", 7))
-            self.dx_cluster_tree.insert(
-                "end", self._dx_cluster_table_cell(spot.call, 15), ("worked",) if worked_call else (),
+            # One Tk call per row (instead of ~11): chunks alternate with
+            # their tags. Line tags cover the row text, not the newline,
+            # exactly like the former tag_add(line.0, line.end).
+            line_tags = (("new",) if age_seconds <= 120 else ()) + (("selected",) if item_id == selected_id else ())
+            rest = "".join(
+                self._dx_cluster_table_cell(value, width)
+                for value, width in (
+                    (spot.frequency_mhz, 11), (spot.band or "—", 8), (spot.mode or "—", 10),
+                    (spot.spotter, 15), (spotter_country, 20), (comment, 60),
+                )
             )
             self.dx_cluster_tree.insert(
-                "end", self._dx_cluster_table_cell(dx_country, 20), ("worked",) if worked_country else (),
+                "end",
+                self._dx_cluster_table_cell((spot.time_utc + "Z") if spot.time_utc else "—", 7), line_tags,
+                self._dx_cluster_table_cell(spot.call, 15), (("worked",) if worked_call else ()) + line_tags,
+                self._dx_cluster_table_cell(dx_country, 20), (("worked",) if worked_country else ()) + line_tags,
+                rest, line_tags,
+                "\n", (),
             )
-            for value, width in (
-                (spot.frequency_mhz, 11), (spot.band or "—", 8), (spot.mode or "—", 10),
-                (spot.spotter, 15), (spotter_country, 20), (comment, 60),
-            ):
-                self.dx_cluster_tree.insert("end", self._dx_cluster_table_cell(value, width))
-            self.dx_cluster_tree.insert("end", "\n")
-            line_start = f"{line_number}.0"
-            line_end = f"{line_number}.end"
-            if age_seconds <= 120:
-                self.dx_cluster_tree.tag_add("new", line_start, line_end)
-            if item_id == selected_id:
-                self.dx_cluster_tree.tag_add("selected", line_start, line_end)
             self.dx_cluster_visible_ids.append(item_id)
             self.dx_cluster_spot_by_id[item_id] = spot
 

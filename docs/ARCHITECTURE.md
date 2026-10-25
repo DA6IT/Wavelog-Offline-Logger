@@ -1,6 +1,6 @@
 # Wavelog Offline Logger – Architektur & Entwicklerhinweise
 
-> Stand: 0.21.1
+> Stand: 0.22.0
 > Ziel: große Funktionsbereiche getrennt entwickeln, ohne die zentrale `app.py` wieder wachsen zu lassen.
 
 ## Überblick
@@ -372,13 +372,13 @@ Der Verzeichnisname wird aus `appVersion` erzeugt.
 Beispiel:
 
 ```go
-appVersion = "0.21.1"
+appVersion = "0.22.0"
 ```
 
 ergibt:
 
 ```text
-app-v0211
+app-v0220
 ```
 
 Damit muss der Runtime-Pfad beim nächsten Release nicht mehr separat von Hand geändert werden.
@@ -412,13 +412,13 @@ Mindestens diese beiden Werte müssen übereinstimmen:
 `logger_core.py`:
 
 ```python
-VERSION = "0.21.1"
+VERSION = "0.22.0"
 ```
 
 `bootstrap_windows.go`:
 
 ```go
-appVersion = "0.21.1"
+appVersion = "0.22.0"
 ```
 
 Das Windows-Buildscript prüft diesen Zustand absichtlich und bricht bei einem Konflikt ab.
@@ -666,6 +666,90 @@ normalisiert. Danach greift ebenfalls der schnelle Append-Pfad.
 
 Damit wächst der Aufwand eines normalen neuen QSOs nicht mehr mit der Größe des
 gesamten Logbuchs.
+
+### Parser, LogStore-Cache und gebündelter Sync (v0.22.0)
+
+Die Laufzeit darf bei großen Logbüchern nicht quadratisch mit der Anzahl der
+QSOs wachsen. Dafür gelten seit v0.22.0 zusätzlich:
+
+- `parse_adif()` sucht mit Start-/Endpositionen im Gesamttext und kopiert keine
+  Resttexte mehr pro Datensatz (vorher O(n²)).
+- `LogStore` hält die geparsten Datensätze der kanonischen ADIF-Datei im
+  Speicher. Gültigkeit wird bei jedem Zugriff über Größe, `mtime_ns`, Inode und
+  `ctime_ns` geprüft; externe Ersetzungen (Restore, andere Werkzeuge) werden so
+  erkannt. Eigene Schreibvorgänge invalidieren den Cache, Appends ergänzen ihn
+  inkrementell. Aufrufer erhalten immer Kopien.
+- `find()` nutzt einen Index, `update()` liest und schreibt genau einmal.
+  `add_many()` hängt mehrere QSOs in einem journalisierten Append an,
+  `upsert_many()` ersetzt/ergänzt mehrere QSOs mit höchstens einem
+  verifizierten Rewrite und verweigert den Rewrite einer unlesbaren Datei.
+- Vollständige Rewrites werden vor `os.replace()` mit `fsync()` gesichert.
+- `MetadataDB.bulk()` bündelt viele kleine Metadaten-Schreibvorgänge in einer
+  Transaktion; `reconcile_index()` arbeitet mit einer Abfrage und einem Commit.
+- `SyncEngine.sync()` sammelt lokale Ergebnisse je Phase in
+  `sync_write_buffer.py` und schreibt sie in Batches (ADIF zuerst, danach der
+  `synced`-Status). Unverknüpfte lokale QSOs werden nach Rufzeichen/Datum/Band
+  vorsortiert statt pro Remote-QSO alle lokalen QSOs abzufragen. Lokale
+  Änderungen während eines offenen Batches werden wie bisher zum Konflikt.
+- Absturzsicherheit der Batches: Vor jedem ADIF-Batch werden Verknüpfung und
+  Baselines in `sync_pending_apply` vorgemerkt. Bricht der Prozess zwischen
+  ADIF-Schreiben und Status-Commit ab, übernimmt `reconcile_index()` beim
+  nächsten Start die vorgemerkten Zeilen, wenn die ADIF genau diesen Datensatz
+  enthält, sonst werden sie verworfen. So entstehen weder doppelte Uploads
+  (Delta-Sync) noch falsche Konflikte. Zurückgestellte Baseline-Updates werden
+  übersprungen, wenn das QSO zwischenzeitlich lokal geändert/gelöscht wurde.
+- Wurden im selben Lauf keine QSOs hochgeladen oder gepatcht, verwendet der
+  QSL-Status-Refresh die bereits geladene QSO-Liste und den ADIF-Export.
+- `CountryDB.lookup()` nutzt einen Längstpräfix-Index.
+- Die DX-Cluster-Tabelle wird bei eingehenden Spots gebündelt neu aufgebaut
+  (eine Tk-Operation pro Zeile); die Worked-Before-Caches werden im
+  Logbuch-Worker berechnet.
+
+Regressionstests: `test_performance_paths.py`.
+
+`sync_write_buffer.py` ist ein Nicht-Feature-Modul und deshalb explizit im
+Windows-Bootstrap eingebettet.
+
+### Reaktionsfähigkeit der Oberfläche (v0.22.0)
+
+Gemessen mit einer Sondenumgebung (echte App unter Xvfb, 20 000 QSOs, 5-ms-
+Heartbeat auf dem Tk-Thread). Regeln:
+
+- **Logbuch-Treeview inkrementell:** `qso_tree_view.plan_row_diff()` vergleicht
+  die angezeigten Zeilen mit dem neuen Cache. Bleibt die relative Reihenfolge
+  gleich (Neu, Bearbeiten, Löschen, Statuswechsel), werden nur die geänderten
+  Zeilen eingefügt/aktualisiert/entfernt; sonst (Umsortierung, doppelte IDs,
+  mehr als 2000 Änderungen) folgt der bisherige gestaffelte Neuaufbau.
+  Einfügen/Ändern nutzt direkte Tcl-Aufrufe statt der generischen
+  ttk-Optionsformatierung.
+- **Löschen und Bearbeiten** schreiben die ADIF in einem Worker
+  (`_run_qso_write`). Gelöschte Zeilen verschwinden sofort; Löschen/Bearbeiten
+  sind gesperrt, bis der Schreibvorgang abgeschlossen ist; Beenden und
+  Profilwechsel warten darauf (kein Daemon-Thread, `_wait_qso_write` vor
+  `db.close()`). Die Reihenfolge „ADIF zuerst, danach
+  `mark_pending_delete_many`“ bleibt unverändert. Gelöschte IDs bleiben
+  ausgeblendet, bis ein Refresh ohne sie eintrifft.
+- **Profil-Index beim Start/Profilwechsel:** `reconcile_index()` läuft in einem
+  Worker, beim Start erst nachdem das Fenster angezeigt und das erste Layout
+  abgeschlossen ist (sonst blockieren Metadaten-Sperre und GIL den
+  Fensteraufbau). Scheitert er, wiederholt ihn der wartende Worker synchron.
+  `reconcile_index(scan_started=…)` löscht keine Metadaten-Zeilen, die nach
+  Beginn des Scans angelegt wurden (QSO während des Scans gespeichert). Logbuch-Refresh, Delta-Upload
+  und vollständiger Abgleich warten im Worker auf `_profile_index_ready`; die
+  frühere Garantie „Index abgeglichen vor jedem automatischen Upload“ bleibt.
+- **CTY.DAT** wird im Hintergrund geladen; `CountryDB.lookup()` wartet bis zum
+  Abschluss, Ergebnisse sind identisch.
+- **Gemeinsame Schriften:** eine skalierbare Schrift pro Schriftangabe statt
+  einer pro Widget (vorher 198 Schriften bei 2 verschiedenen Angaben).
+- **Refresh-Worker:** Worked-Before-Verlauf wird pro Rufzeichen erst bei Bedarf
+  aufgebaut (`dx_cluster.LazyWorkedHistory`), Länder- und Mode-Normalisierung
+  werden pro Lauf memoisiert, `list_meta()` ohne `sqlite3.Row`-Umweg.
+- **Statistik** kopiert die gemeinsamen Cache-Listen nicht mehr auf dem Tk-Thread.
+- `sys.setswitchinterval(0.001)`: der Tk-Thread bekommt das GIL bei laufenden
+  Workern schneller zurück (deutlich weniger Ruckler).
+
+Regressionstests: `test_ui_performance.py`. `qso_tree_view.py` ist im
+Windows-Bootstrap eingebettet.
 
 ## QSL Card Manager Integration (v0.20.0)
 

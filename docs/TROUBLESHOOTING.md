@@ -95,6 +95,10 @@ Die App lässt die vorhandenen Tagesdateien unangetastet, wenn Sicherung, Schrei
 
 Prüfe zuerst Breiten- und Längengrad sowie die angezeigte GPS-Genauigkeit. Aktualisiere bei bestehender Internetverbindung die Referenzdaten und suche erneut. Ein POTA-Katalogpunkt ist nur ein Marker und kann bei großen Parks weit vom tatsächlichen Standort entfernt liegen. Kandidaten bis 25 km werden deshalb angezeigt, müssen aber mit **POTA-Grenze prüfen** und der offiziellen Parkinformation bewusst bestätigt werden. Eine fehlende Standortfreigabe verhindert nicht die manuelle Koordinateneingabe.
 
+## Beenden direkt nach dem Löschen dauert einen Moment
+
+Gelöschte oder bearbeitete QSOs werden im Hintergrund in das Logbuch geschrieben. Das Programm schließt erst, wenn dieser Vorgang abgeschlossen ist, damit keine Änderung verloren geht; die Statuszeile zeigt dann „Beenden wartet, bis die letzte Änderung gespeichert ist …“. Ein Profilwechsel ist bis dahin gesperrt und kann einen Augenblick später erneut ausgeführt werden.
+
 ## Diagnoseinformationen für ein Issue
 
 - Programmversion
