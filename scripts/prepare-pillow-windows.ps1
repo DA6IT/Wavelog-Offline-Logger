@@ -27,7 +27,7 @@ if (Test-Path -LiteralPath $pillowMarker) {
 
 $pinnedWheelHashes = @{
     # pillow-13.0.0-cp312-cp312-win_amd64.whl
-    '13.0.0' = 'ff3fe9eb621fbb9db4c4be33ab946f6bac5f98ab50ca8d3260503653656c961b'
+    '13.0.0' = 'ff3fe9eb621fbb9db4c4be33ab946f6bac5f98ab50ca8d3260503653656c961b'  # pragma: allowlist secret (public PyPI wheel SHA-256)
 }
 if (-not $pinnedWheelHashes.ContainsKey($PillowVersion)) {
     throw "Fuer Pillow $PillowVersion ist noch keine freigegebene Windows-Wheel-Pruefsumme hinterlegt."
