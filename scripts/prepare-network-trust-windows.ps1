@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory,
     [string]$TruststoreVersion = '0.10.4',
-    [string]$CertifiVersion = '2026.6.17'
+    [string]$CertifiVersion = '2026.10.19'
 )
 
 $ErrorActionPreference = 'Stop'

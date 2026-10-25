@@ -16,6 +16,11 @@
 ### Reliability
 
 - fully rewritten logbook files are flushed to disk before they replace the previous file
+- an interrupted complete synchronization (e.g. power loss) is finished cleanly on the next start without duplicate uploads or unnecessary conflicts
+
+### Security
+
+- bundled libraries updated: Pillow 13.0.0 and certifi 2026.10.19
 
 ## 0.21.1 — 2026-09-18
 

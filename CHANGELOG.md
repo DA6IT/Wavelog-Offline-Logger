@@ -16,6 +16,11 @@
 ### Zuverlässigkeit
 
 - vollständig neu geschriebene Logbuchdateien werden vor dem Ersetzen dauerhaft auf den Datenträger geschrieben
+- ein unterbrochener vollständiger Abgleich (z. B. Stromausfall) wird beim nächsten Start sauber abgeschlossen, ohne doppelte Uploads oder unnötige Konflikte
+
+### Sicherheit
+
+- mitgelieferte Bibliotheken aktualisiert: Pillow 13.0.0 und certifi 2026.10.19
 
 ## [0.21.1] - 2026-09-18
 

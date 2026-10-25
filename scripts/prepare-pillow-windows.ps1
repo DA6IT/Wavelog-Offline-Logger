@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory,
-    [string]$PillowVersion = '12.3.0'
+    [string]$PillowVersion = '13.0.0'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,8 +26,8 @@ if (Test-Path -LiteralPath $pillowMarker) {
 }
 
 $pinnedWheelHashes = @{
-    # pillow-12.3.0-cp312-cp312-win_amd64.whl
-    '12.3.0' = 'a2b55dd6b2a4c4b7d87ffa56bdb33fdc5fdb9a462173861a7bc097f17d91cb09'
+    # pillow-13.0.0-cp312-cp312-win_amd64.whl
+    '13.0.0' = 'ff3fe9eb621fbb9db4c4be33ab946f6bac5f98ab50ca8d3260503653656c961b'
 }
 if (-not $pinnedWheelHashes.ContainsKey($PillowVersion)) {
     throw "Fuer Pillow $PillowVersion ist noch keine freigegebene Windows-Wheel-Pruefsumme hinterlegt."
