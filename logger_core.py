@@ -1212,6 +1212,8 @@ class LogStore:
         cached = self._cached_records(path)
 
         original_size = path.stat().st_size
+        if cached is not None and (self._cache_key or (None,))[0] != original_size:
+            cached = None
         prefix = b""
         with path.open("rb") as handle:
             handle.seek(-1, os.SEEK_END)
@@ -1231,11 +1233,13 @@ class LogStore:
         except Exception:
             self._invalidate_cache()
             raise
-        if cached is not None:
+        new_key = self._stat_key(path)
+        if cached is not None and new_key is not None and new_key[0] == original_size + len(payload):
             # Keep the cache valid without re-reading the whole file: only the
-            # appended records are parsed.
+            # appended records are parsed.  Any size mismatch means another
+            # writer touched the file, so the cache is dropped instead.
             cached.extend(self._records_from_fields(parse_adif(record_text), path))
-            self._set_cache(path, self._stat_key(path), cached)
+            self._set_cache(path, new_key, cached)
         else:
             self._invalidate_cache()
 
@@ -1562,6 +1566,15 @@ class MetadataDB:
                     PRIMARY KEY(callsign, source)
                 );
                 CREATE INDEX IF NOT EXISTS idx_callbook_updated ON callbook_cache(updated_at);
+                -- Write-ahead record for batched sync writes (v0.22.0): staged
+                -- before the ADIF write, removed after the synced status commit.
+                CREATE TABLE IF NOT EXISTS sync_pending_apply (
+                    local_id TEXT PRIMARY KEY,
+                    wavelog_id INTEGER NOT NULL,
+                    local_hash TEXT NOT NULL,
+                    remote_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
             """)
             qsl_columns = {
                 str(row[1]).lower() for row in self.conn.execute("PRAGMA table_info(qsl_meta)")
@@ -1836,6 +1849,43 @@ class MetadataDB:
             self._commit()
         return changed
 
+    def stage_pending_apply(self, items: Iterable[tuple[str, int, str, str]]) -> None:
+        """Persist (local_id, wavelog_id, local_hash, remote_hash) before an ADIF batch write."""
+        now = utc_now_iso()
+        with self.lock:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO sync_pending_apply(local_id,wavelog_id,local_hash,remote_hash,created_at) "
+                "VALUES(?,?,?,?,?)",
+                [(lid, int(wid), lh, rh, now) for lid, wid, lh, rh in items],
+            )
+            self._commit()
+
+    def clear_pending_apply(self, local_ids: Iterable[str]) -> None:
+        with self.lock:
+            self.conn.executemany("DELETE FROM sync_pending_apply WHERE local_id=?", [(str(v),) for v in local_ids])
+            self._commit()
+
+    def _resolve_pending_apply(self, local_by_id: dict[str, dict[str, Any]], hash_for) -> None:
+        """Finish a sync batch interrupted between ADIF write and status commit.
+
+        If the ADIF already contains exactly the staged record, the link and
+        baselines are applied (no re-upload, no false conflict).  Otherwise the
+        write never happened and the staged row is simply discarded.
+        """
+        pending = self.conn.execute(
+            "SELECT local_id,wavelog_id,local_hash,remote_hash FROM sync_pending_apply"
+        ).fetchall()
+        for local_id, wavelog_id, local_hash, remote_hash in pending:
+            qso = local_by_id.get(local_id)
+            if qso is not None and hash_for(qso) == local_hash:
+                owner = self.conn.execute(
+                    "SELECT local_id FROM sync_meta WHERE wavelog_id=?", (int(wavelog_id),)
+                ).fetchone()
+                if owner is None or owner[0] == local_id:
+                    self.set_status(local_id, "synced", wavelog_id=int(wavelog_id),
+                                    last_synced_hash=local_hash, remote_hash=remote_hash)
+            self.conn.execute("DELETE FROM sync_pending_apply WHERE local_id=?", (local_id,))
+
     def reconcile_index(self, local_qsos: list[dict[str, Any]]):
         """Bulk equivalent of ensure_local() for every QSO plus orphan cleanup.
 
@@ -1843,9 +1893,28 @@ class MetadataDB:
         """
         ids = {q["local_id"] for q in local_qsos if q.get("local_id")}
         now = utc_now_iso()
+        # Hash outside the DB lock so other threads (UI) are not blocked; only
+        # synced rows and staged sync writes need a hash comparison.
         with self.lock:
+            need_hash = {
+                str(r[0]) for r in self.conn.execute(
+                    "SELECT local_id FROM sync_meta WHERE status='synced' AND last_synced_hash IS NOT NULL "
+                    "UNION SELECT local_id FROM sync_pending_apply"
+                ).fetchall()
+            }
+        hashes = {q["local_id"]: qso_hash(q) for q in local_qsos if q["local_id"] in need_hash}
+
+        def hash_for(qso: dict[str, Any]) -> str:
+            value = hashes.get(qso["local_id"])
+            if value is None:  # row changed after the pre-read
+                value = hashes[qso["local_id"]] = qso_hash(qso)
+            return value
+
+        local_by_id = {q["local_id"]: q for q in local_qsos}
+        with self.lock:
+            self._resolve_pending_apply(local_by_id, hash_for)
             # local_id -> [wavelog_id, status, last_synced_hash, local_version]
-            rows: dict[str, list[Any]] = {
+            rows: dict[str, list[Any]] = {  # read after pending resolution
                 str(r[0]): [r[1], r[2], r[3], r[4]]
                 for r in self.conn.execute(
                     "SELECT local_id,wavelog_id,status,last_synced_hash,local_version FROM sync_meta"
@@ -1865,7 +1934,7 @@ class MetadataDB:
                     )
                     rows[local_id] = [None, "local_only", None, 1]
                 elif row[1] == "synced" and row[2]:
-                    if qso_hash(q) != row[2]:
+                    if hash_for(q) != row[2]:
                         version = int(row[3] or 0) + 1
                         self.conn.execute(
                             "UPDATE sync_meta SET status='modified',local_version=?,updated_at=? WHERE local_id=?",
@@ -3308,7 +3377,7 @@ class SyncEngine:
                             m.get("remote_hash") == legacy_remote_hash_v010(remote) and
                             (m.get("last_synced_hash") != local_now_hash or
                              m.get("remote_hash") != remote_now_hash_for_migration)):
-                        writes.defer_status(lid, "synced", wavelog_id=wid,
+                        writes.defer_status(lid, "synced", snapshot=sync_snapshot.get(lid), wavelog_id=wid,
                                             last_synced_hash=local_now_hash,
                                             remote_hash=remote_now_hash_for_migration)
                         continue
@@ -3368,7 +3437,7 @@ class SyncEngine:
                         )
                 else:
                     # Establish/refresh the baseline for older metadata rows.
-                    writes.defer_status(lid, "synced", wavelog_id=wid,
+                    writes.defer_status(lid, "synced", snapshot=sync_snapshot.get(lid), wavelog_id=wid,
                                         last_synced_hash=local_now_hash, remote_hash=remote_now_hash)
             except Exception as e:
                 self.db.set_status(lid, "error", wavelog_id=wid, error=str(e))
@@ -3393,6 +3462,7 @@ class SyncEngine:
             key = ((q.get("call") or "").upper(), q.get("qso_date"), q.get("band"))
             candidate_buckets.setdefault(key, []).append(q)
         xota_ids = set(self.db.xota_station_ids())
+        consumed_local_ids: set[str] = set()
         writes = SyncWriteBuffer(self.store, self.db, qso_hash, summary, raise_errors=True)
 
         def bind_xota(station_id: int | None, local_id: str):
@@ -3406,20 +3476,24 @@ class SyncEngine:
             self._report_progress(progress_callback, "Neue Wavelog-QSOs werden übernommen", index, len(remote_items))
             if wid in claimed_remote or self.db.get_by_wavelog_id(wid):
                 continue
-            rq = remote_to_local(r, {})
-            bucket = candidate_buckets.get((rq["call"], rq["qso_date"], rq["band"]), [])
+            q = remote_to_local(r, self._station_for(r, station_map))
+            bucket = [
+                row for row in candidate_buckets.get((q["call"], q["qso_date"], q["band"]), [])
+                if row["local_id"] not in consumed_local_ids
+            ]
             match = self._match_local(r, bucket)
             actual_station_id = remote_station_profile_id(r)
             if match:
-                bucket.remove(match)
+                # Every record carrying this local_id is linked now (the same
+                # rule get_meta() enforced before), even duplicated ids.
+                consumed_local_ids.add(match["local_id"])
                 # Wavelog becomes the synchronized representation of this QSO.
                 writes.upsert(
-                    match["local_id"], remote_to_local(r, self._station_for(r, station_map)),
+                    match["local_id"], q,
                     wavelog_id=wid, remote_hash=remote_hash(r), counter="linked",
                     after=bind_xota(actual_station_id, match["local_id"]),
                 )
             else:
-                q = remote_to_local(r, self._station_for(r, station_map))
                 writes.upsert(
                     q["local_id"], q, wavelog_id=wid, remote_hash=remote_hash(r), counter="pulled",
                     after=bind_xota(actual_station_id, q["local_id"]),

@@ -8,12 +8,17 @@ per-QSO results of a sync phase and applies them in bounded batches:
 * ADIF: one ``LogStore.upsert_many()`` / ``delete_many()`` per batch
 * SQLite: one transaction per batch via ``MetadataDB.bulk()``
 
-Ordering guarantees match the previous sequential code: the ADIF write of a
-record always happens before its ``synced`` status is stored, so an
-interruption leaves at worst an unlinked local copy that the next full sync
-links again.  Local edits made while a batch was pending are detected with the
-same version snapshot check as before and become conflicts instead of being
-overwritten.
+Crash safety: before an ADIF batch is written, the intended link/baselines
+are staged in ``sync_pending_apply`` (one transaction).  If the process dies
+between the ADIF write and the status commit, the next
+``MetadataDB.reconcile_index()`` finds the staged rows and applies them when
+the ADIF contains exactly the staged record, or discards them when the write
+never happened.  An interruption therefore neither re-uploads pulled QSOs as
+LOCAL ONLY nor turns remote updates into false conflicts.
+
+Local edits or deletions made while a batch was pending are detected with the
+same version snapshot check as before: pending writes become conflicts and
+deferred baseline refreshes are skipped instead of overwriting the change.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 DEFAULT_BATCH_SIZE = 500
+_NO_SNAPSHOT = object()
 
 
 @dataclass
@@ -54,7 +60,7 @@ class SyncWriteBuffer:
     batch_size: int = DEFAULT_BATCH_SIZE
     upserts: list[_PendingUpsert] = field(default_factory=list)
     deletes: list[_PendingDelete] = field(default_factory=list)
-    statuses: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    statuses: list[tuple[str, Any, dict[str, Any]]] = field(default_factory=list)
 
     def pending(self) -> int:
         return len(self.upserts) + len(self.deletes) + len(self.statuses)
@@ -63,9 +69,13 @@ class SyncWriteBuffer:
         if self.pending() >= self.batch_size:
             self.flush()
 
-    def defer_status(self, local_id: str, status: str, **kwargs: Any) -> None:
-        """Pure metadata update without dependency on later loop iterations."""
-        self.statuses.append((local_id, {"status": status, **kwargs}))
+    def defer_status(self, local_id: str, status: str, *, snapshot: Any = _NO_SNAPSHOT, **kwargs: Any) -> None:
+        """Pure metadata update without dependency on later loop iterations.
+
+        With ``snapshot`` the update is skipped at flush time when the QSO was
+        edited/deleted locally in the meantime (the next sync handles it).
+        """
+        self.statuses.append((local_id, snapshot, {"status": status, **kwargs}))
         self._maybe_flush()
 
     def upsert(self, local_id: str, record: dict[str, Any], *, wavelog_id: int, remote_hash: str,
@@ -119,25 +129,39 @@ class SyncWriteBuffer:
             if not (u.check_snapshot and self._changed_during_sync(u.local_id, u.wavelog_id, u.snapshot))
         ]
         if upserts:
+            hashes = [self.qso_hash(u.record) for u in upserts]
+            stage = getattr(self.db, "stage_pending_apply", None)
+            if stage is not None:
+                stage([(u.local_id, u.wavelog_id, h, u.remote_hash) for u, h in zip(upserts, hashes)])
             try:
                 self.store.upsert_many([u.record for u in upserts])
             except Exception as exc:
+                self._clear_staged(upserts)
                 if self.raise_errors:
                     raise
                 self._mark_errors(upserts, exc)
             else:
                 with self.db.bulk():
-                    for u in upserts:
+                    for u, local_hash in zip(upserts, hashes):
                         self.db.set_status(
                             u.local_id, "synced", wavelog_id=u.wavelog_id,
-                            last_synced_hash=self.qso_hash(u.record), remote_hash=u.remote_hash,
+                            last_synced_hash=local_hash, remote_hash=u.remote_hash,
                         )
                         setattr(self.summary, u.counter, getattr(self.summary, u.counter) + 1)
                         if u.after is not None:
                             u.after()
+                    self._clear_staged(upserts)
 
         if statuses:
             with self.db.bulk():
-                for local_id, values in statuses:
+                for local_id, snapshot, values in statuses:
+                    if snapshot is not _NO_SNAPSHOT and snapshot is not None \
+                            and not self.db.unchanged_since(local_id, snapshot):
+                        continue
                     values = dict(values)
                     self.db.set_status(local_id, values.pop("status"), **values)
+
+    def _clear_staged(self, upserts: list[_PendingUpsert]) -> None:
+        clear = getattr(self.db, "clear_pending_apply", None)
+        if clear is not None:
+            clear([u.local_id for u in upserts])

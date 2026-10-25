@@ -469,5 +469,103 @@ class SyncBatchTests(TestCase):
             db.close()
 
 
+class SyncCrashSafetyTests(TestCase):
+    """Review findings: batch crash window, deferred status race, dup ids."""
+
+    class Summary:
+        remote_updated = conflicts = errors = remote_deleted = linked = pulled = 0
+
+    def test_interrupted_batch_is_applied_on_next_reconcile_without_reupload(self):
+        with TemporaryDirectory() as temp:
+            store = LogStore(Path(temp) / "logs")
+            db = MetadataDB(Path(temp) / "meta.sqlite")
+            buffer = SyncWriteBuffer(store, db, qso_hash, self.Summary(), raise_errors=True)
+            rows = [{"local_id": f"p{i}", **sample(f"DL{i}AA", i)} for i in range(20)]
+            for i, row in enumerate(rows):
+                buffer.upsert(row["local_id"], row, wavelog_id=100 + i, remote_hash=f"r{i}", counter="pulled")
+
+            # Simulated kill after the ADIF write, before the status commit.
+            def killed(*_args, **_kwargs):
+                raise KeyboardInterrupt("process killed")
+
+            with patch.object(db, "set_status", side_effect=killed):
+                with self.assertRaises(KeyboardInterrupt):
+                    buffer.flush()
+            self.assertEqual(len(store.scan()), 20)
+            self.assertEqual(db.list_meta(), [])
+
+            db.reconcile_index(store.scan())  # next start
+            metas = db.list_meta()
+            self.assertEqual(len(metas), 20)
+            self.assertTrue(all(m["status"] == "synced" and m["wavelog_id"] for m in metas))
+            self.assertEqual(db.list_new_upload_candidates(), [])
+            self.assertEqual(db.conn.execute("SELECT count(*) FROM sync_pending_apply").fetchone()[0], 0)
+            db.close()
+
+    def test_staged_rows_are_discarded_when_adif_write_never_happened(self):
+        with TemporaryDirectory() as temp:
+            store = LogStore(Path(temp) / "logs")
+            db = MetadataDB(Path(temp) / "meta.sqlite")
+            q = store.add(sample("DL1AAA"))
+            db.set_status(q["local_id"], "synced", wavelog_id=5, last_synced_hash=qso_hash(q), remote_hash="old")
+            changed = {**q, "comment": "remote edit"}
+            db.stage_pending_apply([(q["local_id"], 5, qso_hash(changed), "new")])
+            db.reconcile_index(store.scan())
+            meta = db.get_meta(q["local_id"])
+            self.assertEqual((meta["status"], meta["last_synced_hash"], meta["remote_hash"]),
+                             ("synced", qso_hash(q), "old"))
+            self.assertEqual(db.conn.execute("SELECT count(*) FROM sync_pending_apply").fetchone()[0], 0)
+            db.close()
+
+    def test_deferred_baseline_does_not_override_local_delete(self):
+        with TemporaryDirectory() as temp:
+            store = LogStore(Path(temp) / "logs")
+            db = MetadataDB(Path(temp) / "meta.sqlite")
+            q = store.add(sample("DL1AAA"))
+            db.set_status(q["local_id"], "synced", wavelog_id=5, last_synced_hash=qso_hash(q), remote_hash="r")
+            snapshot = db.version_snapshot()[q["local_id"]]
+            buffer = SyncWriteBuffer(store, db, qso_hash, self.Summary())
+            buffer.defer_status(q["local_id"], "synced", snapshot=snapshot, wavelog_id=5,
+                                last_synced_hash=qso_hash(q), remote_hash="r")
+            store.delete_many([q["local_id"]])
+            db.mark_pending_delete_many([q["local_id"]])
+            buffer.flush()
+            self.assertEqual(db.get_meta(q["local_id"])["status"], "pending_delete")
+            db.close()
+
+    def test_duplicate_local_id_is_linked_only_once(self):
+        with TemporaryDirectory() as temp:
+            store = LogStore(Path(temp) / "logs")
+            db = MetadataDB(Path(temp) / "meta.sqlite")
+            text = adif_header() + "".join(
+                qso_to_adif_record({"local_id": "same", **sample("DL1AAA", 1, freq=f)}) for f in ("14.250", "14.251")
+            )
+            store.canonical_path.write_text(text, encoding="utf-8")
+            client = FakeClient([remote_row(1, "DL1AAA", 1), remote_row(2, "DL1AAA", 1, freq=14251000)])
+            summary = SyncEngine(store, db, client).sync(1, {1: {"callsign": "DA6IT"}})
+            self.assertEqual((summary.linked, summary.pulled), (1, 1))
+            self.assertEqual(len(store.scan()), 2)
+            db.close()
+
+    def test_append_cache_dropped_when_file_grew_externally(self):
+        with TemporaryDirectory() as temp:
+            store = LogStore(Path(temp), "x")
+            store.add(sample("DL1AAA"))
+            store.scan()
+            original = store._recover_pending_append
+            state = {"calls": 0}
+
+            def recover_with_foreign_append(path):
+                original(path)
+                state["calls"] += 1
+                if state["calls"] == 2:  # right after our journaled append
+                    with open(path, "ab") as handle:
+                        handle.write(qso_to_adif_record({"local_id": "ext", **sample("G4EXT", 9)}).encode())
+
+            with patch.object(store, "_recover_pending_append", side_effect=recover_with_foreign_append):
+                store.add(sample("DL3CCC", 3))
+            self.assertEqual(sorted(q["call"] for q in store.scan()), ["DL1AAA", "DL3CCC", "G4EXT"])
+
+
 if __name__ == "__main__":
     main()

@@ -231,6 +231,7 @@ Runtime must not grow quadratically with the number of QSOs:
 - `find()` uses an index, `update()` reads and writes exactly once, `add_many()` appends several QSOs in one journaled append and `upsert_many()` replaces/adds several QSOs with at most one verified rewrite (never for an unreadable file). Full rewrites are fsynced before `os.replace()`.
 - `MetadataDB.bulk()` groups many small metadata writes in one transaction; `reconcile_index()` uses one query and one commit.
 - `SyncEngine.sync()` collects local results per phase in `sync_write_buffer.py` and applies them in batches (ADIF first, then the `synced` status). Unlinked local QSOs are bucketed by call/date/band. Local edits during an open batch still become conflicts.
+- Batch crash safety: before each ADIF batch the intended links/baselines are staged in `sync_pending_apply`. If the process dies between the ADIF write and the status commit, the next `reconcile_index()` applies staged rows whose record is present in the ADIF and discards the rest, so neither duplicate delta uploads nor false conflicts occur. Deferred baseline updates are skipped when the QSO was edited/deleted locally meanwhile.
 - Without uploads or patches in the same run, the QSL status refresh reuses the downloaded QSO list and ADIF export.
 - `CountryDB.lookup()` uses a longest-prefix index; the DX Cluster table rebuild is coalesced and worked-before caches are computed in the logbook worker.
 

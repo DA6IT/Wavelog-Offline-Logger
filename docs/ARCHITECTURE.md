@@ -691,6 +691,13 @@ QSOs wachsen. Dafür gelten seit v0.22.0 zusätzlich:
   `synced`-Status). Unverknüpfte lokale QSOs werden nach Rufzeichen/Datum/Band
   vorsortiert statt pro Remote-QSO alle lokalen QSOs abzufragen. Lokale
   Änderungen während eines offenen Batches werden wie bisher zum Konflikt.
+- Absturzsicherheit der Batches: Vor jedem ADIF-Batch werden Verknüpfung und
+  Baselines in `sync_pending_apply` vorgemerkt. Bricht der Prozess zwischen
+  ADIF-Schreiben und Status-Commit ab, übernimmt `reconcile_index()` beim
+  nächsten Start die vorgemerkten Zeilen, wenn die ADIF genau diesen Datensatz
+  enthält, sonst werden sie verworfen. So entstehen weder doppelte Uploads
+  (Delta-Sync) noch falsche Konflikte. Zurückgestellte Baseline-Updates werden
+  übersprungen, wenn das QSO zwischenzeitlich lokal geändert/gelöscht wurde.
 - Wurden im selben Lauf keine QSOs hochgeladen oder gepatcht, verwendet der
   QSL-Status-Refresh die bereits geladene QSO-Liste und den ADIF-Export.
 - `CountryDB.lookup()` nutzt einen Längstpräfix-Index.
