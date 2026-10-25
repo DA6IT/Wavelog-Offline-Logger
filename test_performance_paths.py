@@ -378,64 +378,71 @@ def remote_row(wid: int, call: str, minute: int, **extra) -> dict:
 
 
 class SyncBatchTests(TestCase):
+    def _tempdir(self) -> str:
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        return directory.name
+
     def _engine(self, temp, remote, **kwargs):
         store = LogStore(Path(temp) / "logs")
         db = MetadataDB(Path(temp) / "meta.sqlite")
         client = FakeClient(remote, **kwargs)
+        # Windows cannot delete the temp dir while SQLite holds the file.
+        self.addCleanup(db.close)
         return store, db, client, SyncEngine(store, db, client)
 
     def test_initial_import_links_and_pulls_without_quadratic_queries(self):
-        with TemporaryDirectory() as temp:
-            remote = [remote_row(i + 1, f"DL{i}ABC", i % 60) for i in range(300)]
-            store, db, client, engine = self._engine(temp, remote)
-            # Two QSOs were already logged offline (one 30 s apart).
-            store.add(sample("DL5ABC", 5))
-            store.add({**sample("DL7ABC", 7), "time_on": "120730"})
-            with patch.object(db, "get_meta", wraps=db.get_meta) as get_meta:
-                summary = engine.sync(1, {1: {"callsign": "DA6IT"}})
-            self.assertEqual(summary.linked, 2)
-            self.assertEqual(summary.pulled, 298)
-            self.assertEqual(summary.errors, 0)
-            self.assertLess(get_meta.call_count, 50)
-            rows = store.scan()
-            self.assertEqual(len(rows), 300)
-            linked = {m["wavelog_id"] for m in db.list_meta() if m["status"] == "synced"}
-            self.assertEqual(linked, set(range(1, 301)))
-            # Downloads are reused for the QSL refresh when nothing was pushed.
-            self.assertEqual(client.calls.get("list_qsos"), 1)
-            self.assertEqual(client.calls.get("export_adif"), 1)
+        temp = self._tempdir()
+        remote = [remote_row(i + 1, f"DL{i}ABC", i % 60) for i in range(300)]
+        store, db, client, engine = self._engine(temp, remote)
+        # Two QSOs were already logged offline (one 30 s apart).
+        store.add(sample("DL5ABC", 5))
+        store.add({**sample("DL7ABC", 7), "time_on": "120730"})
+        with patch.object(db, "get_meta", wraps=db.get_meta) as get_meta:
+            summary = engine.sync(1, {1: {"callsign": "DA6IT"}})
+        self.assertEqual(summary.linked, 2)
+        self.assertEqual(summary.pulled, 298)
+        self.assertEqual(summary.errors, 0)
+        self.assertLess(get_meta.call_count, 50)
+        rows = store.scan()
+        self.assertEqual(len(rows), 300)
+        linked = {m["wavelog_id"] for m in db.list_meta() if m["status"] == "synced"}
+        self.assertEqual(linked, set(range(1, 301)))
+        # Downloads are reused for the QSL refresh when nothing was pushed.
+        self.assertEqual(client.calls.get("list_qsos"), 1)
+        self.assertEqual(client.calls.get("export_adif"), 1)
 
-            again = engine.sync(1, {1: {"callsign": "DA6IT"}})
-            self.assertEqual((again.pulled, again.linked, again.pushed, again.errors), (0, 0, 0, 0))
-            self.assertEqual(len(store.scan()), 300)
+        again = engine.sync(1, {1: {"callsign": "DA6IT"}})
+        self.assertEqual((again.pulled, again.linked, again.pushed, again.errors), (0, 0, 0, 0))
+        self.assertEqual(len(store.scan()), 300)
 
     def test_qsl_refresh_downloads_fresh_view_after_upload(self):
-        with TemporaryDirectory() as temp:
-            store, db, client, engine = self._engine(temp, [remote_row(1, "DL1AAA", 1)])
-            store.add(sample("G4NEW", 40))
-            db.reconcile_index(store.scan())
-            summary = engine.sync(1, {1: {"callsign": "DA6IT"}})
-            self.assertEqual(summary.pushed, 1)
-            self.assertEqual(client.calls.get("list_qsos"), 2)
+        temp = self._tempdir()
+        store, db, client, engine = self._engine(temp, [remote_row(1, "DL1AAA", 1)])
+        store.add(sample("G4NEW", 40))
+        db.reconcile_index(store.scan())
+        summary = engine.sync(1, {1: {"callsign": "DA6IT"}})
+        self.assertEqual(summary.pushed, 1)
+        self.assertEqual(client.calls.get("list_qsos"), 2)
 
     def test_remote_change_delete_and_restore_are_batched(self):
-        with TemporaryDirectory() as temp:
-            remote = [remote_row(i + 1, f"DL{i}ABC", i) for i in range(6)]
-            store, db, client, engine = self._engine(temp, remote)
-            engine.sync(1, {1: {"callsign": "DA6IT"}})
-            by_wid = {m["wavelog_id"]: m["local_id"] for m in db.list_meta()}
-            client.remote[0] = {**client.remote[0], "comment": "changed remotely"}
-            del client.remote[1]
-            store.delete(by_wid[3])  # ADI record lost outside the app
-            with patch.object(store, "_write_file", wraps=store._write_file) as writer:
-                summary = engine.sync(1, {1: {"callsign": "DA6IT"}})
-            self.assertEqual(summary.remote_updated, 2)
-            self.assertEqual(summary.remote_deleted, 1)
-            self.assertLessEqual(writer.call_count, 2)
-            self.assertEqual(store.find(by_wid[1])["comment"], "changed remotely")
-            self.assertIsNone(store.find(by_wid[2]))
-            self.assertIsNotNone(store.find(by_wid[3]))
-            self.assertEqual(len(store.scan()), 5)
+        temp = self._tempdir()
+        remote = [remote_row(i + 1, f"DL{i}ABC", i) for i in range(6)]
+        store, db, client, engine = self._engine(temp, remote)
+        engine.sync(1, {1: {"callsign": "DA6IT"}})
+        by_wid = {m["wavelog_id"]: m["local_id"] for m in db.list_meta()}
+        client.remote[0] = {**client.remote[0], "comment": "changed remotely"}
+        del client.remote[1]
+        store.delete(by_wid[3])  # ADI record lost outside the app
+        with patch.object(store, "_write_file", wraps=store._write_file) as writer:
+            summary = engine.sync(1, {1: {"callsign": "DA6IT"}})
+        self.assertEqual(summary.remote_updated, 2)
+        self.assertEqual(summary.remote_deleted, 1)
+        self.assertLessEqual(writer.call_count, 2)
+        self.assertEqual(store.find(by_wid[1])["comment"], "changed remotely")
+        self.assertIsNone(store.find(by_wid[2]))
+        self.assertIsNotNone(store.find(by_wid[3]))
+        self.assertEqual(len(store.scan()), 5)
 
     def test_buffer_turns_concurrent_local_edit_into_conflict(self):
         with TemporaryDirectory() as temp:
