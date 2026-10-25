@@ -27,7 +27,7 @@ jobs:
           python -m unittest test_shutdown_delta_sync.py -v
           python -m unittest test_data_backup_security.py -v
           python -m unittest test_usage_stats.py test_qsl_eqsl.py -v
-          python -m unittest test_performance_paths.py test_logstore_append.py test_logstore_delete_many.py -v
+          python -m unittest test_performance_paths.py test_ui_performance.py test_logstore_append.py test_logstore_delete_many.py -v
 
   security:
     name: Security checks

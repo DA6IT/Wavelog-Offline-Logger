@@ -12,6 +12,9 @@
 - Abgleich der lokalen Sync-Informationen beim Laden des Logbuchs in einem Schritt
 - DX-Cluster: schnellere Länderzuordnung, gebündelte Aktualisierung der Spot-Liste bei vielen eingehenden Spots; die Worked-Before-Auswertung läuft im Hintergrund
 - der WSJT-X-Abgleich übernimmt neue QSOs gesammelt
+- Programmstart: das Fenster erscheint bei großen Logbüchern deutlich früher, das Logbuch wird danach im Hintergrund eingelesen
+- Logbuchansicht: nach Speichern, Bearbeiten oder Löschen werden nur die betroffenen Zeilen aktualisiert statt der ganzen Liste; gelöschte QSOs verschwinden sofort, das Schreiben der Logdatei läuft im Hintergrund
+- Fenstergröße ändern, Statistik öffnen und Hintergrundaktualisierungen verursachen spürbar weniger Ruckler
 
 ### Zuverlässigkeit
 

@@ -9,5 +9,6 @@ v0.22.0 makes the Logger much faster with large logbooks – when loading, editi
 - **Less data traffic:** Without local uploads or changes, Wavelog data is downloaded only once per synchronization.
 - **DX Cluster:** Faster country lookup and a smooth spot list even with many incoming spots.
 - **WSJT-X and data safety:** Many new WSJT-X QSOs are imported at once; rewritten logbook files are protected even better against power loss.
+- **Smoother interface:** Faster startup; saving, deleting and editing show up in the logbook view immediately; less stutter when resizing the window and in the statistics.
 
 Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.22.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.22.0/docs/en/USER_GUIDE.md)

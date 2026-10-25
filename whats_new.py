@@ -12,6 +12,7 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
         "Beim vollständigen Abgleich werden die Daten von Wavelog nicht mehr unnötig doppelt geladen, wenn keine lokalen Änderungen übertragen wurden.",
         "Die DX-Cluster-Liste bleibt auch bei sehr vielen eingehenden Spots flüssig, und die Länderzuordnung von Rufzeichen ist spürbar schneller.",
         "Der WSJT-X-Abgleich übernimmt viele neue QSOs auf einmal schneller, und das Logbuch wird beim Speichern noch robuster gegen Stromausfälle geschützt.",
+        "Das Programm startet bei großen Logbüchern schneller, und die Oberfläche bleibt beim Speichern, Löschen, Ändern der Fenstergröße und in der Statistik flüssiger.",
     ),
     "0.21.1": (
         "Der automatische Wavelog-Abgleich beim Start und Beenden überträgt jetzt nur neue lokale QSOs und ist dadurch schneller.",
@@ -102,6 +103,7 @@ WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
         "Complete synchronization no longer downloads Wavelog data twice when no local changes were uploaded.",
         "The DX Cluster list stays smooth even with many incoming spots, and callsign country lookup is noticeably faster.",
         "WSJT-X synchronization imports many new QSOs at once more quickly, and the logbook is protected even better against power loss while saving.",
+        "The program starts faster with large logbooks, and the interface stays smoother when saving, deleting, resizing the window and in the statistics.",
     ),
     "0.21.1": (
         "Automatic Wavelog synchronization at startup and shutdown now uploads only new local QSOs, so it finishes faster.",

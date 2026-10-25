@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 from dx_cluster import (
-    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DxClusterClient, DxClusterConfig, DxClusterError, DxSpotterConfig, SPOTTER_REGION_OPTIONS, normalize_worked_mode, select_dx_spot_candidate, spot_comment_with_mode, spot_sort_value, spotter_region_for_continent, worked_flags,
+    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DxClusterClient, DxClusterConfig, DxClusterError, DxSpotterConfig, LazyWorkedHistory, SPOTTER_REGION_OPTIONS, normalize_worked_mode, select_dx_spot_candidate, spot_comment_with_mode, spot_sort_value, spotter_region_for_continent, worked_flags,
 )
 from logger_core import BANDS, MODES, band_from_mhz
 from ui_theme import theme
@@ -34,7 +34,7 @@ class DxClusterFeatureMixin:
         self.dx_cluster_worked_countries: set[tuple[str, str, str]] = set()
         self.qso_worked_counts: Counter[tuple[str, str, str]] = Counter()
         self.qso_worked_call_totals: Counter[str] = Counter()
-        self.qso_worked_history: dict[str, list[dict[str, str]]] = {}
+        self.qso_worked_history: LazyWorkedHistory = LazyWorkedHistory()
         self.dx_cluster_filter_job = None
         self.dx_cluster_refresh_job = None
         self.dx_cluster_session_received = 0
@@ -435,32 +435,40 @@ class DxClusterFeatureMixin:
         countries: set[tuple[str, str, str]] = set()
         worked_counts: Counter[tuple[str, str, str]] = Counter()
         call_totals: Counter[str] = Counter()
-        worked_history: dict[str, list[dict[str, str]]] = {}
+        history_refs: dict[str, list[dict]] = {}
+        # Per-run memos: large logs repeat the same calls and mode/band pairs.
+        country_memo: dict[str, str] = {}
+        mode_memo: dict[tuple[str, str], str] = {}
+        lookup = self.country_db.lookup
         for qso in qsos:
             call = str(qso.get("call") or "").strip().upper()
             if call:
                 call_totals[call] += 1
-                worked_history.setdefault(call, []).append({
-                    "qso_date": str(qso.get("qso_date") or ""),
-                    "time_on": str(qso.get("time_on") or ""),
-                    "band": str(qso.get("band") or ""),
-                    "mode": str(qso.get("mode") or ""),
-                })
+                history_refs.setdefault(call, []).append(qso)
             country = str(qso.get("country") or "").strip()
             if not country and call:
-                info = self.country_db.lookup(call)
-                country = info.country if info else ""
-            frequency_hz = 0
-            try:
-                frequency_hz = int(round(float(str(qso.get("freq") or "0").replace(",", ".")) * 1_000_000))
-            except (TypeError, ValueError):
-                pass
+                country = country_memo.get(call)
+                if country is None:
+                    info = lookup(call)
+                    country = country_memo[call] = info.country if info else ""
+            raw_mode = str(qso.get("mode") or "")
             band = str(qso.get("band") or "").strip()
-            if not band and frequency_hz:
-                band = band_from_mhz(frequency_hz / 1_000_000) or ""
-            mode = normalize_worked_mode(
-                str(qso.get("mode") or ""), frequency_hz, band,
-            )
+            if band:
+                # The frequency only matters without a band (band derivation
+                # and SSB sideband), so it is not parsed here.
+                mode_key = (raw_mode, band)
+                mode = mode_memo.get(mode_key)
+                if mode is None:
+                    mode = mode_memo[mode_key] = normalize_worked_mode(raw_mode, 0, band)
+            else:
+                frequency_hz = 0
+                try:
+                    frequency_hz = int(round(float(str(qso.get("freq") or "0").replace(",", ".")) * 1_000_000))
+                except (TypeError, ValueError):
+                    pass
+                if frequency_hz:
+                    band = band_from_mhz(frequency_hz / 1_000_000) or ""
+                mode = normalize_worked_mode(raw_mode, frequency_hz, band)
             if not band or not mode:
                 continue
             if call:
@@ -468,8 +476,7 @@ class DxClusterFeatureMixin:
                 worked_counts[(call, band, mode)] += 1
             if country:
                 countries.add((country, band, mode))
-        for history in worked_history.values():
-            history.sort(key=lambda item: (item["qso_date"], re.sub(r"[^0-9]", "", item["time_on"])), reverse=True)
+        worked_history = LazyWorkedHistory(history_refs)
         return {
             "calls": calls, "countries": countries, "worked_counts": worked_counts,
             "call_totals": call_totals, "worked_history": worked_history,

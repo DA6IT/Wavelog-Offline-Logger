@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import messagebox, simpledialog
+from app_common import write_startup_log
 from dialogs import ProfileDeleteDialog, ProfileManagerDialog
 from logger_core import LogStore, MetadataDB, ProfileManager
 from xota import ActivationReferenceService, ReverseGeocodeService, XotaRepository
@@ -38,7 +40,47 @@ class ProfilesFeatureMixin:
             self.xota_repository,
             self.db.get_setting("xota_reverse_geocode_url", ""),
         )
-        self.db.reconcile_index(self.store.scan())
+        self._start_profile_index()
+
+    def _start_profile_index(self) -> None:
+        """Reconcile ADIF and sync metadata off the Tk thread.
+
+        This used to run synchronously while the window was being built
+        (seconds for very large logbooks). Delta uploads and the logbook
+        refresh wait for this event, so the previous ordering guarantee
+        (index reconciled before any automatic upload) is unchanged.
+        """
+        store, db = self.store, self.db
+        ready = threading.Event()
+        self._profile_index_ready = ready
+
+        def worker():
+            try:
+                db.reconcile_index(store.scan())
+            except Exception as exc:
+                write_startup_log("Profil-Index konnte nicht abgeglichen werden: " + repr(exc))
+            finally:
+                ready.set()
+
+        thread = threading.Thread(target=worker, name="profile-index", daemon=True)
+        if getattr(self, "_interface_built", False):
+            thread.start()
+        else:
+            # At startup the reconcile holds the metadata lock for a while;
+            # start it once the window is built so widget setup (which reads
+            # settings from the same DB) is not blocked by it.
+            self._pending_profile_index_thread = thread
+
+    def _start_pending_profile_index(self) -> None:
+        thread = self.__dict__.pop("_pending_profile_index_thread", None)
+        if thread is not None:
+            thread.start()
+
+    def _wait_profile_index(self, timeout: float = 120.0) -> None:
+        """Block a worker thread (never the Tk thread) until the index is ready."""
+        ready = getattr(self, "_profile_index_ready", None)
+        if ready is not None:
+            ready.wait(timeout)
 
     def _current_profile(self) -> dict:
         return self.profile_manager.get(self.active_profile_id) or {"id": self.active_profile_id, "name": "Profil"}

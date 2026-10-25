@@ -236,3 +236,18 @@ Runtime must not grow quadratically with the number of QSOs:
 - `CountryDB.lookup()` uses a longest-prefix index; the DX Cluster table rebuild is coalesced and worked-before caches are computed in the logbook worker.
 
 Regression tests: `test_performance_paths.py`. `sync_write_buffer.py` is a non-feature module and is embedded explicitly in the Windows bootstrap.
+
+## UI responsiveness (v0.22.0)
+
+Measured with a probe (real app under Xvfb, 20,000 QSOs, 5 ms heartbeat on the Tk thread):
+
+- **Incremental logbook Treeview:** `qso_tree_view.plan_row_diff()` compares the shown rows with the new cache. When the relative order is unchanged (add, edit, delete, status change) only changed rows are inserted/updated/removed; otherwise (reordering, duplicate ids, more than 2000 changes) the previous chunked rebuild runs. Inserts/updates use direct Tcl calls.
+- **Delete and edit** write the ADI file in a worker (`_run_qso_write`). Deleted rows disappear immediately; delete/edit are locked until the write completes. The order "ADI first, then `mark_pending_delete_many`" is unchanged.
+- **Profile index at startup/profile switch:** `reconcile_index()` runs in a worker, at startup only after the window has been built. Logbook refresh, delta upload and full sync wait for `_profile_index_ready` in their workers, so the index is still reconciled before any automatic upload.
+- **CTY.DAT** is loaded in the background; `CountryDB.lookup()` waits for completion.
+- **Shared fonts:** one scalable font per font specification instead of one per widget.
+- **Refresh worker:** worked-before history is built per call on demand (`dx_cluster.LazyWorkedHistory`), country/mode normalization is memoized per run, `list_meta()` avoids `sqlite3.Row` conversion.
+- **Statistics** no longer copy the shared cache lists on the Tk thread.
+- `sys.setswitchinterval(0.001)` lets the Tk thread regain the GIL sooner while workers run.
+
+Regression tests: `test_ui_performance.py`. `qso_tree_view.py` is embedded in the Windows bootstrap.

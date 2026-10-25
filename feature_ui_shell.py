@@ -99,6 +99,11 @@ class UiShellFeatureMixin:
             except (TypeError, ValueError, tk.TclError):
                 return ()
 
+        # One scalable font per distinct font specification. Previously every
+        # widget received its own Font object (hundreds), so each resize
+        # reconfigured hundreds of fonts and re-laid out the UI for each one.
+        shared_fonts: dict[str, tkfont.Font | None] = {}
+
         def visit(widget):
             try:
                 children = widget.winfo_children()
@@ -110,11 +115,16 @@ class UiShellFeatureMixin:
             try:
                 font_spec = widget.cget("font")
                 if font_spec:
-                    responsive_font = tkfont.Font(root=self, font=font_spec)
-                    base_size = int(responsive_font.cget("size"))
-                    if base_size:
+                    key = str(font_spec)
+                    if key not in shared_fonts:
+                        responsive_font = tkfont.Font(root=self, font=font_spec)
+                        base_size = int(responsive_font.cget("size"))
+                        shared_fonts[key] = responsive_font if base_size else None
+                        if base_size:
+                            self._responsive_fonts.append((responsive_font, base_size))
+                    responsive_font = shared_fonts[key]
+                    if responsive_font is not None:
                         widget.configure(font=responsive_font)
-                        self._responsive_fonts.append((responsive_font, base_size))
             except (KeyError, TypeError, ValueError, tk.TclError):
                 pass
 

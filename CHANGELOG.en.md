@@ -12,6 +12,9 @@
 - local synchronization information is reconciled in a single step when the logbook is loaded
 - DX Cluster: faster country lookup and coalesced spot-list updates for busy clusters; worked-before evaluation runs in the background
 - WSJT-X synchronization imports new QSOs in one batch
+- startup: with large logbooks the window appears much sooner; the logbook is read in the background afterwards
+- logbook view: after saving, editing or deleting, only the affected rows are updated instead of the whole list; deleted QSOs disappear immediately while the logbook file is written in the background
+- resizing the window, opening statistics and background refreshes cause noticeably less stutter
 
 ### Reliability
 

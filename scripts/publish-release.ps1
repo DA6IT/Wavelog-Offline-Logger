@@ -189,7 +189,8 @@ try {
         "-m", "unittest", "-v",
         "test_usage_stats.py",
         "test_qsl_eqsl.py",
-        "test_performance_paths.py"
+        "test_performance_paths.py",
+        "test_ui_performance.py"
     )
 
     foreach ($scriptPath in @(

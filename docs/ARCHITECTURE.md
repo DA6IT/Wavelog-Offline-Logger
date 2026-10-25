@@ -710,6 +710,41 @@ Regressionstests: `test_performance_paths.py`.
 `sync_write_buffer.py` ist ein Nicht-Feature-Modul und deshalb explizit im
 Windows-Bootstrap eingebettet.
 
+### Reaktionsfähigkeit der Oberfläche (v0.22.0)
+
+Gemessen mit einer Sondenumgebung (echte App unter Xvfb, 20 000 QSOs, 5-ms-
+Heartbeat auf dem Tk-Thread). Regeln:
+
+- **Logbuch-Treeview inkrementell:** `qso_tree_view.plan_row_diff()` vergleicht
+  die angezeigten Zeilen mit dem neuen Cache. Bleibt die relative Reihenfolge
+  gleich (Neu, Bearbeiten, Löschen, Statuswechsel), werden nur die geänderten
+  Zeilen eingefügt/aktualisiert/entfernt; sonst (Umsortierung, doppelte IDs,
+  mehr als 2000 Änderungen) folgt der bisherige gestaffelte Neuaufbau.
+  Einfügen/Ändern nutzt direkte Tcl-Aufrufe statt der generischen
+  ttk-Optionsformatierung.
+- **Löschen und Bearbeiten** schreiben die ADIF in einem Worker
+  (`_run_qso_write`). Gelöschte Zeilen verschwinden sofort; Löschen/Bearbeiten
+  sind gesperrt, bis der Schreibvorgang abgeschlossen ist. Die Reihenfolge
+  „ADIF zuerst, danach `mark_pending_delete_many`“ bleibt unverändert.
+- **Profil-Index beim Start/Profilwechsel:** `reconcile_index()` läuft in einem
+  Worker, beim Start erst nach dem Aufbau des Fensters (sonst blockiert er die
+  Metadaten-Sperre während des Widget-Aufbaus). Logbuch-Refresh, Delta-Upload
+  und vollständiger Abgleich warten im Worker auf `_profile_index_ready`; die
+  frühere Garantie „Index abgeglichen vor jedem automatischen Upload“ bleibt.
+- **CTY.DAT** wird im Hintergrund geladen; `CountryDB.lookup()` wartet bis zum
+  Abschluss, Ergebnisse sind identisch.
+- **Gemeinsame Schriften:** eine skalierbare Schrift pro Schriftangabe statt
+  einer pro Widget (vorher 198 Schriften bei 2 verschiedenen Angaben).
+- **Refresh-Worker:** Worked-Before-Verlauf wird pro Rufzeichen erst bei Bedarf
+  aufgebaut (`dx_cluster.LazyWorkedHistory`), Länder- und Mode-Normalisierung
+  werden pro Lauf memoisiert, `list_meta()` ohne `sqlite3.Row`-Umweg.
+- **Statistik** kopiert die gemeinsamen Cache-Listen nicht mehr auf dem Tk-Thread.
+- `sys.setswitchinterval(0.001)`: der Tk-Thread bekommt das GIL bei laufenden
+  Workern schneller zurück (deutlich weniger Ruckler).
+
+Regressionstests: `test_ui_performance.py`. `qso_tree_view.py` ist im
+Windows-Bootstrap eingebettet.
+
 ## QSL Card Manager Integration (v0.20.0)
 
 Die QSL-Integration bleibt bewusst modular:

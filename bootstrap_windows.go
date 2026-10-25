@@ -59,6 +59,9 @@ var qsoDuplicatesSource []byte
 //go:embed sync_write_buffer.py
 var syncWriteBufferSource []byte
 
+//go:embed qso_tree_view.py
+var qsoTreeViewSource []byte
+
 //go:embed dx_cluster.py
 var dxClusterSource []byte
 
@@ -356,6 +359,9 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "sync_write_buffer.py"), syncWriteBufferSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "qso_tree_view.py"), qsoTreeViewSource, 0644); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "dx_cluster.py"), dxClusterSource, 0644); err != nil {
 		return err
 	}
@@ -506,6 +512,7 @@ func appFilesComplete(appDir, hamlibDir string) bool {
 		filepath.Join(appDir, "external_logging.py"),
 		filepath.Join(appDir, "qso_duplicates.py"),
 		filepath.Join(appDir, "sync_write_buffer.py"),
+		filepath.Join(appDir, "qso_tree_view.py"),
 		filepath.Join(appDir, "dx_cluster.py"),
 		filepath.Join(appDir, "callbook.py"),
 		filepath.Join(appDir, "ui_preferences.py"),
@@ -565,6 +572,7 @@ func embeddedAppFilesMatch(appDir string) bool {
 		"external_logging.py": externalLoggingSource,
 		"qso_duplicates.py":  qsoDuplicatesSource,
 		"sync_write_buffer.py": syncWriteBufferSource,
+		"qso_tree_view.py":     qsoTreeViewSource,
 		"dx_cluster.py":       dxClusterSource,
 		"callbook.py":         callbookSource,
 		"ui_preferences.py":   uiPreferencesSource,

@@ -181,6 +181,7 @@ class WavelogOnlineFeatureMixin:
 
         def worker():
             try:
+                self._wait_profile_index()
                 client = WavelogClient(settings.base_url, settings.token)
                 summary = SyncEngine(self.store, self.db, client).push_new_only(settings.station_id)
                 ContestSyncEngine(self.store, self.db, client).link_pending()

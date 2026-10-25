@@ -520,7 +520,7 @@ class CountryInfo:
 
 class CountryDB:
     """Offline amateur-radio country lookup using a standard CTY.DAT file."""
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, background: bool = False):
         self.path = Path(path)
         self.exact: dict[str, CountryInfo] = {}
         self.prefixes: list[tuple[str, CountryInfo]] = []
@@ -528,7 +528,19 @@ class CountryDB:
         self._prefix_index: dict[str, CountryInfo] = {}
         self._max_prefix_len = 0
         self.loaded = False
-        self._load()
+        self._ready = threading.Event()
+        if background:
+            # Parsing CTY.DAT takes ~0.1 s; the UI can be built meanwhile.
+            # lookup() waits for completion, so results are identical.
+            threading.Thread(target=self._load_and_signal, name="cty-load", daemon=True).start()
+        else:
+            self._load_and_signal()
+
+    def _load_and_signal(self):
+        try:
+            self._load()
+        finally:
+            self._ready.set()
 
     @staticmethod
     def _clean_alias(token: str) -> tuple[str, bool, str | None, str | None, str | None]:
@@ -609,6 +621,8 @@ class CountryDB:
         self.loaded = bool(self.prefixes)
 
     def lookup(self, callsign: str) -> CountryInfo | None:
+        if not self._ready.is_set():
+            self._ready.wait()
         call = re.sub(r"[^A-Z0-9/]", "", (callsign or "").strip().upper())
         if not call:
             return None
@@ -2027,7 +2041,13 @@ class MetadataDB:
 
     def list_meta(self) -> list[dict[str, Any]]:
         with self.lock:
-            return [dict(r) for r in self.conn.execute("SELECT * FROM sync_meta ORDER BY created_at")]
+            # Plain tuples + zip are much cheaper than sqlite3.Row -> dict for
+            # tens of thousands of rows (logbook refresh, full sync).
+            cursor = self.conn.cursor()
+            cursor.row_factory = None
+            cursor.execute("SELECT * FROM sync_meta ORDER BY created_at")
+            columns = [column[0] for column in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     def list_candidates(self) -> list[dict[str, Any]]:
         with self.lock:
