@@ -50,7 +50,7 @@ POTA candidates use a locally cached official catalogue. Nearby markers up to 10
 
 ![Logbook and sync](../screenshots/en/logbook-sync.png)
 
-Important states are `LOCAL ONLY`, `WAVELOG ✓`, changed, conflict and sync error. Select a row to see the stored reason. A conflict is resolved only by explicitly choosing the local or Wavelog version. Missing external ADI data is never interpreted as an automatic remote-deletion request.
+Important states are `LOCAL ONLY`, `WAVELOG ✓`, changed, conflict and sync error. Deleted QSOs disappear from the list immediately while the logbook is saved in the background. Until that save has finished – usually less than a second even for large logbooks – further deleting, editing and switching profiles are briefly locked, and closing the app waits for it. Select a row to see the stored reason. A conflict is resolved only by explicitly choosing the local or Wavelog version. Missing external ADI data is never interpreted as an automatic remote-deletion request.
 
 Online mode pushes only new, never-linked QSOs. Optional startup and shutdown delta syncs also upload only new local QSOs; they never download, edit, delete, reconcile integrity or resolve conflicts. Those complete reconciliation operations remain available through manual sync only. Automatic delta sync displays a blocking progress window and a final summary before the app becomes usable or closes. Cancelling a shutdown delta sync continues closing the app immediately. Existing automatic startup and shutdown settings are migrated safely to the matching delta-sync settings without overwriting an explicitly selected new option; a cancelled manual full sync retains its checkpoint and journal for resume.
 

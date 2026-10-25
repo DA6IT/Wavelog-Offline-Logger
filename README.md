@@ -34,6 +34,7 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - verifizierter In-App-Updater; unter Windows wird die bestätigte neue Version automatisch installiert
 - vollständiges ZIP-Backup und Restore von Profilen, Einstellungen, ADI-Logbüchern und Metadaten
 - einmalige „Was ist neu?“-Übersicht nach dem ersten Start einer neuen Version
+- schnell auch bei großen Logbüchern mit vielen tausend QSOs: Laden, Bearbeiten, Löschen und der vollständige Wavelog-Abgleich bleiben flüssig
 - responsive Oberfläche mit gezieltem Scrollen bei langen Geräteeinstellungen; Felder, Aktionen und Abstände passen sich gemeinsam an und werden vor jedem Release in mehreren Fenstergrößen geprüft
 - Builds für Windows x64, macOS Apple Silicon/Intel und Linux x64/ARM64
 
