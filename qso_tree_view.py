@@ -47,6 +47,42 @@ def plan_row_diff(old: Sequence[Row], new: Sequence[Row], *, max_ops: int = DEFA
     return ops
 
 
+# Column index of the callsign in a logbook row's values.
+CALL_COLUMN = 2
+
+
+def normalize_call_query(query: object) -> str:
+    """Search text as typed by the user -> comparable form ("dl1ab " -> "DL1AB")."""
+    return "".join(str(query or "").split()).upper()
+
+
+def filter_rows_by_call(rows: Sequence[Row], query: object) -> list[Row]:
+    """Rows whose callsign contains ``query`` (case-insensitive, substring).
+
+    An empty query returns all rows.  ``*`` and ``?`` act as wildcards for
+    "any characters" / "one character", e.g. ``DL*AB`` or ``DL?AB``.
+    """
+    needle = normalize_call_query(query)
+    if not needle:
+        return list(rows)
+    if "*" in needle or "?" in needle:
+        import re
+
+        pattern = re.compile(
+            ".*".join(".".join(re.escape(part) for part in chunk.split("?")) for chunk in needle.split("*"))
+        )
+        return [row for row in rows if pattern.search(_call_of(row))]
+    return [row for row in rows if needle in _call_of(row)]
+
+
+def _call_of(row: Row) -> str:
+    values = row[2]
+    try:
+        return str(values[CALL_COLUMN] or "").upper()
+    except (IndexError, TypeError):
+        return ""
+
+
 def _text(values: Iterable[Any]) -> tuple[str, ...]:
     # Same display as ttk's insert(values=...): every cell as text.
     return tuple(str(value) for value in values)

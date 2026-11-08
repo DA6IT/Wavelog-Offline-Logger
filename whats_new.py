@@ -6,6 +6,9 @@ from __future__ import annotations
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
 
+    "0.24.0": (
+        "Im Logbuch gibt es jetzt ein Suchfeld für Rufzeichen: Die Liste zeigt sofort nur noch passende QSOs, auch bei Teilen eines Rufzeichens wie „DL1“. Mit * und ? lassen sich Platzhalter verwenden, Strg+F springt ins Suchfeld und Esc leert die Suche.",
+    ),
     "0.23.0": (
         "WaveLogGate wird nicht mehr gebraucht: Der Logger zeigt Wavelog Frequenz und Modus des Funkgeräts an, ein Klick auf einen DX-Spot oder die Bandmap in Wavelog stellt das Funkgerät ein, und der Rotor kann auf Wunsch der Peilung aus Wavelog folgen. Einschalten unter CAT → Wavelog-Verbindung für Funkgerät.",
         "Beim Bearbeiten, Löschen, Importieren und Abgleichen bleiben jetzt alle Angaben eines QSOs erhalten, auch Felder wie DOK, IOTA, Satellit, SIG oder QSL-Hinweise, die der Logger nicht selbst anzeigt.",

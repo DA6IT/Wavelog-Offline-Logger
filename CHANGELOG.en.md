@@ -2,6 +2,12 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.24.0 — unreleased
+
+### Added
+
+- **Callsign search in the logbook:** a search field above the logbook table filters by callsign while typing (substring, case-insensitive, wildcards `*` and `?`). The number of matches is shown; Ctrl+F jumps to the search field, Esc clears it, arrow down moves into the results. Works on large logbooks without reloading data.
+
 ## 0.23.0 — 2026-11-08
 
 ### Added

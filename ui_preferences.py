@@ -260,6 +260,7 @@ ENGLISH = {
     "QSO bearbeiten": "Edit QSO", "QSO lokal speichern": "Save QSO locally", "QSO löschen": "Delete QSO",
     "QSOs dieser Fast-Log-Sitzung": "QSOs in this Fast Log session", "Serielle Parameter": "Serial parameters",
     "Seriennummer": "Serial number", "Session beenden": "End session", "Session starten": "Start session",
+    "Rufzeichen suchen": "Search callsign", "Kein QSO mit diesem Rufzeichen": "No QSO with this callsign",
     "Speicherung": "Storage", "Standardband / Mode": "Default band / mode", "Synchronisieren": "Synchronize",
     "UDP Logging beim App-Start automatisch starten": "Start UDP logging automatically when the app starts",
     "UDP Logging beim App-Start und Profilwechsel automatisch starten": "Start UDP logging automatically at app startup and profile changes",

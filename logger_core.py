@@ -28,7 +28,7 @@ from qso_duplicates import QsoMatcher
 from sync_write_buffer import SyncWriteBuffer
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.23.0"
+VERSION = "0.24.0"
 ADIF_VERSION = "3.1.8"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"

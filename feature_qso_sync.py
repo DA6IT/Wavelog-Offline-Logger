@@ -17,7 +17,7 @@ from logger_core import (
     utc_now_iso,
 )
 from qsl_storage import QslStorage
-from qso_tree_view import apply_row_diff, insert_row, plan_row_diff
+from qso_tree_view import apply_row_diff, filter_rows_by_call, insert_row, normalize_call_query, plan_row_diff
 from wsjtx_sync import format_wsjtx_result, load_wsjtx_settings, should_wsjtx_sync_for_reason, sync_wsjtx_with_local
 from ui_theme import theme
 
@@ -62,6 +62,12 @@ class QsoSyncFeatureMixin:
         # a refresh that scanned before the write must not show them again.
         self._qso_hidden_ids: set[str] = set()
         self._qso_cached_summary: dict[str, object] = {}
+        # Callsign search in the logbook view (v0.24.0). ``_qso_tree_filter``
+        # is the search the Treeview currently shows.
+        self._qso_filter = ""
+        self._qso_tree_filter = ""
+        self._qso_filter_job = None
+        self._qso_render_source: list[tuple[str, str, tuple]] = []
 
     def _build_qsos_page(self):
         p = self._new_page("qsos")
@@ -77,7 +83,27 @@ class QsoSyncFeatureMixin:
 
         card = self._card(p, row=1, column=0, sticky="nsew")
         card.columnconfigure(0, weight=1)
-        card.rowconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)
+
+        search = ttk.Frame(card, style="Card.TFrame")
+        search.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        ttk.Label(search, text="Rufzeichen suchen", style="Card.TLabel").pack(side="left")
+        self.qso_search_var = tk.StringVar()
+        self.qso_search_entry = ttk.Entry(search, textvariable=self.qso_search_var, width=18)
+        self.qso_search_entry.pack(side="left", padx=(8, 4))
+        self.qso_search_clear_button = ttk.Button(
+            search, text="✕", width=3, style="Secondary.TButton", command=self.clear_qso_search,
+        )
+        self.qso_search_clear_button.pack(side="left")
+        self.qso_search_result_label = tk.Label(search, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9))
+        self.qso_search_result_label.pack(side="left", padx=(10, 0))
+        self.qso_search_var.trace_add("write", lambda *_: self._qso_search_changed())
+        self.qso_search_entry.bind("<Escape>", lambda _e: self.clear_qso_search())
+        self.qso_search_entry.bind("<Return>", lambda _e: self._apply_qso_search_now())
+        self.qso_search_entry.bind("<Down>", lambda _e: self._focus_first_qso_row())
+        self.bind("<Control-f>", self._focus_qso_search, add="+")
+        self.bind("<Control-F>", self._focus_qso_search, add="+")
+
         cols = ("date", "time", "call", "operator", "contest", "band", "mode", "freq", "rst", "status", "email_qsl", "qrz", "lotw", "eqsl", "clublog", "dcl")
         self.tree = ttk.Treeview(card, columns=cols, show="headings", selectmode="extended")
         headings = {"date":"Datum UTC", "time":"Zeit", "call":"Call", "operator":"Operator", "contest":"Contest", "band":"Band", "mode":"Mode", "freq":"MHz", "rst":"RST", "status":"Sync", "email_qsl":"E-Mail QSL",
@@ -87,9 +113,9 @@ class QsoSyncFeatureMixin:
         for c in cols:
             self.tree.heading(c, text=self._tr(headings[c]))
             self.tree.column(c, width=widths[c], minwidth=45, stretch=(c in ("call", "contest")))
-        self.tree.grid(row=0, column=0, sticky="nsew")
+        self.tree.grid(row=1, column=0, sticky="nsew")
         sb = ttk.Scrollbar(card, orient="vertical", command=self.tree.yview)
-        sb.grid(row=0, column=1, sticky="ns")
+        sb.grid(row=1, column=1, sticky="ns")
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.tag_configure("local", foreground=theme.MUTED)
         self.tree.tag_configure("wavelog", foreground=theme.OK)
@@ -100,7 +126,7 @@ class QsoSyncFeatureMixin:
         self.tree.bind("<<TreeviewSelect>>", self._sync_selection_changed)
 
         actions = ttk.Frame(card, style="Card.TFrame")
-        actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(actions, text="QSO bearbeiten", style="Secondary.TButton", command=self.edit_selected_qso).pack(side="left")
         self.delete_qso_button = ttk.Button(
             actions,
@@ -125,12 +151,74 @@ class QsoSyncFeatureMixin:
             card, text="Keine offenen Sync-Details.", bg=theme.CARD, fg=theme.MUTED,
             font=("Segoe UI", 9), anchor="w", justify="left", wraplength=1050,
         )
-        self.sync_detail_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(9, 0))
+        self.sync_detail_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(9, 0))
 
         legend = tk.Label(card, text="QSL-Status: ✓ bestätigt · ↑ gesendet/hochgeladen · … wartet · — kein Status · ? nicht verfügbar · E-Mail QSL: ✅ versendet · — nicht versendet",
                           bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 8), anchor="w")
-        legend.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        legend.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         self._sync_selection_changed()
+
+    # -- callsign search ------------------------------------------------------
+    def _qso_search_changed(self):
+        """Typing: filter after a short pause so large logbooks stay fluid."""
+        if self._qso_filter_job is not None:
+            try:
+                self.after_cancel(self._qso_filter_job)
+            except tk.TclError:
+                pass
+        self._qso_filter_job = self.after(200, self._apply_qso_search_now)
+
+    def _apply_qso_search_now(self):
+        self._qso_filter_job = None
+        if self.closing:
+            return
+        query = normalize_call_query(self.qso_search_var.get())
+        if query == self._qso_filter:
+            return
+        self._qso_filter = query
+        self._ensure_qso_tree_rendered()
+        self._update_qso_search_result()
+
+    def clear_qso_search(self):
+        if self.qso_search_var.get():
+            self.qso_search_var.set("")
+        self._apply_qso_search_now()
+        self.qso_search_entry.focus_set()
+
+    def _focus_qso_search(self, _event=None):
+        if getattr(self, "current_page", "") != "qsos":
+            return None
+        self.qso_search_entry.focus_set()
+        self.qso_search_entry.select_range(0, "end")
+        return "break"
+
+    def _focus_first_qso_row(self):
+        children = self.tree.get_children()
+        if children:
+            self.tree.focus_set()
+            self.tree.selection_set(children[0])
+            self.tree.focus(children[0])
+            self.tree.see(children[0])
+        return "break"
+
+    def _visible_qso_rows(self) -> list[tuple[str, str, tuple]]:
+        hidden = self._qso_hidden_ids
+        rows = [row for row in self._qso_cached_rows if row[0] and row[0] not in hidden]
+        return filter_rows_by_call(rows, self._qso_filter)
+
+    def _update_qso_search_result(self):
+        label = getattr(self, "qso_search_result_label", None)
+        if label is None:
+            return
+        if not self._qso_filter:
+            label.configure(text="")
+            return
+        count = len(self._qso_tree_rows) if self._qso_tree_rows is not None else len(self._visible_qso_rows())
+        if count:
+            text = f"{count} Treffer" if self.language != "en" else f"{count} match{'es' if count != 1 else ''}"
+        else:
+            text = self._tr("Kein QSO mit diesem Rufzeichen")
+        label.configure(text=text, fg=theme.MUTED if count else theme.WARN)
 
     @staticmethod
     def _display_qsl_status(value: str | None) -> str:
@@ -497,11 +585,13 @@ class QsoSyncFeatureMixin:
     def _ensure_qso_tree_rendered(self):
         if not self._qso_view_loaded:
             return
-        if self._qso_tree_generation == self._qso_cache_generation:
+        if (
+            self._qso_tree_generation == self._qso_cache_generation
+            and self._qso_tree_filter == self._qso_filter
+        ):
             return
 
-        hidden = self._qso_hidden_ids
-        rows = [row for row in self._qso_cached_rows if row[0] and row[0] not in hidden]
+        rows = self._visible_qso_rows()
         if self._qso_tree_rows is not None and self._qso_tree_rows:
             ops = plan_row_diff(self._qso_tree_rows, rows)
             if ops is not None:
@@ -514,6 +604,8 @@ class QsoSyncFeatureMixin:
                 if ops is not None:
                     self._qso_tree_rows = rows
                     self._qso_tree_generation = self._qso_cache_generation
+                    self._qso_tree_filter = self._qso_filter
+                    self._update_qso_search_result()
                     restore = self._qso_restore_selection
                     if restore and self.tree.exists(restore):
                         self.tree.selection_set(restore)
@@ -532,6 +624,8 @@ class QsoSyncFeatureMixin:
         self._qso_render_generation += 1
         render_generation = self._qso_render_generation
         self._qso_tree_rows = None
+        self._qso_render_source = rows
+        self._qso_render_filter = self._qso_filter
         self.tree.delete(*self.tree.get_children())
 
         # Render in chunks. Tk gets control back between chunks, so even a
@@ -553,7 +647,7 @@ class QsoSyncFeatureMixin:
         if self.closing or render_generation != self._qso_render_generation:
             return
 
-        rows = self._qso_cached_rows
+        rows = self._qso_render_source
         batch_size = 400
         end = min(len(rows), start + batch_size)
         if start == 0:
@@ -583,7 +677,9 @@ class QsoSyncFeatureMixin:
             return
 
         self._qso_tree_generation = self._qso_cache_generation
+        self._qso_tree_filter = getattr(self, "_qso_render_filter", self._qso_filter)
         self._qso_tree_rows = list(rendered)
+        self._update_qso_search_result()
         if selected and self.tree.exists(selected):
             self.tree.selection_set(selected)
             self.tree.focus(selected)
@@ -857,6 +953,7 @@ class QsoSyncFeatureMixin:
             self.tree.delete(*existing)
         if self._qso_tree_rows is not None:
             self._qso_tree_rows = [row for row in self._qso_tree_rows if row[0] not in wanted]
+            self._update_qso_search_result()
         if anchor and self.tree.exists(anchor):
             self.tree.selection_set(anchor)
             self.tree.focus(anchor)

@@ -257,6 +257,8 @@ Die Tabelle zeigt lokale QSOs und deren Zustand:
 - `KONFLIKT` – lokal und in Wavelog unterschiedlich geändert
 - `SYNC-FEHLER` – Übertragung nicht eindeutig erfolgreich
 
+**Rufzeichen suchen:** Das Suchfeld über der Tabelle zeigt beim Tippen nur noch QSOs, deren Rufzeichen den eingegebenen Text enthält – `dl1` findet zum Beispiel DL1AB und DL1XYZ/P. Groß-/Kleinschreibung spielt keine Rolle; `*` steht für beliebig viele Zeichen, `?` für genau ein Zeichen (`DL?AB`). Neben dem Feld steht die Trefferzahl. **Strg+F** springt ins Suchfeld, **Esc** oder **✕** leert die Suche, **Pfeil runter** wechselt in die Trefferliste. Bearbeiten, Löschen und QSL-Versand wirken wie gewohnt auf die ausgewählten Treffer; Abgleich, Statistik und Export berücksichtigen immer das ganze Logbuch.
+
 Ein QSO kann lokal bearbeitet oder gelöscht werden. Gelöschte QSOs verschwinden sofort aus der Liste; das Logbuch wird im Hintergrund gespeichert. Bis dieser Speichervorgang abgeschlossen ist – bei großen Logbüchern meist unter einer Sekunde –, sind weiteres Löschen, Bearbeiten und der Profilwechsel kurz gesperrt, und beim Beenden wartet das Programm darauf. Bei einem Konflikt entscheidet der Benutzer ausdrücklich zwischen lokaler und Wavelog-Version. Ein außerhalb der App fehlendes lokales ADI-QSO ist kein automatischer Auftrag, es aus Wavelog zu löschen.
 
 Bei `SYNC-FEHLER` zeigt die Detailzeile unter der Tabelle die gespeicherte technische Ursache des ausgewählten QSOs. Eine Stationsprofil-Abweichung wird dort ausdrücklich genannt. Sie wird nicht automatisch repariert oder gelöscht.
