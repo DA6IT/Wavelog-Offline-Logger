@@ -91,6 +91,7 @@ class SyncResilienceTests(unittest.TestCase):
             self.assertEqual("local-1", pending[0]["local_id"])
             db.consume_journal_changes([pending[0]["id"]])
             self.assertEqual([], db.pending_journal_changes())
+            db.close()  # Windows cannot delete an open SQLite file
 
     def test_control_plane_upgrade_is_idempotent_and_versions_are_journaled(self):
         with TemporaryDirectory() as directory:
@@ -126,6 +127,7 @@ class SyncResilienceTests(unittest.TestCase):
             meta = reopened.get_meta("local-1")
             self.assertIsNotNone(meta)
             self.assertEqual(1, (meta or {})["local_version"])
+            reopened.close()
 
     def test_cancelled_sync_preserves_persisted_resume_state_and_journal(self):
         with TemporaryDirectory() as directory:
@@ -140,6 +142,7 @@ class SyncResilienceTests(unittest.TestCase):
                 engine.sync(1, cancel_event=cancelled)
             self.assertEqual("page:7", db.get_sync_state(1)["checkpoint"])
             self.assertEqual(1, len(db.pending_journal_changes()))
+            db.close()
 
 
 class _JsonResponse:
