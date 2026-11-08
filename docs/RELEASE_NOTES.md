@@ -1,33 +1,37 @@
-# DA6IT.de Wavelog Offline Logger v0.22.0
+# DA6IT.de Wavelog Offline Logger v0.23.0
 
 ## Deutsch
 
-v0.22.0 macht den Logger bei großen Logbüchern deutlich schneller – beim Laden, Bearbeiten und beim vollständigen Wavelog-Abgleich. Funktionen und Bedienung bleiben unverändert.
+v0.23.0 ersetzt WaveLogGate durch eine eingebaute Wavelog-Verbindung für Funkgerät und Rotor und sorgt dafür, dass beim Bearbeiten, Importieren und Abgleichen alle Angaben eines QSOs erhalten bleiben.
 
 ### Highlights
 
-- **Große Logbücher:** Laden, Aktualisieren, Bearbeiten und Löschen bleiben auch bei vielen tausend QSOs flüssig.
-- **Schnellerer vollständiger Abgleich:** Neue, geänderte und gelöschte QSOs werden gebündelt verarbeitet; besonders das erste Herunterladen eines bestehenden Wavelog-Logbuchs ist erheblich schneller.
-- **Weniger Datenverkehr:** Ohne lokale Uploads oder Änderungen werden die Wavelog-Daten pro Abgleich nur noch einmal geladen.
-- **DX-Cluster:** Schnellere Länderzuordnung und eine flüssige Spot-Liste auch bei vielen eingehenden Spots.
-- **WSJT-X und Datensicherheit:** Viele neue WSJT-X-QSOs werden auf einmal übernommen; neu geschriebene Logbuchdateien sind noch besser gegen Stromausfälle geschützt.
-- **Flüssigere Oberfläche:** Schnellerer Programmstart; Speichern, Löschen und Bearbeiten erscheinen sofort in der Logbuchansicht; weniger Ruckler beim Ändern der Fenstergröße und in der Statistik.
+- **Wavelog-Verbindung für Funkgerät:** Frequenz, Modus und Sendeleistung erscheinen in Wavelog; ein Klick auf einen DX-Spot oder in die Bandmap stellt das Funkgerät ein; „Live - WebSocket“ zeigt den Funkgerätestatus direkt an; der Rotor kann der Peilung aus Wavelog folgen. Einschalten unter **CAT → Wavelog-Verbindung für Funkgerät** – WaveLogGate vorher beenden. Das API-Token braucht die Berechtigung `radio:write`.
+- **Alle QSO-Angaben bleiben erhalten:** Auch Felder wie DOK, IOTA, Satellit, SIG, Bundesland/County oder QSL-Hinweise, die der Logger nicht selbst anzeigt, bleiben beim Bearbeiten, Löschen, Importieren und Abgleichen erhalten.
+- **Abgleich ergänzt statt ersetzt:** Sendeleistung, QSO-Ende und eigene Angaben wie Portabel-Locator oder POTA-Referenz bleiben erhalten. Früher verlorene Angaben wie DOK oder IOTA holt der erste vollständige Abgleich aus Wavelog zurück.
+- **Mehr übertragene Daten:** Satelliten-QSOs, DOK, IOTA, SIG, Bundesland/County und das QSO-Ende werden mit Wavelog ausgetauscht; lokal geleerte Felder werden auch in Wavelog geleert.
+- **Sichereres Löschen:** Ein QSO wird lokal erst entfernt, wenn Wavelog die Löschung einzeln bestätigt; fehlen ungewöhnlich viele QSOs, fragt der Logger vorher nach.
+- **Zuverlässigere Zuordnung:** QSOs rund um Mitternacht UTC werden wiedererkannt statt doppelt angelegt; die Verbindung funktioniert auch mit Servern, die „Missing API token“ meldeten.
 
-Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.22.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.22.0/docs/en/USER_GUIDE.md)
+Tipp: Vor dem ersten vollständigen Abgleich nach dem Update ein Backup anlegen (**Einstellungen → Allgemein → Daten & Backup**).
+
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.23.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.23.0/docs/en/USER_GUIDE.md)
 
 ---
 
 ## English
 
-v0.22.0 makes the Logger much faster with large logbooks – when loading, editing and during complete Wavelog synchronization. Features and operation remain unchanged.
+v0.23.0 replaces WaveLogGate with a built-in Wavelog connection for radio and rotator and keeps every detail of a QSO when editing, importing and synchronizing.
 
 ### Highlights
 
-- **Large logbooks:** Loading, refreshing, editing and deleting stay responsive even with many thousands of QSOs.
-- **Faster complete synchronization:** New, changed and deleted QSOs are processed in batches; the first download of an existing Wavelog logbook in particular is considerably faster.
-- **Less data traffic:** Without local uploads or changes, Wavelog data is downloaded only once per synchronization.
-- **DX Cluster:** Faster country lookup and a smooth spot list even with many incoming spots.
-- **WSJT-X and data safety:** Many new WSJT-X QSOs are imported at once; rewritten logbook files are protected even better against power loss.
-- **Smoother interface:** Faster startup; saving, deleting and editing show up in the logbook view immediately; less stutter when resizing the window and in the statistics.
+- **Wavelog radio connection:** frequency, mode and TX power appear in Wavelog; a click on a DX spot or the bandmap tunes the radio; “Live - WebSocket” shows the radio status directly; the rotator can follow the bearing from Wavelog. Enable it under **CAT → Wavelog radio connection** – close WaveLogGate first. The API token needs the `radio:write` permission.
+- **Every QSO detail is kept:** fields such as DOK, IOTA, satellite, SIG, state/county or QSL hints that the Logger does not display itself are kept when editing, deleting, importing and synchronizing.
+- **Synchronization adds instead of replacing:** TX power, QSO end time and your own data such as a portable locator or POTA reference are kept. Details lost earlier, such as DOK or IOTA, are restored from Wavelog by the first complete synchronization.
+- **More data exchanged:** satellite QSOs, DOK, IOTA, SIG, state/county and the QSO end time are exchanged with Wavelog; fields cleared locally are cleared in Wavelog as well.
+- **Safer deletion:** a QSO is only removed locally once Wavelog confirms the deletion individually; if unusually many QSOs are missing, the Logger asks first.
+- **More reliable matching:** QSOs around midnight UTC are recognised instead of being duplicated; the connection also works with servers that reported “Missing API token”.
 
-Documentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.22.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.22.0/docs/en/USER_GUIDE.md)
+Tip: create a backup (**Settings → General → Data & backup**) before the first complete synchronization after the update.
+
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.23.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.23.0/docs/en/USER_GUIDE.md)

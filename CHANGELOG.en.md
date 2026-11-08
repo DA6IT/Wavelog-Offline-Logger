@@ -2,7 +2,7 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
-## 0.23.0 — unreleased (test build)
+## 0.23.0 — 2026-11-08
 
 ### Added
 

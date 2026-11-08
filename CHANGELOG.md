@@ -2,7 +2,7 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
-## [0.23.0] - unveröffentlicht (Testversion)
+## [0.23.0] - 2026-11-08
 
 ### Added
 

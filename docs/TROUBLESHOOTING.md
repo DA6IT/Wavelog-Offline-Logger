@@ -56,6 +56,12 @@ Tokens niemals in einem öffentlichen Issue posten.
 
 Bei `CERTIFICATE_VERIFY_FAILED` verwendet ein aktueller Build zuerst den nativen Zertifikatsspeicher des Betriebssystems und zusätzlich ein gebündeltes CA-Paket als Fallback. Prüfe trotzdem Systemdatum, ausstehende Betriebssystem-Zertifikatsupdates sowie TLS-inspektierende Firmen-Proxys oder Virenscanner. Die Zertifikatsprüfung wird aus Sicherheitsgründen nicht abschaltbar gemacht.
 
+## Wavelog-Verbindung für Funkgerät startet nicht oder QSY kommt nicht an
+
+- **Port belegt:** WaveLogGate oder eine zweite Logger-Instanz nutzt bereits Port 54321/54322. WaveLogGate beenden und die Verbindung unter **CAT** neu einschalten.
+- **Funkgerät erscheint nicht in Wavelog:** Das API-v2-Token braucht die Berechtigung `radio:write`.
+- **Klick auf einen Spot stellt nichts ein:** CAT muss laufen; Wavelog muss unter genau der eingetragenen Wavelog-Adresse geöffnet sein. Safari unterstützt QSY und „Live - WebSocket“ nicht.
+
 ## Contest-Sessions erscheinen nicht oder werden nicht verknüpft
 
 Führe im Contest-Bereich **Mit Wavelog abgleichen** aus und prüfe den dort angezeigten Contest-API-Status. Der API-v2-Token benötigt `contest:read` zum Laden sowie `contest:write` zum Anlegen, Ändern und Verknüpfen. Der gewählte Contest muss in Wavelogs Contest-Katalog aktiv sein. Bei Clubstationen kann ein Mitglied eigene QSOs verknüpfen; zum Erstellen oder Bearbeiten der gemeinsamen Session sind Club-Officer-Rechte erforderlich.
