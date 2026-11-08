@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	appVersion   = "0.22.0"
+	appVersion   = "0.23.0"
 	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
 	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
 
@@ -61,6 +61,9 @@ var syncWriteBufferSource []byte
 
 //go:embed qso_tree_view.py
 var qsoTreeViewSource []byte
+
+//go:embed wavelog_gate.py
+var wavelogGateSource []byte
 
 //go:embed dx_cluster.py
 var dxClusterSource []byte
@@ -362,6 +365,9 @@ func writeAppFiles(appDir string) error {
 	if err := os.WriteFile(filepath.Join(appDir, "qso_tree_view.py"), qsoTreeViewSource, 0644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(appDir, "wavelog_gate.py"), wavelogGateSource, 0644); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(appDir, "dx_cluster.py"), dxClusterSource, 0644); err != nil {
 		return err
 	}
@@ -573,6 +579,7 @@ func embeddedAppFilesMatch(appDir string) bool {
 		"qso_duplicates.py":  qsoDuplicatesSource,
 		"sync_write_buffer.py": syncWriteBufferSource,
 		"qso_tree_view.py":     qsoTreeViewSource,
+		"wavelog_gate.py":      wavelogGateSource,
 		"dx_cluster.py":       dxClusterSource,
 		"callbook.py":         callbookSource,
 		"ui_preferences.py":   uiPreferencesSource,

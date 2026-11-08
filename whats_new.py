@@ -6,6 +6,15 @@ from __future__ import annotations
 
 WHATS_NEW: dict[str, tuple[str, ...]] = {
 
+    "0.23.0": (
+        "WaveLogGate wird nicht mehr gebraucht: Der Logger zeigt Wavelog Frequenz und Modus des Funkgeräts an, ein Klick auf einen DX-Spot oder die Bandmap in Wavelog stellt das Funkgerät ein, und der Rotor kann auf Wunsch der Peilung aus Wavelog folgen. Einschalten unter CAT → Wavelog-Verbindung für Funkgerät.",
+        "Beim Bearbeiten, Löschen, Importieren und Abgleichen bleiben jetzt alle Angaben eines QSOs erhalten, auch Felder wie DOK, IOTA, Satellit, SIG oder QSL-Hinweise, die der Logger nicht selbst anzeigt.",
+        "Der Wavelog-Abgleich ergänzt QSOs, statt sie zu ersetzen: Angaben, die Wavelog nicht mitliefert (zum Beispiel Sendeleistung oder QSO-Ende), gehen nicht mehr verloren. Früher verlorene Angaben wie DOK oder IOTA holt der erste Abgleich aus Wavelog zurück.",
+        "Satelliten-QSOs, DOK, IOTA, SIG, Bundesland/County und das QSO-Ende werden jetzt mit nach Wavelog übertragen und von dort übernommen.",
+        "Mehr Sicherheit beim Abgleich: Ein QSO wird lokal erst gelöscht, wenn Wavelog die Löschung einzeln bestätigt. Fehlen auf einmal ungewöhnlich viele QSOs, fragt der Logger nach, bevor er etwas löscht.",
+        "QSOs kurz vor und nach Mitternacht UTC werden beim Abgleich zuverlässig wiedererkannt, statt doppelt angelegt zu werden.",
+        "Die Verbindung zu Wavelog-Servern, die das API-Token nicht weiterreichen (Meldung „Missing API token“), funktioniert jetzt ebenfalls.",
+    ),
     "0.22.0": (
         "Große Logbücher laden und aktualisieren deutlich schneller; das Bearbeiten und Löschen einzelner QSOs reagiert auch bei vielen tausend Einträgen sofort.",
         "Der vollständige Wavelog-Abgleich ist bei großen Logbüchern erheblich schneller, besonders beim ersten Herunterladen eines bestehenden Wavelog-Logbuchs.",

@@ -2,6 +2,28 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
+## 0.23.0 — unreleased (test build)
+
+### Added
+
+- **Wavelog radio connection (replaces WaveLogGate):** frequency/mode are sent to the Wavelog API v2 (`radio`), QSY requests from Wavelog (`http://127.0.0.1:54321/{Hz}/{mode}`) tune the radio, a local WebSocket (`ws://127.0.0.1:54322`) provides live status for “Live - WebSocket” in Wavelog, and the rotor can follow `lookup_result`/`satellite_position` from Wavelog. Both local services listen on `127.0.0.1` only and accept browser requests only from the configured Wavelog address.
+
+### Fixed
+
+- ADIF fields without their own input field (e.g. `DARC_DOK`, `IOTA`, `SAT_NAME`, `SIG`, `QSL_VIA`, QSL status) were lost for **all** QSOs whenever the log file was rewritten (edit, delete, import, migration, sync); they are now preserved completely
+- complete synchronization replaced local QSOs with Wavelog's shortened representation (TX power, QSO end, MY_* data were lost); Wavelog data is now merged, and the first sync restores lost DOK/IOTA/SAT data from Wavelog
+- uploads and edits now also transfer propagation mode, satellite, DOK, IOTA, SIG, state/county, QSL via and QSO end
+- a QSO missing from the Wavelog list is deleted locally only after a single 404 confirmation; with unusually many missing QSOs deletions are withheld until confirmed
+- QSOs around 00:00 UTC are linked across the date boundary
+- “HTTP 401 Missing API token” with web servers that drop the `Authorization` header (issue #35): the token is also sent as `X-API-Key`
+
+### Changed
+
+- own ADIF files declare ADIF 3.1.8
+- sync hash schema v3; sync baselines of older versions are adopted without mass conflicts
+- Wavelog's ADIF export is downloaded by `since_id` instead of page numbers; export and confirmation downloads have a page limit and detect endless loops
+- CI runs all tests (`unittest discover`)
+
 ## 0.22.0 — 2026-10-25
 
 ### Changed

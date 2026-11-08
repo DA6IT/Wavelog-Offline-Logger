@@ -150,6 +150,7 @@ class ProfilesFeatureMixin:
             self._stop_dx_cluster_runtime(update_ui=False)
             self._stop_dx_spotter_runtime(update_ui=False)
             self._stop_udp_log_runtime(update_ui=False)
+            self._stop_wavelog_gate_runtime(update_ui=False)
             if self.db:
                 self.db.close()
             self._open_profile_storage(profile_id)
@@ -176,6 +177,7 @@ class ProfilesFeatureMixin:
             # was closed. Start the newly selected profile with its own saved
             # host, port and autostart preference once the UI is idle again.
             self.after_idle(self._autostart_udp_log)
+            self.after_idle(self._autostart_wavelog_gate)
             self._schedule_qsl_background_sync(
                 500,
                 reason="profile",

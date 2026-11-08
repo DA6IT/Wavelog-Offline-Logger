@@ -29,6 +29,7 @@ from feature_udp import UdpFeatureMixin
 from feature_ui_shell import UiShellFeatureMixin
 from feature_update import UpdateFeatureMixin
 from feature_usage import UsageStatsFeatureMixin
+from feature_wavelog_gate import WavelogGateFeatureMixin
 from feature_wavelog_online import WavelogOnlineFeatureMixin
 from feature_xota import XotaFeatureMixin
 from logger_core import APP_NAME, VERSION, app_data_dir
@@ -52,6 +53,7 @@ class LoggerApp(
     StatsFeatureMixin,
     CatFeatureMixin,
     RotorFeatureMixin,
+    WavelogGateFeatureMixin,
     DxClusterFeatureMixin,
     UdpFeatureMixin,
     BackupFeatureMixin,
@@ -111,6 +113,7 @@ class LoggerApp(
         self._init_settings_feature()
         self._init_cat_feature()
         self._init_rotor_feature()
+        self._init_wavelog_gate_feature()
         self._init_udp_feature()
         self._init_dxcluster_feature()
         self._init_fastlog_feature()
@@ -152,6 +155,7 @@ class LoggerApp(
         self.after(180, lambda: self.refresh_qsos(force=True))
         self.after(350, self._show_adif_migration_report)
         self.after(600, self._autostart_udp_log)
+        self.after(1100, self._autostart_wavelog_gate)
         self.after(700, self._localization_tick)
         self.after(950, self._show_startup_notices)
         self.after(1300, self._maybe_startup_wsjtx_sync)

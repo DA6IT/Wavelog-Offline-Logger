@@ -2608,6 +2608,11 @@ class WavelogClient:
     def delete_qso(self, wid: int):
         self._request("DELETE", "qso", ident=wid)
 
+    def post_radio(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Upsert the live CAT state of one radio (scope radio:write)."""
+        r = self._request("POST", "radio", payload=payload) or {}
+        return r.get("data") or {}
+
     def contest_catalog(self) -> list[dict[str, Any]]:
         r = self._request("GET", "catalog", params={"topic": "contest"}) or {}
         data = r.get("data") or []
