@@ -16,6 +16,7 @@ from logger_core import (
     qso_hash_matches, qso_to_adif_record, remote_hash, remote_to_local,
 )
 
+
 ADIF_WITH_EXTRAS = (
     "<ADIF_VER:5>3.1.7<EOH>\n"
     "<APP_AFUTOOLS_ID:3>abc<CALL:5>DL1AB<QSO_DATE:8>20261101<TIME_ON:4>1200<BAND:3>20m<MODE:3>SSB"
@@ -180,12 +181,14 @@ class SyncSafetyTests(Fixture):
         db.ensure_local(local["local_id"], qso_hash(local))
         summary = engine.sync(1, {})
         self.assertEqual(summary.linked, 1)
+        # Local data (TX power) won the link and went to Wavelog immediately.
+        self.assertEqual(summary.patched, 1)
         client.remote[0].update(comment="remote edit", darc_dok="F11")
         summary = engine.sync(1, {})
         self.assertEqual(summary.remote_updated, 1, summary)
         q = store.find(local["local_id"])
         self.assertEqual(q["comment"], "remote edit")
-        self.assertEqual(q["tx_pwr"], "100")
+        self.assertEqual(float(q["tx_pwr"]), 100.0)
         self.assertEqual(q["my_iota"], "EU-005")
         self.assertEqual(q["adif_extra"]["MY_ANTENNA"], "Dipol")
         self.assertEqual(q["adif_extra"]["DARC_DOK"], "F11")
@@ -328,6 +331,129 @@ class ClientTests(TestCase):
             WavelogClient("https://log.example.org", "wl2_x").lookup_callsign("dl1ab", date="2026-11-01")
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(requests[0].full_url).query)
         self.assertEqual(query["date"], ["2026-11-01"])
+
+
+class ReviewRegressionTests(Fixture):
+    """Findings of the independent v0.23 review (reproduced, then fixed)."""
+
+    def test_linking_keeps_local_data_and_pushes_it(self):
+        store, db, client, engine = self.engine([remote_row(101, "DL1AB", 0)])
+        local = store.add({"local_id": "L1", "call": "DL1AB", "band": "20m", "mode": "USB", "freq": "14.25",
+                           "qso_date": "2026-10-01", "time_on": "120030", "name": "Hans", "qth": "Berlin",
+                           "comment": "nice signal", "adif_extra": {"DARC_DOK": "F11", "IOTA": "EU-005"}})
+        db.ensure_local(local["local_id"], qso_hash(local))
+        summary = engine.sync(1, {})
+        self.assertEqual((summary.linked, summary.patched, summary.errors), (1, 1, 0), summary)
+        q = store.find("L1")
+        self.assertEqual((q["name"], q["qth"], q["comment"], q["time_on"]), ("Hans", "Berlin", "nice signal", "120030"))
+        self.assertEqual(q["adif_extra"], {"DARC_DOK": "F11", "IOTA": "EU-005"})
+        self.assertEqual(q["gridsquare"], "JO31")  # filled from Wavelog
+        sent = client.patched[-1][1]
+        self.assertEqual((sent["name"], sent["darc_dok"], sent["iota"]), ("Hans", "F11", "EU-005"))
+        again = engine.sync(1, {})
+        self.assertEqual((again.patched, again.remote_updated, again.conflicts), (0, 0, 0), again)
+
+    def test_remote_update_does_not_overwrite_my_fields(self):
+        store, db, client, engine = self.engine([remote_row(1, "DL1AB", 5)])
+        station = {1: {"callsign": "DA6IT", "gridsquare": "JO31AA", "city": "Home", "pota": ""}}
+        engine.sync(1, station)
+        lid = db.list_meta()[0]["local_id"]
+        q = dict(store.find(lid))
+        q.update(my_gridsquare="JO62QM", my_qth="Berlin-Park", my_pota_ref="DE-0001")
+        q.pop("_file", None)
+        store.update(lid, q)
+        db.set_status(lid, "synced", wavelog_id=1, last_synced_hash=qso_hash(q), remote_hash=remote_hash(client.remote[0]))
+        client.remote[0]["comment"] = "QSL received"
+        summary = engine.sync(1, station)
+        self.assertEqual(summary.remote_updated, 1)
+        after = store.find(lid)
+        self.assertEqual((after["my_gridsquare"], after["my_qth"], after["my_pota_ref"]), ("JO62QM", "Berlin-Park", "DE-0001"))
+        self.assertEqual(after["comment"], "QSL received")
+
+    def test_cleared_comment_reaches_wavelog(self):
+        store, db, client, engine = self.engine([remote_row(1, "DL1AB", 5, comment="old comment")])
+        engine.sync(1, {})
+        lid = db.list_meta()[0]["local_id"]
+        q = dict(store.find(lid))
+        q["comment"] = ""
+        q.pop("_file", None)
+        store.update(lid, q)
+        summary = engine.sync(1, {})
+        self.assertEqual(summary.patched, 1)
+        payload = client.patched[-1][1]
+        self.assertEqual(payload["comment"], "")
+        # start unchanged and no local end time: date/time are not sent, so
+        # Wavelog keeps its own COL_TIME_OFF
+        self.assertNotIn("qso_date", payload)
+        self.assertNotIn("time_on", payload)
+
+    def test_reconcile_index_accepts_v2_baselines(self):
+        store = LogStore(self.temp / "logs")
+        db = MetadataDB(self.temp / "meta.sqlite")
+        self.addCleanup(db.close)
+        q = store.add({"call": "DL1AB", "band": "20m", "mode": "USB", "qso_date": "2026-10-01", "time_on": "120000"})
+        db.set_status(q["local_id"], "synced", wavelog_id=1, last_synced_hash=legacy_qso_hash_v2(q), remote_hash="r")
+        db.reconcile_index(store.scan())
+        self.assertEqual(db.get_meta(q["local_id"])["status"], "synced")
+        self.assertEqual(db.pending_journal_changes(), [])
+
+    def test_club_member_qso_without_operator_is_not_deleted(self):
+        rows = [remote_row(400 + i, f"DL{i}CL", i, operator=("DL1ME" if i == 0 else "DL9OT")) for i in range(3)]
+        store, db, client, engine = self.engine(rows)
+        db.set_setting("operator_call", "DL1ME")
+        client.remote = rows[:1]  # member token sees only its own QSOs ...
+        client.get_qso = lambda wid: (_ for _ in ()).throw(WavelogError("HTTP 404: not_found: QSO not found", status=404))
+        for i, r in enumerate(rows):
+            q = remote_to_local(r, {})
+            q["local_id"] = f"C{i}"
+            if i == 2:
+                q["operator_call"] = ""
+            q = store.add(q)
+            db.set_status(q["local_id"], "synced", wavelog_id=r["id"], last_synced_hash=qso_hash(q), remote_hash=remote_hash(r))
+        summary = engine.sync(1, {1: {"id": 1, "callsign": "DL0CLUB"}})
+        self.assertEqual(summary.remote_deleted, 0)
+        self.assertEqual(len(store.scan()), 3)
+
+    def test_proxy_404_is_not_a_deletion(self):
+        store, db, client, engine = self.engine([remote_row(1, "DL1AB", 5), remote_row(2, "DL2CD", 6)])
+        engine.sync(1, {})
+        client.remote = client.remote[:1]
+        client.get_qso = lambda wid: (_ for _ in ()).throw(WavelogError("HTTP 404: <html>Not Found</html>", status=404))
+        summary = engine.sync(1, {})
+        self.assertEqual(summary.remote_deleted, 0)
+        self.assertEqual(len(store.scan()), 2)
+
+    def test_submode_pairs_survive_rewrite(self):
+        text = ("<EOH><CALL:4>DL1A<QSO_DATE:8>20260101<TIME_ON:4>1200<BAND:3>20m<MODE:4>MFSK<SUBMODE:3>Q65<EOR>"
+                "<CALL:4>DL1B<QSO_DATE:8>20260101<TIME_ON:4>1201<BAND:3>20m<MODE:3>PSK<SUBMODE:5>PSK63<EOR>"
+                "<CALL:4>DL1C<QSO_DATE:8>20260101<TIME_ON:4>1202<BAND:3>20m<MODE:2>CW<SUBMODE:3>PCW<EOR>"
+                "<CALL:4>DL1D<QSO_DATE:8>20260101<TIME_ON:4>1203<BAND:3>20m<MODE:3>XYZ<SUBMODE:4>ABCD<EOR>")
+        for fields in parse_adif(text):
+            again = parse_adif(qso_to_adif_record(adif_fields_to_qso(fields)))[0]
+            self.assertEqual((again.get("MODE"), again.get("SUBMODE")), (fields["MODE"], fields["SUBMODE"]))
+        q = adif_fields_to_qso(parse_adif(text)[3])
+        q["mode"] = "CW"  # edited: the old pair must not be reused
+        again = parse_adif(qso_to_adif_record(q))[0]
+        self.assertEqual((again.get("MODE"), again.get("SUBMODE")), ("CW", None))
+
+    def test_field_names_with_dash_and_dot_survive(self):
+        q = adif_fields_to_qso(parse_adif("<CALL:4>DL1A<APP_LOG-4OM_ID:3>abc<MY.FIELD:1>z<EOR>")[0])
+        record = qso_to_adif_record(q)
+        self.assertIn("<APP_LOG-4OM_ID:3>abc", record)
+        self.assertIn("<MY.FIELD:1>z", record)
+
+
+class RedirectTests(TestCase):
+    def test_x_api_key_is_dropped_on_cross_origin_redirect(self):
+        import urllib.request
+        handler = logger_core._SafeRedirectHandler()
+        req = urllib.request.Request("https://log.example.org/index.php/api/v2/qso",
+                                     headers={"Authorization": "Bearer wl2_x", "X-API-Key": "wl2_x"})
+        new = handler.redirect_request(req, None, 302, "Found", {}, "https://other.example.org/login")
+        self.assertIsNone(new.get_header("X-api-key"))
+        self.assertIsNone(new.get_header("Authorization"))
+        same = handler.redirect_request(req, None, 302, "Found", {}, "https://log.example.org/index.php/api/v2/qso/")
+        self.assertEqual(same.get_header("X-api-key"), "wl2_x")
 
 
 if __name__ == "__main__":

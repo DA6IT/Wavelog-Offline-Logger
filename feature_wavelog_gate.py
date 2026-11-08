@@ -296,6 +296,26 @@ class WavelogGateFeatureMixin:
         else:
             self.status_var.set(f"Rotor folgt Wavelog: {azimuth:.0f}°")
 
+    def _gate_radio_lost(self):
+        gate = getattr(self, "wavelog_gate", None)
+        if gate is not None:
+            gate.clear_radio()
+
+    def _restart_wavelog_gate_after_settings(self):
+        """Wavelog URL/token changed: running servers must use the new values."""
+        gate = getattr(self, "wavelog_gate", None)
+        if gate is None or not gate.running or self.closing:
+            return
+        settings = self._wavelog_online_settings()
+        config = GateConfig.from_getter(self.db.get_setting, settings.base_url)
+        try:
+            config.validate()
+        except GateError as exc:
+            write_startup_log("Wavelog-Verbindung nach Einstellungsänderung gestoppt: " + str(exc))
+            self._stop_wavelog_gate_runtime()
+            return
+        self._start_wavelog_gate(config, show_error=False)
+
     # -- called by the CAT poll (UI thread) -----------------------------------
     def _gate_radio_update(self, reading):
         gate = getattr(self, "wavelog_gate", None)

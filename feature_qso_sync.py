@@ -12,7 +12,10 @@ from tkinter import filedialog, messagebox, ttk
 from app_common import write_startup_log
 from dialogs import EditDialog, SyncProgressDialog
 from dx_cluster import normalize_worked_mode
-from logger_core import ContestSyncEngine, SyncEngine, WavelogClient, merge_qso_records, qso_hash, utc_now_iso
+from logger_core import (
+    ContestSyncEngine, SyncEngine, WavelogClient, merge_qso_records, merge_remote_into_local, qso_hash,
+    utc_now_iso,
+)
 from qsl_storage import QslStorage
 from qso_tree_view import apply_row_diff, insert_row, plan_row_diff
 from wsjtx_sync import format_wsjtx_result, load_wsjtx_settings, should_wsjtx_sync_for_reason, sync_wsjtx_with_local
@@ -707,7 +710,9 @@ class QsoSyncFeatureMixin:
                                                        "contest_id","stx","srx","stx_string","srx_string")}
             q.update(profile)
             q.update(self._country_fields_for_call(q.get("call", "")))
-            q = merge_qso_records(old, q)
+            # Only what the dialog changed; a sync may have updated the record
+            # since the dialog was opened (restored IOTA, remote edits ...).
+            changes = {k: v for k, v in q.items() if k != "_file" and old.get(k, "") != v}
         except Exception as e:
             messagebox.showerror("Bearbeiten fehlgeschlagen", str(e), parent=self)
             return
@@ -715,7 +720,8 @@ class QsoSyncFeatureMixin:
         self.status_var.set(f"QSO {q.get('call', '')} wird gespeichert …")
 
         def write():
-            updated = store.update(local_id, q)
+            current = store.find(local_id) or old
+            updated = store.update(local_id, merge_qso_records(current, changes))
             db.ensure_local(local_id, qso_hash(updated))
             return updated
 
@@ -1381,7 +1387,7 @@ class QsoSyncFeatureMixin:
             if remote_deleted:
                 if force_local:
                     # Re-create the locally changed QSO in Wavelog and link the new id.
-                    sid = int(self.db.get_setting("station_profile_id", "0"))
+                    sid = self.db.xota_station_id_for_qso(lid) or int(self.db.get_setting("station_profile_id", "0"))
                     from logger_core import local_to_wavelog, remote_hash
                     remote = client.create_qso(local_to_wavelog(q, sid, include_operator=True))
                     new_wid = int(remote.get("id"))
@@ -1392,9 +1398,9 @@ class QsoSyncFeatureMixin:
                     self.store.delete(lid)
                     self.db.delete_meta(lid)
             elif force_local:
-                sid = int(self.db.get_setting("station_profile_id", "0"))
-                from logger_core import local_to_wavelog, remote_hash
-                remote = client.patch_qso(wid, local_to_wavelog(q, sid))
+                sid = self.db.xota_station_id_for_qso(lid) or int(self.db.get_setting("station_profile_id", "0"))
+                from logger_core import local_patch_payload, remote_hash
+                remote = client.patch_qso(wid, local_patch_payload(q, sid, client.get_qso(wid)))
                 self.db.set_status(lid, "synced", last_synced_hash=qso_hash(q), remote_hash=remote_hash(remote))
             else:
                 from logger_core import remote_to_local, remote_hash
@@ -1404,7 +1410,7 @@ class QsoSyncFeatureMixin:
                 rq = remote_to_local(remote, smap.get(int(remote.get("station_id") or 0), {}))
                 rq["local_id"] = lid
                 current = self.store.find(lid)
-                stored = self.store.update(lid, merge_qso_records(current, rq))
+                stored = self.store.update(lid, merge_remote_into_local(current, rq))
                 self.db.set_status(lid, "synced", last_synced_hash=qso_hash(stored), remote_hash=remote_hash(remote))
             self.refresh_qsos()
         except Exception as e:

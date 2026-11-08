@@ -15,6 +15,13 @@
 - Upload und Änderungen übertragen jetzt auch Ausbreitungsart, Satellit, DOK, IOTA, SIG, Bundesland/County, QSL-Via und QSO-Ende
 - ein in der Wavelog-Liste fehlendes QSO wird lokal erst nach einer einzelnen 404-Bestätigung gelöscht; bei ungewöhnlich vielen fehlenden QSOs werden Löschungen zurückgehalten und erst nach Rückfrage übernommen
 - QSOs um 00:00 UTC werden beim Abgleich auch über die Datumsgrenze hinweg verknüpft
+- wird ein vorhandenes lokales QSO erstmals mit Wavelog verknüpft, bleiben die lokalen Angaben erhalten (Wavelog füllt nur leere Felder) und werden direkt nach Wavelog übertragen
+- eigene Angaben (MY_GRIDSQUARE, MY_CITY, MY_POTA/SOTA/WWFF) eines QSOs werden nicht mehr durch die aktuellen Werte des Wavelog-Stationsprofils ersetzt
+- lokal geleerte Felder (Kommentar, Name, QTH, Notizen, Locator, Rapporte, Referenzen) werden auch in Wavelog geleert; eine Änderung setzt die Endzeit in Wavelog nicht mehr auf die Startzeit zurück
+- MODE/SUBMODE-Paare wie MFSK/Q65, PSK/PSK63 oder CW/PCW bleiben beim Neuschreiben gültig; ADIF-Feldnamen mit `-` oder `.` bleiben erhalten
+- nach dem Update erscheinen synchronisierte QSOs nicht mehr fälschlich als „geändert“
+- Club-Mitglieds-Token: QSOs ohne eingetragenen Operator werden nicht als „in Wavelog gelöscht“ entfernt; nur eine echte Wavelog-404-Antwort zählt als Löschbestätigung
+- das API-Token wird bei Weiterleitungen auf einen anderen Server auch als `X-API-Key` nicht weitergegeben
 - „HTTP 401 Missing API token“ bei Webservern, die den `Authorization`-Header verwerfen (Issue #35): das Token wird zusätzlich als `X-API-Key` gesendet
 
 ### Changed

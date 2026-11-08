@@ -39,6 +39,8 @@ class _PendingUpsert:
     snapshot: int | None = None
     check_snapshot: bool = False
     after: Callable[[], None] | None = None
+    # Baseline stored as last_synced_hash; None = hash of the written record.
+    baseline_hash: str | None = None
 
 
 @dataclass
@@ -80,18 +82,29 @@ class SyncWriteBuffer:
 
     def upsert(self, local_id: str, record: dict[str, Any], *, wavelog_id: int, remote_hash: str,
                counter: str, snapshot: int | None = None, check_snapshot: bool = False,
-               after: Callable[[], None] | None = None) -> None:
+               after: Callable[[], None] | None = None, merge: str = "remote",
+               baseline_hash: str | None = None) -> None:
         # Wavelog delivers only a subset of the ADIF fields.  Merge it into the
         # current local record so fields Wavelog does not carry (TX power,
         # QSO end, MY_* references, preserved ADIF extras ...) survive.
-        from logger_core import merge_qso_records  # local import: avoids a cycle
+        # ``merge="link"``: the local record wins, Wavelog only fills gaps.
+        # ``merge="fill"``: used for healing, same semantics as "link".
+        from logger_core import merge_qso_records, merge_remote_into_local  # local import: avoids a cycle
 
         finder = getattr(self.store, "find", None)
         existing = finder(local_id) if callable(finder) else None
-        row = merge_qso_records(existing, record)
+        if existing is None:
+            row = merge_qso_records(None, record)
+        elif merge in ("link", "fill"):
+            row = merge_remote_into_local(existing, record, link=True)
+        elif merge == "replace":
+            row = merge_qso_records(existing, record)
+        else:
+            row = merge_remote_into_local(existing, record)
         row["local_id"] = local_id
         self.upserts.append(_PendingUpsert(
             local_id, row, int(wavelog_id), remote_hash, counter, snapshot, check_snapshot, after,
+            baseline_hash if existing is not None else None,
         ))
         self._maybe_flush()
 
@@ -150,9 +163,10 @@ class SyncWriteBuffer:
             else:
                 with self.db.bulk():
                     for u, local_hash in zip(upserts, hashes):
+                        baseline = u.baseline_hash or local_hash
                         self.db.set_status(
                             u.local_id, "synced", wavelog_id=u.wavelog_id,
-                            last_synced_hash=local_hash, remote_hash=u.remote_hash,
+                            last_synced_hash=baseline, remote_hash=u.remote_hash,
                         )
                         setattr(self.summary, u.counter, getattr(self.summary, u.counter) + 1)
                         if u.after is not None:

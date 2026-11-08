@@ -976,6 +976,7 @@ class CatFeatureMixin:
         self.cat_poll_busy = False
         if generation != self.cat_generation or self.closing:
             return
+        self._gate_radio_lost()
         self.cat_status_label.configure(text="CAT-Lesefehler: " + message, fg=theme.WARN)
         if not self.tuner_busy:
             self._schedule_cat_poll(max(interval_ms, 1500), interval_ms)
@@ -1035,6 +1036,7 @@ class CatFeatureMixin:
 
     def _stop_cat_runtime(self, *, update_ui: bool = True):
         self.cat_generation += 1
+        self._gate_radio_lost()
         self._cancel_cat_poll()
         self.cat_poll_busy = False
         self.cat_starting = False

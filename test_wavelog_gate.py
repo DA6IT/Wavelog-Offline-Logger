@@ -308,5 +308,75 @@ class QsyToRigctldTests(TestCase):
         self.assertEqual(received, ["F 7074000", "M USB 0"])
 
 
+class GateRobustnessTests(TestCase):
+    def test_non_reading_client_never_blocks_update_radio(self):
+        gate = WavelogGate()
+        self.addCleanup(gate.stop)
+        port = free_port()
+        gate.start(GateConfig(websocket=True, ws_port=port, allowed_origins=(ORIGIN,)))
+        client = WsTestClient(port)  # never reads again
+        self.addCleanup(client.close)
+        client.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        started = time.monotonic()
+        for index in range(20000):
+            gate._last_broadcast_at = 0.0  # force a broadcast every time
+            gate.update_radio(RadioState(frequency_hz=14_000_000 + index, mode="USB"))
+        self.assertLess(time.monotonic() - started, 5.0)
+
+    def test_stale_or_cleared_cat_state_stops_heartbeats(self):
+        posts = []
+
+        class Client:
+            def post_radio(self, payload):
+                posts.append(payload["frequency"])
+
+        old = wavelog_gate.RADIO_PUSH_HEARTBEAT
+        wavelog_gate.RADIO_PUSH_HEARTBEAT = 0.5
+        self.addCleanup(setattr, wavelog_gate, "RADIO_PUSH_HEARTBEAT", old)
+        gate = WavelogGate(client_factory=lambda: Client())
+        self.addCleanup(gate.stop)
+        gate.start(GateConfig(radio_push=True, allowed_origins=(ORIGIN,)))
+        gate.update_radio(RadioState(frequency_hz=14_074_000, mode="PKTUSB"))
+        self.assertTrue(wait_for(lambda: len(posts) == 1))
+        gate.clear_radio()
+        time.sleep(2.5)
+        self.assertEqual(posts, [14_074_000])
+
+    def test_replay_uses_fresh_timestamp(self):
+        gate = WavelogGate()
+        self.addCleanup(gate.stop)
+        port = free_port()
+        gate.start(GateConfig(websocket=True, ws_port=port, allowed_origins=(ORIGIN,)))
+        gate.update_radio(RadioState(frequency_hz=7_010_000, mode="CW"))
+        time.sleep(1.2)
+        client = WsTestClient(port)
+        self.addCleanup(client.close)
+        client.recv_json()
+        replay = client.recv_json()
+        self.assertLess(abs(time.time() * 1000 - replay["timestamp"]), 800)
+
+    def test_restart_never_runs_two_push_threads(self):
+        gate_holder = {}
+        release = threading.Event()
+
+        class SlowClient:
+            def post_radio(self, payload):
+                release.wait(3)
+
+        gate = WavelogGate(client_factory=lambda: SlowClient())
+        self.addCleanup(gate.stop)
+        config = GateConfig(radio_push=True, allowed_origins=(ORIGIN,))
+        gate.start(config)
+        gate.update_radio(RadioState(frequency_hz=14_074_000, mode="USB"))
+        time.sleep(0.3)  # first thread is inside post_radio
+        started = time.monotonic()
+        gate.start(config)  # restart: stop() must not block the UI thread
+        self.assertLess(time.monotonic() - started, 1.0)
+        release.set()
+        time.sleep(0.5)
+        alive = [t for t in threading.enumerate() if t.name == "gate-radio-push" and t.is_alive()]
+        self.assertEqual(len(alive), 1)
+
+
 if __name__ == "__main__":
     main()

@@ -367,6 +367,14 @@ class FakeClient:
         self.next_id += 1
         return {"id": self.next_id, **payload}
 
+    def patch_qso(self, wid, payload):
+        # v0.23: a linked local QSO with extra data is pushed right away.
+        self._count("patch")
+        for row in self.remote:
+            if int(row.get("id") or 0) == int(wid):
+                return dict(row)
+        raise logger_core.WavelogError("HTTP 404: not_found: QSO not found", status=404)
+
     def get_qso(self, wid):
         # Single-QSO lookup used to confirm a remote deletion (v0.23).
         self._count("get_qso")
@@ -416,9 +424,12 @@ class SyncBatchTests(TestCase):
         self.assertEqual(len(rows), 300)
         linked = {m["wavelog_id"] for m in db.list_meta() if m["status"] == "synced"}
         self.assertEqual(linked, set(range(1, 301)))
-        # Downloads are reused for the QSL refresh when nothing was pushed.
-        self.assertEqual(client.calls.get("list_qsos"), 1)
-        self.assertEqual(client.calls.get("export_adif"), 1)
+        # v0.23: the local QSO logged 30 s off wins the link and its time is
+        # sent to Wavelog right away; that PATCH invalidates the download
+        # reuse, so the QSL refresh downloads a fresh view once.
+        self.assertEqual(summary.patched, 1)
+        self.assertEqual(client.calls.get("patch"), 1)
+        self.assertEqual(client.calls.get("list_qsos"), 2)
 
         again = engine.sync(1, {1: {"callsign": "DA6IT"}})
         self.assertEqual((again.pulled, again.linked, again.pushed, again.errors), (0, 0, 0, 0))

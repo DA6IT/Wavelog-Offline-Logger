@@ -81,7 +81,7 @@ def _url_origin(parts: urllib.parse.SplitResult) -> tuple[str, str, int]:
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Keep redirects on HTTP(S), prevent TLS downgrade and avoid credential leaks."""
 
-    _SENSITIVE_HEADERS = ("Authorization", "Proxy-Authorization", "Cookie")
+    _SENSITIVE_HEADERS = ("Authorization", "Proxy-Authorization", "Cookie", "X-API-Key")
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         resolved = urllib.parse.urljoin(req.full_url, newurl)
@@ -104,8 +104,11 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
             return None
 
         if _url_origin(old_parts) != _url_origin(new_parts):
+            # urllib stores header names via str.capitalize() ("X-api-key"),
+            # remove_header() needs that exact spelling.
             for name in self._SENSITIVE_HEADERS:
                 redirected.remove_header(name)
+                redirected.remove_header(name.capitalize())
         return redirected
 
 
@@ -776,7 +779,7 @@ FIELD_RE = re.compile(r"<([^:>]+):(\d+)(?::[^>]*)?>", re.IGNORECASE)
 EOH_RE = re.compile(r"<EOH\s*>", re.IGNORECASE)
 EOR_RE = re.compile(r"<EOR\s*>", re.IGNORECASE)
 EOR_MARKER_RE = re.compile(r"<EOR", re.IGNORECASE)
-ADIF_FIELD_NAME_RE = re.compile(r"[A-Z0-9_]{1,64}")
+ADIF_FIELD_NAME_RE = re.compile(r"[^,:<>{}\s]{1,64}")
 # Populated after qso_to_adif_fields() is defined (see below LogStore marker).
 KNOWN_ADIF_FIELDS: frozenset[str] = frozenset()
 
@@ -834,6 +837,18 @@ def adif_header() -> str:
     return "\n".join(lines)
 
 
+# Frequent ADIF 3.1.x submodes and their MODE (subset of the ADIF spec).
+ADIF_SUBMODE_PARENTS = {
+    "Q65": "MFSK", "FST4": "MFSK", "FST4W": "MFSK", "JS8": "MFSK", "FSQCALL": "MFSK", "JTMS": "MFSK",
+    "MFSK8": "MFSK", "MFSK16": "MFSK", "MFSK32": "MFSK", "FREEDV": "DIGITALVOICE", "M17": "DIGITALVOICE",
+    "PSK63": "PSK", "PSK125": "PSK", "PSK250": "PSK", "BPSK31": "PSK", "QPSK31": "PSK", "QPSK63": "PSK",
+    "PSK31": "PSK", "PCW": "CW", "ASCI": "RTTY", "OLIVIA 8/250": "OLIVIA", "OLIVIA 8/500": "OLIVIA",
+    "OLIVIA 16/500": "OLIVIA", "OLIVIA 16/1000": "OLIVIA", "OLIVIA 32/1000": "OLIVIA",
+    "DOMINOEX": "DOMINO", "VARA HF": "DYNAMIC", "VARA FM 1200": "DYNAMIC", "JT9-1": "JT9",
+    "JT65A": "JT65", "JT65B": "JT65", "JT65C": "JT65", "JT4A": "JT4", "JT4B": "JT4",
+}
+
+
 def _mode_for_adif(mode: str) -> tuple[str, str | None]:
     mode = (mode or "").upper()
     if mode in ("USB", "LSB"):
@@ -865,24 +880,50 @@ def _clean_adif_extra(extra: Any) -> dict[str, str]:
     return out
 
 
-def merge_qso_records(base: dict[str, Any] | None, overlay: dict[str, Any]) -> dict[str, Any]:
+# Values derived from the Wavelog *station profile* (not from the QSO): they
+# describe the profile as it is today and must never overwrite what a QSO
+# recorded (portable locator, POTA reference ...).
+STATION_DERIVED_KEYS = frozenset({
+    "my_gridsquare", "my_qth", "my_pota_ref", "my_sota_ref", "my_wwff_ref", "station_call",
+})
+
+
+def _is_empty(value: Any) -> bool:
+    return value is None or str(value).strip() == ""
+
+
+def merge_qso_records(base: dict[str, Any] | None, overlay: dict[str, Any], *,
+                      fill_only: bool = False,
+                      fill_only_keys: Iterable[str] = ()) -> dict[str, Any]:
     """Overlay ``overlay`` on ``base`` without dropping fields it does not carry.
 
-    Keys present in ``overlay`` win (an empty string clears the value).
-    ``adif_extra`` is merged per ADIF field: an overlay entry with an empty
-    value removes that field, missing entries keep the base value.  Used for
-    edits and for Wavelog data, which only ever carries a subset of fields.
+    Default: keys present in ``overlay`` win (an empty string clears the
+    value). ``adif_extra`` is merged per ADIF field: an overlay entry with an
+    empty value removes that field, missing entries keep the base value.
+
+    ``fill_only=True`` (or a key listed in ``fill_only_keys``) only fills
+    values that are empty in ``base`` and never clears anything.  Used when
+    an existing local QSO is linked to Wavelog and for station-profile data.
     """
     merged = {k: v for k, v in (base or {}).items() if k != "_file"}
     base_extra = _clean_adif_extra((base or {}).get("adif_extra"))
+    guarded = set(fill_only_keys)
     for key, value in overlay.items():
         if key in ("adif_extra", "_file"):
+            continue
+        if base is not None and (fill_only or key in guarded):
+            if _is_empty(merged.get(key)) and not _is_empty(value):
+                merged[key] = value
             continue
         merged[key] = value
     if "adif_extra" in overlay and isinstance(overlay.get("adif_extra"), dict):
         for name, value in overlay["adif_extra"].items():
             key = str(name or "").strip().upper()
             if not key:
+                continue
+            if base is not None and fill_only:
+                if not base_extra.get(key) and not _is_empty(value):
+                    base_extra[key] = str(value)
                 continue
             if value is None or str(value) == "":
                 base_extra.pop(key, None)
@@ -892,8 +933,27 @@ def merge_qso_records(base: dict[str, Any] | None, overlay: dict[str, Any]) -> d
     return merged
 
 
+def merge_remote_into_local(base: dict[str, Any] | None, remote_local: dict[str, Any], *,
+                            link: bool = False) -> dict[str, Any]:
+    """Apply a Wavelog QSO (already mapped by ``remote_to_local``) locally.
+
+    ``link=True`` (a local QSO is linked to Wavelog for the first time): the
+    local record wins and only empty fields are filled from Wavelog.
+    Otherwise Wavelog's QSO fields win, but station-profile values only fill.
+    """
+    if link:
+        return merge_qso_records(base, remote_local, fill_only=True)
+    return merge_qso_records(base, remote_local, fill_only_keys=STATION_DERIVED_KEYS)
+
+
 def qso_to_adif_fields(qso: dict[str, Any]) -> dict[str, Any]:
     mode, submode = _mode_for_adif(str(qso.get("mode") or ""))
+    original_main, _, original_sub = str(qso.get("adif_main_mode") or "").upper().partition("/")
+    if submode is None and original_main and original_sub == mode and original_main != mode:
+        # Original pair from the ADIF file, still valid for this mode.
+        mode, submode = original_main, original_sub
+    elif submode is None and mode in ADIF_SUBMODE_PARENTS:
+        mode, submode = ADIF_SUBMODE_PARENTS[mode], mode
     f: dict[str, Any] = {
         APP_ID_FIELD: qso.get("local_id"),
         "CALL": (qso.get("call") or "").upper(),
@@ -960,7 +1020,14 @@ def adif_fields_to_qso(f: dict[str, str]) -> dict[str, Any]:
     if len(time_off) == 4:
         time_off += "00"
     mode = f.get("SUBMODE") or f.get("MODE") or ""
+    # Remember the original MODE/SUBMODE pair (Q65, PSK63 ... cannot always be
+    # mapped back); it is only reused while the QSO keeps that submode.
+    main_mode = (
+        f"{(f.get('MODE') or '').strip().upper()}/{(f.get('SUBMODE') or '').strip().upper()}"
+        if f.get("SUBMODE") and f.get("MODE") else ""
+    )
     return {
+        "adif_main_mode": main_mode,
         "local_id": f.get(APP_ID_FIELD) or str(uuid.uuid4()),
         "call": f.get("CALL", "").upper(),
         "band": f.get("BAND", ""),
@@ -2054,7 +2121,7 @@ class MetadataDB:
                     )
                     rows[local_id] = [None, "local_only", None, 1, now]
                 elif row[1] == "synced" and row[2]:
-                    if hash_for(q) != row[2]:
+                    if hash_for(q) != row[2] and not qso_hash_matches(row[2], q):
                         version = int(row[3] or 0) + 1
                         self.conn.execute(
                             "UPDATE sync_meta SET status='modified',local_version=?,updated_at=? WHERE local_id=?",
@@ -2739,6 +2806,41 @@ def local_to_wavelog(q: dict[str, Any], station_profile_id: int, *, include_oper
     return {k: v for k, v in p.items() if v is not None}
 
 
+
+# Fields the logger lets the user edit and Wavelog's PATCH accepts.  When such
+# a field is empty locally it is sent as "" so a deletion reaches Wavelog.
+# Not included: tx_pwr (older versions could blank it locally) and the extra
+# ADIF fields (not editable in the logger UI).
+PATCH_CLEARABLE_FIELDS = (
+    "comment", "name", "qth", "notes", "gridsquare", "rst_sent", "rst_rcvd",
+    "pota_ref", "sota_ref", "wwff_ref", "srx_string", "stx_string",
+)
+
+
+def local_patch_payload(q: dict[str, Any], station_profile_id: int,
+                        remote: dict[str, Any] | None = None) -> dict[str, Any]:
+    """PATCH body: changed values plus explicit clears; keeps Wavelog's end time.
+
+    Wavelog resets COL_TIME_OFF to time_on when a PATCH carries qso_date and
+    time_on without time_off.  If the local end time is unknown and the start
+    is unchanged, the date/time pair is therefore left out.
+    """
+    payload = local_to_wavelog(q, station_profile_id)
+    for key in PATCH_CLEARABLE_FIELDS:
+        if key not in payload and key in q:
+            payload[key] = ""
+    if remote is not None and not str(q.get("time_off") or "").strip():
+        rq = remote_to_local(remote, {})
+        same_start = (
+            str(rq.get("qso_date") or "") == str(q.get("qso_date") or "")
+            and str(rq.get("time_on") or "")[:4] == str(q.get("time_on") or "")[:4]
+        )
+        if same_start:
+            payload.pop("qso_date", None)
+            payload.pop("time_on", None)
+            payload.pop("time_off", None)
+    return payload
+
 # (local key, Wavelog JSON key, upper-case).  A field is only mapped when the
 # JSON object contains its key: Wavelog's compact QSO object omits several
 # fields (tx_pwr, country, operator, ...).  Mapping an absent key to "" would
@@ -2783,6 +2885,10 @@ def remote_to_local(r: dict[str, Any], station: dict[str, Any] | None = None) ->
         if remote_key in r:
             value = str(r.get(remote_key) or "")
             out[local_key] = value.upper() if upper else value
+    for key in ("time_off", "qso_date_off"):
+        # Only filled from the ADIF export (see _enrich_remote_identity_from_adif).
+        if r.get(key):
+            out[key] = str(r.get(key))
     if "station_callsign" in r or st.get("callsign"):
         out["station_call"] = str(r.get("station_callsign") or st.get("callsign") or "").upper()
     if st:
@@ -3314,7 +3420,7 @@ class SyncEngine:
         existing = self.store.find(local_id)
         if existing:
             # Wavelog's JSON carries only a subset of fields; keep the rest.
-            return self.store.update(local_id, merge_qso_records(existing, rq))
+            return self.store.update(local_id, merge_remote_into_local(existing, rq))
         return self.store.add(merge_qso_records(None, rq))
 
     def _enrich_remote_identity_from_adif(self, remote_rows: list[dict[str, Any]],
@@ -3353,6 +3459,14 @@ class SyncEngine:
                 r["operator"] = op
             if stcall and not r.get("station_callsign"):
                 r["station_callsign"] = stcall
+            # Not part of Wavelog's JSON object; needed so a later PATCH does
+            # not reset Wavelog's end time and so the local copy keeps it.
+            time_off = str(f.get("TIME_OFF") or "").strip()
+            if time_off and not r.get("time_off"):
+                r["time_off"] = (time_off + "00")[:6] if len(time_off) == 4 else time_off[:6]
+                date_off = str(f.get("QSO_DATE_OFF") or "").strip()
+                if len(date_off) == 8:
+                    r["qso_date_off"] = f"{date_off[:4]}-{date_off[4:6]}-{date_off[6:8]}"
             # Contest exchange fields are standard ADIF but are not guaranteed
             # to be present in Wavelog's compact JSON list representation.
             for adif_name, json_name in (("CONTEST_ID","contest_id"),("STX","stx"),("SRX","srx"),
@@ -3477,7 +3591,8 @@ class SyncEngine:
         try:
             row = self.client.get_qso(int(wid))
         except WavelogError as exc:
-            if getattr(exc, "status", None) == 404:
+            # Only Wavelog's own JSON error counts, not a proxy/maintenance 404.
+            if getattr(exc, "status", None) == 404 and "not_found" in str(exc):
                 return "deleted", None
             if "abgebrochen" in str(exc):
                 raise
@@ -3595,7 +3710,9 @@ class SyncEngine:
 
         def club_invisible(q: dict[str, Any] | None) -> bool:
             q_operator = str((q or {}).get("operator_call") or "").upper()
-            return bool(club_mode and not club_full_visibility and q_operator and q_operator != current_operator)
+            # A member token only sees its own OPERATOR's QSOs; a QSO without
+            # a recorded operator cannot be proven to be one of them.
+            return bool(club_mode and not club_full_visibility and q_operator != current_operator)
 
         # Mass-deletion guard: count linked QSOs that look remotely deleted.
         linked_wids = [
@@ -3727,11 +3844,10 @@ class SyncEngine:
                 # delete it locally too. If the local copy changed meanwhile,
                 # preserve data and ask the user to resolve the conflict.
                 if remote is None:
-                    q_operator = str(q.get("operator_call") or "").upper()
                     # With a member-scoped club token, another member's QSO is
                     # invisible and looks exactly like a 404/deletion. Preserve
                     # those records until an officer token with club:read is used.
-                    if club_mode and not club_full_visibility and q_operator and q_operator != current_operator:
+                    if club_invisible(q):
                         continue
                     if local_changed:
                         self.db.set_status(lid, "conflict", wavelog_id=wid, error="remote_deleted")
@@ -3752,7 +3868,8 @@ class SyncEngine:
                     summary.conflicts += 1
                 elif local_changed:
                     target_station_id = self.db.xota_station_id_for_qso(lid) or station_profile_id
-                    patched = self.client.patch_qso(wid, local_to_wavelog(q, target_station_id))
+                    payload = local_patch_payload(q, target_station_id, remote)
+                    patched = self.client.patch_qso(wid, payload)
                     rh = remote_hash(patched) if patched else local_now_hash
                     self.db.set_status(lid, "synced", wavelog_id=wid,
                                        last_synced_hash=local_now_hash, remote_hash=rh)
@@ -3778,7 +3895,7 @@ class SyncEngine:
                     if healed is not None:
                         writes.upsert(
                             lid, healed, wavelog_id=wid, remote_hash=remote_now_hash, counter="fields_restored",
-                            snapshot=sync_snapshot.get(lid), check_snapshot=True,
+                            snapshot=sync_snapshot.get(lid), check_snapshot=True, merge="replace",
                         )
                     else:
                         # Establish/refresh the baseline for older metadata rows.
@@ -3815,6 +3932,7 @@ class SyncEngine:
                 return lambda: self.db.bind_xota_remote_qso(station_id, local_id)
             return None
 
+        linked_now: list[tuple[str, int, dict[str, Any], int | None]] = []
         self._report_progress(progress_callback, "Neue Wavelog-QSOs werden übernommen", 0, len(remote_items))
         for index, (wid, r) in enumerate(remote_items, 1):
             self._check_cancel(cancel_event)
@@ -3836,17 +3954,44 @@ class SyncEngine:
                 # rule get_meta() enforced before), even duplicated ids.
                 consumed_local_ids.add(match["local_id"])
                 # Wavelog becomes the synchronized representation of this QSO.
+                # The existing local QSO wins; Wavelog only fills empty fields.
+                # The baseline is Wavelog's version, so if the local record
+                # holds more/other data the next sync PATCHes it to Wavelog.
                 writes.upsert(
                     match["local_id"], q,
                     wavelog_id=wid, remote_hash=remote_hash(r), counter="linked",
                     after=bind_xota(actual_station_id, match["local_id"]),
+                    merge="link", baseline_hash=qso_hash(merge_qso_records(None, q)),
                 )
+                linked_now.append((match["local_id"], wid, r, actual_station_id))
             else:
                 writes.upsert(
                     q["local_id"], q, wavelog_id=wid, remote_hash=remote_hash(r), counter="pulled",
                     after=bind_xota(actual_station_id, q["local_id"]),
                 )
         writes.flush()
+
+        # 2b) A freshly linked local QSO that holds more or other data than
+        # Wavelog (it won the merge) is sent to Wavelog right away, so a later
+        # remote edit is not mistaken for a both-sides conflict.
+        for lid, wid, r, actual_station_id in linked_now:
+            self._check_cancel(cancel_event)
+            meta = self.db.get_meta(lid)
+            current = self.store.find(lid)
+            if not meta or not current or meta.get("wavelog_id") != wid:
+                continue
+            if qso_hash_matches(meta.get("last_synced_hash"), current):
+                continue
+            try:
+                target_station_id = actual_station_id or self.db.xota_station_id_for_qso(lid) or station_profile_id
+                patched = self.client.patch_qso(wid, local_patch_payload(current, target_station_id, r))
+                self.db.set_status(lid, "synced", wavelog_id=wid, last_synced_hash=qso_hash(current),
+                                   remote_hash=remote_hash(patched) if patched else remote_hash(r))
+                summary.patched += 1
+            except Exception as exc:
+                # Stays linked with Wavelog's baseline: the next sync retries.
+                self.db.set_status(lid, "modified", wavelog_id=wid, error=str(exc))
+                summary.errors += 1
 
         # 3) Upload everything that is still LOCAL ONLY (including a failed
         # first upload from an earlier run). This happens after linking remote

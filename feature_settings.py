@@ -747,6 +747,7 @@ class SettingsFeatureMixin:
             if self.call_var.get().strip():
                 self._schedule_callbook_lookup(self.call_var.get().strip().upper(), force=True)
             self._reset_wavelog_monitor(delay_ms=300)
+            self._restart_wavelog_gate_after_settings()
             self.status_var.set("Einstellungen gespeichert")
             message = "Einstellungen wurden gespeichert."
             if restart_required:

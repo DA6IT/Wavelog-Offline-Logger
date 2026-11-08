@@ -47,6 +47,12 @@ MAX_WS_PAYLOAD = 64 * 1024
 MAX_WS_CLIENTS = 16
 RADIO_PUSH_MIN_INTERVAL = 1.0
 RADIO_PUSH_HEARTBEAT = 300.0
+# A CAT reading older than this is stale: no heartbeat to Wavelog any more.
+RADIO_STALE_AFTER = 60.0
+# Re-broadcast radio_status with a fresh timestamp (Wavelog's cat.js treats
+# old timestamps as a CAT timeout).
+WS_REFRESH_INTERVAL = 30.0
+WS_SEND_QUEUE = 32
 
 # Modes Wavelog's cat.js sends for a QSY request (performRadioTuning()).
 WAVELOG_QSY_MODES = {
@@ -344,10 +350,17 @@ def read_ws_frame(sock: socket.socket) -> tuple[int, bool, bytes]:
 
 
 class _WsClient:
+    """One browser connection.  Sending never blocks the caller: frames go
+    through a bounded queue to a writer thread; a client that stops reading
+    is disconnected when the queue is full (same as WaveLogGate)."""
+
     def __init__(self, sock: socket.socket):
         self.sock = sock
         self.lock = threading.Lock()
         self.alive = True
+        self.queue: "queue.Queue[bytes | None]" = queue.Queue(maxsize=WS_SEND_QUEUE)
+        self.writer = threading.Thread(target=self._write_loop, name="gate-ws-writer", daemon=True)
+        self.writer.start()
 
     def send_text(self, text: str) -> bool:
         return self._send(encode_ws_frame(text.encode("utf-8"), 0x1))
@@ -356,15 +369,43 @@ class _WsClient:
         if not self.alive:
             return False
         try:
-            with self.lock:
-                self.sock.sendall(frame)
+            self.queue.put_nowait(frame)
             return True
-        except OSError:
-            self.alive = False
+        except queue.Full:
+            self.close()
             return False
 
+    def _write_loop(self) -> None:
+        while self.alive:
+            frame = self.queue.get()
+            if frame is None:
+                break
+            try:
+                # Blocking send in this thread only.  A client that stops
+                # reading fills the queue and is then closed by _send(), which
+                # also unblocks this sendall() via shutdown().
+                with self.lock:
+                    self.sock.sendall(frame)
+            except OSError:
+                self.alive = False
+                break
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
     def close(self) -> None:
+        if not self.alive:
+            return
         self.alive = False
+        try:
+            self.queue.put_nowait(None)
+        except queue.Full:
+            pass
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         try:
             self.sock.close()
         except OSError:
@@ -423,7 +464,7 @@ class _WsHandler(socketserver.BaseRequestHandler):
                 client.close()
                 return
             try:
-                self._read_loop(gate, client)
+                self._read_loop(gate, client, sock)
             finally:
                 gate._ws_remove(client)
                 client.close()
@@ -431,10 +472,10 @@ class _WsHandler(socketserver.BaseRequestHandler):
             return
 
     @staticmethod
-    def _read_loop(gate: "WavelogGate", client: _WsClient) -> None:
+    def _read_loop(gate: "WavelogGate", client: _WsClient, sock: socket.socket) -> None:
         fragments = bytearray()
         while client.alive:
-            opcode, fin, payload = read_ws_frame(client.sock)
+            opcode, fin, payload = read_ws_frame(sock)
             if opcode == 0x8:  # close
                 client._send(encode_ws_frame(payload[:2], 0x8))
                 return
@@ -486,6 +527,8 @@ class WavelogGate:
         self._threads: list[threading.Thread] = []
         self._ws_clients: set[_WsClient] = set()
         self._last_state: RadioState | None = None
+        self._last_state_at = 0.0
+        self._last_broadcast_at = 0.0
         self._last_ws_message: str | None = None
         self._push_queue: "queue.Queue[RadioState | None]" = queue.Queue()
         self._push_thread: threading.Thread | None = None
@@ -523,9 +566,13 @@ class WavelogGate:
                     errors.append(f"WebSocket-Port {config.ws_port} ist belegt ({exc.strerror or exc}). "
                                   "Läuft noch WaveLogGate? Bitte beenden.")
             if config.radio_push:
-                self._push_stop.clear()
-                self._push_queue = queue.Queue()
-                self._push_thread = self._spawn(self._push_loop, "gate-radio-push")
+                # Fresh stop event and queue per run: a previous push thread
+                # still waiting for an HTTP timeout can never read this run's queue.
+                stop_event = threading.Event()
+                push_queue: "queue.Queue[RadioState | None]" = queue.Queue()
+                self._push_stop = stop_event
+                self._push_queue = push_queue
+                self._push_thread = self._spawn(lambda: self._push_loop(stop_event, push_queue), "gate-radio-push")
                 self.status["radio_push"] = "wartet auf CAT-Daten"
                 self.status["push_error"] = ""
         self._emit_status()
@@ -552,7 +599,9 @@ class WavelogGate:
         for client in clients:
             client.close()
         if push_thread is not None and push_thread is not threading.current_thread():
-            push_thread.join(timeout=2)
+            # Short wait only: stop() runs in the Tk thread.  A thread stuck
+            # in an HTTP request ends on its own (its stop event is set).
+            push_thread.join(timeout=0.2)
         self._threads = [t for t in self._threads if t.is_alive()]
         self.status.update({"qsy": "aus", "websocket": "aus", "radio_push": "aus", "ws_clients": 0})
         self._last_state = None
@@ -606,10 +655,12 @@ class WavelogGate:
                 return False
             self._ws_clients.add(client)
             self.status["ws_clients"] = len(self._ws_clients)
-            last = self._last_ws_message
+            state = self._last_state if time.monotonic() - self._last_state_at < RADIO_STALE_AFTER else None
+            name = self.config.radio_name
         client.send_text(json.dumps({"type": "welcome", "message": "Connected to DA6IT.de Wavelog Offline Logger"}))
-        if last:
-            client.send_text(last)
+        if state is not None:
+            # Fresh timestamp: an old one makes cat.js report a CAT timeout.
+            client.send_text(json.dumps(state.ws_message(name), ensure_ascii=False, separators=(",", ":")))
         self._emit_status()
         return True
 
@@ -662,31 +713,52 @@ class WavelogGate:
         """Called after every CAT poll; cheap when nothing changed."""
         if state.frequency_hz <= 0:
             return
+        now = time.monotonic()
         with self._lock:
             changed = self._last_state is None or self._last_state.key() != state.key()
             self._last_state = state
+            self._last_state_at = now
+            refresh = now - self._last_broadcast_at >= WS_REFRESH_INTERVAL
+            if config_ws := self.config.websocket:
+                if changed or refresh:
+                    self._last_broadcast_at = now
             config = self.config
-        if config.websocket and changed:
+            push_queue = self._push_queue if self._push_thread is not None else None
+        if config_ws and (changed or refresh):
             self.broadcast(state.ws_message(config.radio_name))
-        if config.radio_push and self._push_thread is not None:
-            self._push_queue.put(state)
+        if config.radio_push and push_queue is not None:
+            push_queue.put(state)
 
-    def _push_loop(self) -> None:
+    def clear_radio(self) -> None:
+        """CAT stopped or failing: forget the state, no heartbeats any more."""
+        with self._lock:
+            self._last_state = None
+            self._last_state_at = 0.0
+            self._last_ws_message = None
+            push_queue = self._push_queue if self._push_thread is not None else None
+        if push_queue is not None:
+            while True:
+                try:
+                    push_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+    def _push_loop(self, stop_event: threading.Event, push_queue: "queue.Queue[RadioState | None]") -> None:
         last_sent_key: tuple[Any, ...] | None = None
         last_sent_at = 0.0
         pending: RadioState | None = None
         backoff_until = 0.0
-        while not self._push_stop.is_set():
+        while not stop_event.is_set():
             timeout = 1.0 if pending is not None else 5.0
             try:
-                item = self._push_queue.get(timeout=timeout)
+                item = push_queue.get(timeout=timeout)
                 if item is None:
                     break
                 pending = item
                 # Coalesce bursts: only the newest state matters.
                 while True:
                     try:
-                        newer = self._push_queue.get_nowait()
+                        newer = push_queue.get_nowait()
                     except queue.Empty:
                         break
                     if newer is None:
@@ -694,8 +766,16 @@ class WavelogGate:
                     pending = newer
             except queue.Empty:
                 pass
+            if stop_event.is_set():
+                break
             now = time.monotonic()
             if pending is None:
+                continue
+            with self._lock:
+                fresh = self._last_state is not None and now - self._last_state_at < RADIO_STALE_AFTER
+            if not fresh:
+                # CAT stopped/failing: never keep a stale radio "alive" in Wavelog.
+                pending = None
                 continue
             due_change = pending.key() != last_sent_key
             due_heartbeat = now - last_sent_at >= RADIO_PUSH_HEARTBEAT
@@ -711,6 +791,8 @@ class WavelogGate:
                 continue
             try:
                 client.post_radio(pending.api_payload(self.config.radio_name))
+                if stop_event.is_set():
+                    break
             except Exception as exc:  # network errors, 401/403 ...
                 message = str(exc)
                 status = getattr(exc, "status", None)
