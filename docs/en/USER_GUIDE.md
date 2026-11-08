@@ -86,7 +86,7 @@ Profile changes, Hamlib replacement and application shutdown stop the app-manage
 Under **CAT → Wavelog radio connection** the Logger takes over WaveLogGate's tasks. **Close WaveLogGate first**, because both use the same ports.
 
 - **Send frequency and mode to Wavelog:** after every change the Logger reports frequency, mode and – if entered in the QSO form – TX power to Wavelog. The radio appears in Wavelog's radio selection under the configured name (default “Offline Logger”). The API v2 token needs the **radio:write** permission (for example create it with Wavelog's “WaveLogGate” preset).
-- **Accept QSY from Wavelog:** a click on a DX spot or the bandmap in Wavelog tunes the radio via CAT (port 54321). Optionally the mode is set as well; SSB picks the usual sideband (LSB on 160/80/40 m).
+- **Accept QSY from Wavelog:** a click on a DX spot or the bandmap in Wavelog tunes the radio via CAT (port 54321). Optionally the mode reported by Wavelog is set as well (e.g. LSB/USB, CW, RTTY, data).
 - **Live connection (WebSocket):** select **“Live - WebSocket”** as radio in Wavelog to see frequency and mode without delay (port 54322).
 - **Rotor follows Wavelog's bearing:** a callsign lookup or satellite tracking in Wavelog turns the rotor to the reported direction. Requires a connected rotor and the live connection.
 

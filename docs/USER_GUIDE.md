@@ -323,7 +323,7 @@ Beim Profilwechsel, Hamlib-Wechsel und Programmende wird die von der App gestart
 Unter **CAT → Wavelog-Verbindung für Funkgerät** übernimmt der Logger die Aufgaben von WaveLogGate. **WaveLogGate vorher beenden**, weil beide dieselben Ports verwenden.
 
 - **Frequenz und Modus an Wavelog senden:** Der Logger meldet nach jeder Änderung Frequenz, Modus und – falls im QSO-Formular eingetragen – die Sendeleistung an Wavelog. In Wavelog erscheint das Funkgerät unter dem eingetragenen Namen (Standard: „Offline Logger“) in der Funkgeräteauswahl. Das API-v2-Token braucht dafür die Berechtigung **radio:write** (in Wavelog z. B. über die Vorlage „WaveLogGate“ erzeugen).
-- **QSY aus Wavelog annehmen:** Ein Klick auf einen DX-Spot oder in die Bandmap von Wavelog stellt das Funkgerät über CAT ein (Port 54321). Optional wird auch der Modus gesetzt; SSB wählt das übliche Seitenband (LSB auf 160/80/40 m).
+- **QSY aus Wavelog annehmen:** Ein Klick auf einen DX-Spot oder in die Bandmap von Wavelog stellt das Funkgerät über CAT ein (Port 54321). Optional wird auch der von Wavelog gemeldete Modus gesetzt (z. B. LSB/USB, CW, RTTY, Daten).
 - **Live-Verbindung (WebSocket):** In Wavelog als Funkgerät **„Live - WebSocket“** wählen. Frequenz und Modus erscheinen dann ohne Verzögerung (Port 54322).
 - **Rotor folgt der Peilung aus Wavelog:** Bei einer Rufzeichensuche bzw. Satellitenverfolgung in Wavelog dreht der Rotor auf die gemeldete Richtung. Voraussetzung: Rotor ist verbunden und die Live-Verbindung ist eingeschaltet.
 

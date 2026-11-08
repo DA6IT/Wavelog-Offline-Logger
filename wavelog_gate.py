@@ -87,22 +87,14 @@ def parse_origins(values: Iterable[str] | str) -> tuple[str, ...]:
     return tuple(out)
 
 
-def ssb_sideband(frequency_hz: int) -> str:
-    """Conventional sideband: LSB on 160/80/40 m, otherwise USB (incl. 60 m)."""
-    mhz = frequency_hz / 1_000_000
-    return "LSB" if (1.8 <= mhz <= 2.0 or 3.5 <= mhz <= 4.0 or 7.0 <= mhz <= 7.3) else "USB"
-
-
-def wavelog_qsy_mode(mode: str, frequency_hz: int) -> str:
+def wavelog_qsy_mode(mode: str, frequency_hz: int = 0) -> str:
     """Map a Wavelog QSY mode to a Hamlib mode ("" = leave the mode alone).
 
-    Wavelog falls back to ``usb`` for every spot mode it does not know (for
-    example SSB), so USB/LSB are re-derived from the frequency.
+    Wavelog already picks the sideband for phone spots (determineRadioMode()
+    in radiohelpers.js) and maps data modes to RTTY/PKTUSB, so the mode is
+    passed through exactly like WaveLogGate does.
     """
-    raw = WAVELOG_QSY_MODES.get(str(mode or "").strip().lower(), "")
-    if raw in {"USB", "LSB"}:
-        return ssb_sideband(frequency_hz)
-    return raw
+    return WAVELOG_QSY_MODES.get(str(mode or "").strip().lower(), "")
 
 
 @dataclass(frozen=True)

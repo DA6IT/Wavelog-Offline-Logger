@@ -95,8 +95,8 @@ class HelperTests(TestCase):
         self.assertEqual(parse_origins("https://a.de, http://b.de:81/x ; junk"), ("https://a.de", "http://b.de:81"))
 
     def test_qsy_modes(self):
-        self.assertEqual(wavelog_qsy_mode("usb", 7_074_000), "LSB")  # Wavelog falls back to usb
-        self.assertEqual(wavelog_qsy_mode("lsb", 14_200_000), "USB")
+        self.assertEqual(wavelog_qsy_mode("usb", 7_074_000), "USB")  # Wavelog decides the sideband
+        self.assertEqual(wavelog_qsy_mode("LSB", 7_150_000), "LSB")
         self.assertEqual(wavelog_qsy_mode("cw", 7_010_000), "CW")
         self.assertEqual(wavelog_qsy_mode("pkt", 14_074_000), "PKTUSB")
         self.assertEqual(wavelog_qsy_mode("pktfm", 145_500_000), "PKTFM")
@@ -257,6 +257,55 @@ class GateServerTests(TestCase):
         self.gate.stop()
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", self.ws_port))  # released again
+
+
+class QsyToRigctldTests(TestCase):
+    """End to end: Wavelog QSY request -> gate -> HamlibManager -> rigctld."""
+
+    def test_qsy_reaches_rigctld(self):
+        from cat_control import CatConfig, CatError, HamlibManager
+
+        received = []
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(8)
+        self.addCleanup(server.close)
+        rig_port = server.getsockname()[1]
+
+        def fake_rigctld():
+            while True:
+                try:
+                    conn, _ = server.accept()
+                except OSError:
+                    return
+                with conn:
+                    line = conn.makefile("rb").readline().decode().strip()
+                    received.append(line)
+                    conn.sendall(b"RPRT 0\n")
+
+        threading.Thread(target=fake_rigctld, daemon=True).start()
+
+        class Running:
+            def poll(self):
+                return None
+
+        manager = HamlibManager.__new__(HamlibManager)
+        manager._lock = threading.RLock()
+        manager._io_lock = threading.RLock()
+        manager._process = Running()
+        manager._config = CatConfig(port=rig_port)
+        with self.assertRaises(CatError):
+            manager.set_frequency_and_raw_mode(7_010_000, "XYZ")
+
+        gate = WavelogGate(on_qsy=manager.set_frequency_and_raw_mode)
+        self.addCleanup(gate.stop)
+        port = free_port()
+        gate.start(GateConfig(qsy=True, qsy_port=port, allowed_origins=(ORIGIN,)))
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/7074000/usb", headers={"Origin": ORIGIN})
+        with urllib.request.urlopen(req, timeout=3) as resp:  # nosec B310 - loopback test server
+            self.assertEqual(resp.status, 200)
+        self.assertTrue(wait_for(lambda: len(received) == 2))
+        self.assertEqual(received, ["F 7074000", "M USB 0"])
 
 
 if __name__ == "__main__":
