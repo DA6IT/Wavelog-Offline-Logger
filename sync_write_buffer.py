@@ -81,7 +81,14 @@ class SyncWriteBuffer:
     def upsert(self, local_id: str, record: dict[str, Any], *, wavelog_id: int, remote_hash: str,
                counter: str, snapshot: int | None = None, check_snapshot: bool = False,
                after: Callable[[], None] | None = None) -> None:
-        row = dict(record)
+        # Wavelog delivers only a subset of the ADIF fields.  Merge it into the
+        # current local record so fields Wavelog does not carry (TX power,
+        # QSO end, MY_* references, preserved ADIF extras ...) survive.
+        from logger_core import merge_qso_records  # local import: avoids a cycle
+
+        finder = getattr(self.store, "find", None)
+        existing = finder(local_id) if callable(finder) else None
+        row = merge_qso_records(existing, record)
         row["local_id"] = local_id
         self.upserts.append(_PendingUpsert(
             local_id, row, int(wavelog_id), remote_hash, counter, snapshot, check_snapshot, after,

@@ -20,7 +20,7 @@ import zipfile
 from contextlib import contextmanager
 from ctypes import wintypes
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -28,8 +28,8 @@ from qso_duplicates import QsoMatcher
 from sync_write_buffer import SyncWriteBuffer
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.22.0"
-ADIF_VERSION = "3.1.7"
+VERSION = "0.23.0"
+ADIF_VERSION = "3.1.8"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
 
@@ -136,12 +136,24 @@ BAND_RANGES = [
 BANDS = [x[2] for x in BAND_RANGES] + ["SAT"]
 MODES = ["SSB", "USB", "LSB", "CW", "FT8", "FT4", "FM", "AM", "RTTY", "PSK31", "JS8", "MFSK", "DIGITALVOICE"]
 
-# Hash schema v2 (v0.11+): contest exchange fields are part of the synchronized QSO.
-SYNC_FIELDS = [
+# Hash schema v2 (v0.11 - v0.22): contest exchange fields are part of the synchronized QSO.
+SYNC_FIELDS_V2 = [
     "call", "band", "mode", "freq", "qso_date", "time_on", "rst_sent", "rst_rcvd",
     "gridsquare", "name", "qth", "comment", "notes", "pota_ref", "sota_ref", "wwff_ref", "tx_pwr",
     "operator_call", "contest_id", "stx", "srx", "stx_string", "srx_string",
 ]
+
+# Additional ADIF fields that Wavelog API v2 returns in its JSON QSO object
+# and accepts via PATCH.  Locally they live in ``adif_extra`` (ADIF name ->
+# value); Wavelog uses the lower-case ADIF name as JSON key.
+WAVELOG_EXTRA_FIELDS = (
+    "SAT_NAME", "SAT_MODE", "IOTA", "SIG", "SIG_INFO", "DARC_DOK", "STATE", "CNTY", "QSL_VIA",
+)
+
+# Hash schema v3 (v0.23+): propagation mode and the extra Wavelog fields are
+# synchronized as well.  Stored v2 baselines are recognised by
+# ``qso_hash_matches`` so an upgrade never looks like a local/remote edit.
+SYNC_FIELDS = SYNC_FIELDS_V2 + ["prop_mode"] + [f"x:{name}" for name in WAVELOG_EXTRA_FIELDS]
 
 # v0.10 and earlier did not include the contest fields in the sync hash.  Keep
 # that exact schema so old metadata can be upgraded without being mistaken for
@@ -640,10 +652,19 @@ class CountryDB:
 
 def _qso_hash_with_fields(qso: dict[str, Any], fields: list[str]) -> str:
     obj = {}
+    extra = qso.get("adif_extra") or {}
     for k in fields:
+        if k.startswith("x:"):
+            v = extra.get(k[2:]) if isinstance(extra, dict) else None
+            if isinstance(v, str):
+                v = v.strip().upper() or None
+            obj[k] = v
+            continue
         v = qso.get(k)
         if v == "":
             v = None
+        if k == "prop_mode" and isinstance(v, str):
+            v = v.strip().upper() or None
         if k == "freq" and v not in (None, ""):
             try:
                 v = round(float(v), 6)
@@ -664,6 +685,27 @@ def qso_hash(qso: dict[str, Any]) -> str:
 
 def legacy_qso_hash_v010(qso: dict[str, Any]) -> str:
     return _qso_hash_with_fields(qso, LEGACY_SYNC_FIELDS_V010)
+
+
+def legacy_qso_hash_v2(qso: dict[str, Any]) -> str:
+    return _qso_hash_with_fields(qso, SYNC_FIELDS_V2)
+
+
+def qso_hash_matches(stored: str | None, qso: dict[str, Any]) -> bool:
+    """True when ``stored`` is the current OR a legacy hash of ``qso``.
+
+    v0.23 extended the hash schema.  A baseline written by an older version
+    must still count as "unchanged" when the synchronized fields of that
+    older schema are unchanged, otherwise every linked QSO would look edited
+    after the upgrade (mass PATCH/overwrite or conflicts).
+    """
+    if not stored:
+        return False
+    return stored in (qso_hash(qso), legacy_qso_hash_v2(qso), legacy_qso_hash_v010(qso))
+
+
+def qso_hash_is_current(stored: str | None, qso: dict[str, Any]) -> bool:
+    return bool(stored) and stored == qso_hash(qso)
 
 
 # ---------- DPAPI token protection ----------
@@ -734,6 +776,9 @@ FIELD_RE = re.compile(r"<([^:>]+):(\d+)(?::[^>]*)?>", re.IGNORECASE)
 EOH_RE = re.compile(r"<EOH\s*>", re.IGNORECASE)
 EOR_RE = re.compile(r"<EOR\s*>", re.IGNORECASE)
 EOR_MARKER_RE = re.compile(r"<EOR", re.IGNORECASE)
+ADIF_FIELD_NAME_RE = re.compile(r"[A-Z0-9_]{1,64}")
+# Populated after qso_to_adif_fields() is defined (see below LogStore marker).
+KNOWN_ADIF_FIELDS: frozenset[str] = frozenset()
 
 
 def adif_field(name: str, value: Any) -> str:
@@ -802,6 +847,51 @@ def _mode_for_adif(mode: str) -> tuple[str, str | None]:
     return mode, None
 
 
+def _clean_adif_extra(extra: Any) -> dict[str, str]:
+    """Return a safe copy of preserved ADIF fields (name -> non-empty value)."""
+    if not isinstance(extra, dict):
+        return {}
+    out: dict[str, str] = {}
+    for name, value in extra.items():
+        key = str(name or "").strip().upper()
+        if not key or not ADIF_FIELD_NAME_RE.fullmatch(key) or key in KNOWN_ADIF_FIELDS:
+            continue
+        if value is None:
+            continue
+        text = str(value)
+        if text == "":
+            continue
+        out[key] = text
+    return out
+
+
+def merge_qso_records(base: dict[str, Any] | None, overlay: dict[str, Any]) -> dict[str, Any]:
+    """Overlay ``overlay`` on ``base`` without dropping fields it does not carry.
+
+    Keys present in ``overlay`` win (an empty string clears the value).
+    ``adif_extra`` is merged per ADIF field: an overlay entry with an empty
+    value removes that field, missing entries keep the base value.  Used for
+    edits and for Wavelog data, which only ever carries a subset of fields.
+    """
+    merged = {k: v for k, v in (base or {}).items() if k != "_file"}
+    base_extra = _clean_adif_extra((base or {}).get("adif_extra"))
+    for key, value in overlay.items():
+        if key in ("adif_extra", "_file"):
+            continue
+        merged[key] = value
+    if "adif_extra" in overlay and isinstance(overlay.get("adif_extra"), dict):
+        for name, value in overlay["adif_extra"].items():
+            key = str(name or "").strip().upper()
+            if not key:
+                continue
+            if value is None or str(value) == "":
+                base_extra.pop(key, None)
+            else:
+                base_extra[key] = str(value)
+    merged["adif_extra"] = _clean_adif_extra(base_extra)
+    return merged
+
+
 def qso_to_adif_fields(qso: dict[str, Any]) -> dict[str, Any]:
     mode, submode = _mode_for_adif(str(qso.get("mode") or ""))
     f: dict[str, Any] = {
@@ -851,6 +941,8 @@ def qso_to_adif_fields(qso: dict[str, Any]) -> dict[str, Any]:
         "MY_SIG": qso.get("my_sig"),
         "MY_SIG_INFO": qso.get("my_sig_info"),
     }
+    for name, value in _clean_adif_extra(qso.get("adif_extra")).items():
+        f.setdefault(name, value)
     return f
 
 
@@ -913,6 +1005,10 @@ def adif_fields_to_qso(f: dict[str, str]) -> dict[str, Any]:
         "my_iota": f.get("MY_IOTA", ""),
         "my_sig": f.get("MY_SIG", ""),
         "my_sig_info": f.get("MY_SIG_INFO", ""),
+        # Every other ADIF field is kept verbatim, so rewriting the logbook
+        # (edit, delete, import, migration, sync) never drops data such as
+        # DARC_DOK, IOTA, SAT_NAME or QSL information.
+        "adif_extra": _clean_adif_extra(f),
     }
 
 
@@ -925,7 +1021,14 @@ def qso_to_adif_record(qso: dict[str, Any]) -> str:
         "MY_STATE", "MY_DXCC", "MY_CQ_ZONE", "MY_ITU_ZONE",
         "MY_POTA_REF", "MY_SOTA_REF", "MY_WWFF_REF", "MY_IOTA", "MY_SIG", "MY_SIG_INFO",
     ]
-    return "".join(adif_field(k, fields.get(k)) for k in order) + "<EOR>\n"
+    known = "".join(adif_field(k, fields.get(k)) for k in order)
+    extra = "".join(adif_field(k, v) for k, v in sorted(_clean_adif_extra(qso.get("adif_extra")).items()))
+    return known + extra + "<EOR>\n"
+
+
+# ADIF field names that have a first-class local key (see
+# ``adif_fields_to_qso``).  Everything else is preserved in ``adif_extra``.
+KNOWN_ADIF_FIELDS = frozenset(qso_to_adif_fields({}).keys())
 
 
 class LogStore:
@@ -2119,7 +2222,9 @@ class MetadataDB:
 
 # ---------- Wavelog API ----------
 class WavelogError(RuntimeError):
-    pass
+    def __init__(self, message: str = "", *, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -2254,7 +2359,15 @@ class WavelogClient:
         if not self.token:
             raise WavelogError("Kein Wavelog API-v2-Token eingetragen")
         data = None
-        headers = {"Authorization": f"Bearer {self.token}", "User-Agent": USER_AGENT, "Accept": "application/json"}
+        # Wavelog reads ``Authorization: Bearer`` and falls back to ``X-API-Key``.
+        # Apache with PHP-FPM/CGI drops the Authorization header unless the
+        # server sets ``CGIPassAuth On``; X-API-Key reaches PHP in that case.
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "X-API-Key": self.token,
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+        }
         if payload is not None:
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -2305,7 +2418,10 @@ class WavelogClient:
                         msg = raw
                 except Exception:
                     msg = raw or str(e)
-                raise WavelogError(f"HTTP {e.code}: {msg}") from e
+                if e.code == 401 and "missing api token" in msg.lower():
+                    msg += (" · Der Webserver hat das API-Token nicht an Wavelog weitergereicht. "
+                            "Bei Apache mit PHP-FPM hilft in der Wavelog-.htaccess: CGIPassAuth On")
+                raise WavelogError(f"HTTP {e.code}: {msg}", status=e.code) from e
             except urllib.error.URLError as e:
                 if attempt < self.MAX_RETRIES:
                     self._wait_for_retry(min(8.0, float(2 ** attempt)), cancel_event, deadline)
@@ -2331,7 +2447,8 @@ class WavelogClient:
         r = self._request("POST", "station", payload=payload) or {}
         return r.get("data") or {}
 
-    def lookup_callsign(self, callsign: str, *, band: str = "", mode: str = "", include_callbook: bool = True) -> dict[str, Any]:
+    def lookup_callsign(self, callsign: str, *, band: str = "", mode: str = "", include_callbook: bool = True,
+                        date: str = "") -> dict[str, Any]:
         params = {
             "callsign": (callsign or "").strip().upper(),
             "detail": "full",
@@ -2339,6 +2456,9 @@ class WavelogClient:
             "band": band,
             "mode": mode,
         }
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(date or "")):
+            # Older Wavelog versions ignore unknown query parameters.
+            params["date"] = date
         return self._request("GET", "lookup", params=params) or {}
 
     def iter_qso_pages(self, *, since_id: int = 0, qso_since: str | None = None, qso_until: str | None = None,
@@ -2398,23 +2518,52 @@ class WavelogClient:
             out.extend(rows)
         return out
 
+    def _guard_page(self, page: int, meta: dict[str, Any], signature: str, seen: set[str],
+                    cancel_event: threading.Event | None, deadline: float | None) -> None:
+        """Shared safety checks for paged downloads with an untrusted ``has_more``."""
+        if cancel_event is not None and cancel_event.is_set():
+            raise WavelogError("Synchronisierung wurde abgebrochen")
+        if deadline is not None and time.monotonic() >= deadline:
+            raise WavelogError("Synchronisierungs-Deadline überschritten")
+        if page > self.MAX_QSO_PAGES:
+            raise WavelogError("Wavelog-Paginierung überschreitet das Seitenlimit")
+        if meta.get("has_more") and signature in seen:
+            raise WavelogError("Wavelog-Paginierung liefert eine leere oder wiederholte Seite")
+        seen.add(signature)
+
     def export_qsos_adif(self, *, qso_since: str | None = None, qso_until: str | None = None,
-                         station_ids: Iterable[int] | None = None) -> list[dict[str, str]]:
-        page = 1
+                         station_ids: Iterable[int] | None = None, since_id: int = 0,
+                         cancel_event: threading.Event | None = None,
+                         deadline: float | None = None) -> list[dict[str, str]]:
+        """Download the ADIF view (all fields), keyset-paged by Wavelog id.
+
+        Wavelog orders the ADIF export by primary key and reports
+        ``lastfetchedid``.  Continuing with ``since_id`` instead of page numbers
+        cannot skip or repeat records while the remote log changes.
+        """
         out: list[dict[str, str]] = []
-        while True:
-            station_filter = ",".join(str(int(value)) for value in (station_ids or []))
-            params = {"format":"adif", "qso_since":qso_since, "qso_until":qso_until,
-                      "station_id": station_filter, "page":page, "per_page":5000}
-            r = self._request("GET", "qso", params=params) or {}
+        seen: set[str] = set()
+        cursor = max(0, int(since_id or 0))
+        station_filter = ",".join(str(int(value)) for value in (station_ids or []))
+        for page in range(1, self.MAX_QSO_PAGES + 2):
+            params = {"format": "adif", "qso_since": qso_since, "qso_until": qso_until,
+                      "station_id": station_filter, "since_id": cursor or None, "page": 1, "per_page": 5000}
+            r = self._request("GET", "qso", params=params, cancel_event=cancel_event, deadline=deadline) or {}
             data = r.get("data") or {}
             adif = data.get("adif") if isinstance(data, dict) else None
+            meta = r.get("meta") or {}
+            try:
+                last = int((data or {}).get("lastfetchedid") or 0) if isinstance(data, dict) else 0
+            except (TypeError, ValueError):
+                last = 0
+            self._guard_page(page, meta, f"{cursor}:{last}:{len(adif or '')}", seen, cancel_event, deadline)
             if adif:
                 out.extend(parse_adif(adif))
-            meta = r.get("meta") or {}
             if not meta.get("has_more"):
                 break
-            page += 1
+            if last <= cursor:
+                raise WavelogError("Wavelog-ADIF-Export kommt nicht voran (lastfetchedid unverändert)")
+            cursor = last
         return out
 
     def list_confirmations(
@@ -2424,8 +2573,9 @@ class WavelogClient:
     ) -> list[dict[str, Any]]:
         page = 1
         out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        station_filter = ",".join(str(int(value)) for value in (station_ids or []))
         while True:
-            station_filter = ",".join(str(int(value)) for value in (station_ids or []))
             params = {
                 "type": types, "station_id": station_filter,
                 "qso_since": qso_since, "qso_until": qso_until,
@@ -2433,10 +2583,12 @@ class WavelogClient:
             }
             r = self._request("GET", "confirmation", params=params) or {}
             data = r.get("data") or []
+            meta = r.get("meta") or {}
+            signature = hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+            self._guard_page(page, meta, signature, seen, None, None)
             if isinstance(data, list):
                 out.extend(data)
-            meta = r.get("meta") or {}
-            if not meta.get("has_more"):
+            if not meta.get("has_more") or not data:
                 break
             page += 1
         return out
@@ -2559,7 +2711,15 @@ def local_to_wavelog(q: dict[str, Any], station_profile_id: int, *, include_oper
         "stx": int(q["stx"]) if str(q.get("stx") or "").strip().isdigit() else None,
         "srx_string": q.get("srx_string") or None,
         "stx_string": q.get("stx_string") or None,
+        "prop_mode": str(q.get("prop_mode") or "").strip().upper() or None,
+        # Wavelog derives the end date itself (next day when time_off < time_on).
+        "time_off": str(q.get("time_off") or "").replace(":", "")[:6] or None,
     }
+    extra = _clean_adif_extra(q.get("adif_extra"))
+    for name in WAVELOG_EXTRA_FIELDS:
+        value = str(extra.get(name) or "").strip()
+        if value:
+            p[name.lower()] = value
     # OPERATOR is especially important for club/special callsigns. Wavelog
     # accepts it when creating a QSO; for member-scoped club tokens Wavelog
     # intentionally overwrites it with the acting member. PATCH does not
@@ -2572,6 +2732,22 @@ def local_to_wavelog(q: dict[str, Any], station_profile_id: int, *, include_oper
     if include_operator and q.get("contest_id"):
         p["contest_id"] = str(q.get("contest_id") or "").upper()
     return {k: v for k, v in p.items() if v is not None}
+
+
+# (local key, Wavelog JSON key, upper-case).  A field is only mapped when the
+# JSON object contains its key: Wavelog's compact QSO object omits several
+# fields (tx_pwr, country, operator, ...).  Mapping an absent key to "" would
+# blank the local value when the remote record is merged into the local one.
+_REMOTE_TEXT_FIELDS: tuple[tuple[str, str, bool], ...] = (
+    ("rst_sent", "rst_sent", False), ("rst_rcvd", "rst_rcvd", False),
+    ("gridsquare", "gridsquare", True), ("country", "country", False), ("cont", "cont", True),
+    ("cqz", "cqz", False), ("ituz", "ituz", False), ("name", "name", False), ("qth", "qth", False),
+    ("comment", "comment", False), ("notes", "notes", False), ("tx_pwr", "tx_pwr", False),
+    ("pota_ref", "pota_ref", False), ("sota_ref", "sota_ref", False), ("wwff_ref", "wwff_ref", False),
+    ("operator_call", "operator", True), ("contest_id", "contest_id", True),
+    ("stx", "stx", False), ("srx", "srx", False), ("stx_string", "stx_string", False),
+    ("srx_string", "srx_string", False), ("prop_mode", "prop_mode", True),
+)
 
 
 def remote_to_local(r: dict[str, Any], station: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2589,7 +2765,7 @@ def remote_to_local(r: dict[str, Any], station: dict[str, Any] | None = None) ->
         except Exception:
             pass
     st = station or {}
-    return {
+    out: dict[str, Any] = {
         "local_id": str(uuid.uuid4()),
         "call": str(r.get("call") or "").upper(),
         "band": str(r.get("band") or ""),
@@ -2597,34 +2773,32 @@ def remote_to_local(r: dict[str, Any], station: dict[str, Any] | None = None) ->
         "freq": freq_mhz,
         "qso_date": date,
         "time_on": time_on,
-        "rst_sent": r.get("rst_sent") or "",
-        "rst_rcvd": r.get("rst_rcvd") or "",
-        "gridsquare": str(r.get("gridsquare") or "").upper(),
-        "country": r.get("country") or "",
-        "cont": str(r.get("cont") or "").upper(),
-        "cqz": str(r.get("cqz") or ""),
-        "ituz": str(r.get("ituz") or ""),
-        "name": r.get("name") or "",
-        "qth": r.get("qth") or "",
-        "comment": r.get("comment") or "",
-        "notes": r.get("notes") or "",
-        "tx_pwr": r.get("tx_pwr") or "",
-        "pota_ref": r.get("pota_ref") or "",
-        "sota_ref": r.get("sota_ref") or "",
-        "wwff_ref": r.get("wwff_ref") or "",
-        "operator_call": str(r.get("operator") or "").upper(),
-        "station_call": str(r.get("station_callsign") or st.get("callsign") or "").upper(),
-        "contest_id": str(r.get("contest_id") or "").upper(),
-        "stx": str(r.get("stx") or ""),
-        "srx": str(r.get("srx") or ""),
-        "stx_string": str(r.get("stx_string") or ""),
-        "srx_string": str(r.get("srx_string") or ""),
-        "my_gridsquare": str(st.get("gridsquare") or "").upper(),
-        "my_qth": st.get("city") or "",
-        "my_pota_ref": st.get("pota") or "",
-        "my_sota_ref": st.get("sota") or "",
-        "my_wwff_ref": st.get("wwff") or "",
     }
+    for local_key, remote_key, upper in _REMOTE_TEXT_FIELDS:
+        if remote_key in r:
+            value = str(r.get(remote_key) or "")
+            out[local_key] = value.upper() if upper else value
+    if "station_callsign" in r or st.get("callsign"):
+        out["station_call"] = str(r.get("station_callsign") or st.get("callsign") or "").upper()
+    if st:
+        out.update({
+            "my_gridsquare": str(st.get("gridsquare") or "").upper(),
+            "my_qth": st.get("city") or "",
+            "my_pota_ref": st.get("pota") or "",
+            "my_sota_ref": st.get("sota") or "",
+            "my_wwff_ref": st.get("wwff") or "",
+        })
+    extra: dict[str, str] = {}
+    for name in WAVELOG_EXTRA_FIELDS:
+        key = name.lower()
+        if key in r:
+            value = r.get(key)
+            extra[name] = "" if value is None else str(value)
+    if extra:
+        # Empty values are kept here on purpose: merge_qso_records() treats
+        # them as "cleared in Wavelog"; writing drops empty ADIF fields.
+        out["adif_extra"] = extra
+    return out
 
 
 def remote_hash(r: dict[str, Any]) -> str:
@@ -2633,6 +2807,11 @@ def remote_hash(r: dict[str, Any]) -> str:
 
 def legacy_remote_hash_v010(r: dict[str, Any]) -> str:
     return legacy_qso_hash_v010(remote_to_local(r, {}))
+
+
+def remote_hash_matches(stored: str | None, r: dict[str, Any]) -> bool:
+    """Schema-tolerant comparison, see ``qso_hash_matches``."""
+    return qso_hash_matches(stored, remote_to_local(r, {}))
 
 
 def remote_station_profile_id(remote: dict[str, Any]) -> int | None:
@@ -2686,6 +2865,13 @@ class SyncSummary:
     qsl_updated: int = 0
     qsl_errors: int = 0
     scope_skipped: int = 0
+    # Remote deletions that were NOT applied locally because unusually many
+    # linked QSOs were missing at once (see SyncEngine.MASS_DELETE_*).
+    deletions_withheld: int = 0
+    # Linked QSOs absent from the list but still present when fetched by id.
+    deletion_false_alarms: int = 0
+    # Local QSOs whose lost ADIF fields were restored from Wavelog (v0.23 upgrade).
+    fields_restored: int = 0
 
 
 @dataclass
@@ -3074,22 +3260,40 @@ class SyncEngine:
         return {q["local_id"]: q for q in qsos}
 
     @staticmethod
+    def _qso_epoch(date: Any, time_on: Any) -> float | None:
+        try:
+            d = str(date or "").replace("-", "")[:8]
+            t = (str(time_on or "").replace(":", "") + "000000")[:6]
+            return datetime.strptime(d + t, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).timestamp()
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _neighbour_dates(date: Any) -> list[str]:
+        """The QSO date plus the adjacent days (a 90 s window can cross midnight)."""
+        try:
+            day = datetime.strptime(str(date or "")[:10], "%Y-%m-%d")
+        except ValueError:
+            return [str(date or "")]
+        return [(day + timedelta(days=offset)).strftime("%Y-%m-%d") for offset in (0, -1, 1)]
+
+    @staticmethod
     def _match_local(remote: dict[str, Any], locals_: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
         rq = remote_to_local(remote, {})
+        remote_epoch = SyncEngine._qso_epoch(rq.get("qso_date"), rq.get("time_on"))
         for q in locals_:
             if (q.get("call") or "").upper() != rq["call"]:
                 continue
-            if q.get("qso_date") != rq["qso_date"] or q.get("band") != rq["band"]:
+            if q.get("band") != rq["band"]:
                 continue
-            # within 90 seconds
-            try:
-                a = int(q.get("time_on", "000000")[:2]) * 3600 + int(q.get("time_on", "000000")[2:4]) * 60 + int(q.get("time_on", "000000")[4:6] or 0)
-                b = int(rq["time_on"][:2]) * 3600 + int(rq["time_on"][2:4]) * 60 + int(rq["time_on"][4:6] or 0)
-                if abs(a - b) <= 90:
+            # within 90 seconds, also across midnight UTC
+            local_epoch = SyncEngine._qso_epoch(q.get("qso_date"), q.get("time_on"))
+            if local_epoch is not None and remote_epoch is not None:
+                if abs(local_epoch - remote_epoch) <= 90:
                     return q
-            except Exception:
-                if q.get("time_on", "")[:4] == rq.get("time_on", "")[:4]:
-                    return q
+                continue
+            if q.get("qso_date") == rq["qso_date"] and q.get("time_on", "")[:4] == rq.get("time_on", "")[:4]:
+                return q
         return None
 
     @staticmethod
@@ -3102,9 +3306,11 @@ class SyncEngine:
     def _replace_local_from_remote(self, local_id: str, remote: dict[str, Any], station_map: dict[int, dict[str, Any]]) -> dict[str, Any]:
         rq = remote_to_local(remote, self._station_for(remote, station_map))
         rq["local_id"] = local_id
-        if self.store.find(local_id):
-            return self.store.update(local_id, rq)
-        return self.store.add(rq)
+        existing = self.store.find(local_id)
+        if existing:
+            # Wavelog's JSON carries only a subset of fields; keep the rest.
+            return self.store.update(local_id, merge_qso_records(existing, rq))
+        return self.store.add(merge_qso_records(None, rq))
 
     def _enrich_remote_identity_from_adif(self, remote_rows: list[dict[str, Any]],
                                           station_ids: Iterable[int] | None = None) -> list[dict[str, str]] | None:
@@ -3250,8 +3456,58 @@ class SyncEngine:
                 updated += 1
         return updated, errors
 
+    # More missing linked QSOs than max(MIN, RATIO * linked) in one run is
+    # treated as suspicious (wrong profile/token, broken listing) and needs an
+    # explicit confirmation before anything is deleted locally.
+    MASS_DELETE_MIN = 10
+    MASS_DELETE_RATIO = 0.05
+
+    def _confirm_remote_deleted(self, wid: int) -> tuple[str, dict[str, Any] | None]:
+        """Ask Wavelog for one QSO that is missing from the list download.
+
+        Returns ("deleted", None) for HTTP 404, ("present", row) when the QSO
+        still exists (the paged list skipped it) and ("unknown", None) for any
+        other failure.  Only a confirmed 404 may delete local data.
+        """
+        try:
+            row = self.client.get_qso(int(wid))
+        except WavelogError as exc:
+            if getattr(exc, "status", None) == 404:
+                return "deleted", None
+            if "abgebrochen" in str(exc):
+                raise
+            return "unknown", None
+        except Exception:
+            return "unknown", None
+        if isinstance(row, dict) and row.get("id") is not None:
+            return "present", row
+        return "unknown", None
+
+    @staticmethod
+    def _restore_missing_fields(q: dict[str, Any], remote: dict[str, Any]) -> dict[str, Any] | None:
+        """Refill fields that older versions dropped locally, from Wavelog.
+
+        Only fills locally EMPTY values of the fields added to the v0.23 sync
+        schema; never overwrites local data.  Returns None if nothing changed.
+        """
+        rq = remote_to_local(remote, {})
+        local_extra = _clean_adif_extra(q.get("adif_extra"))
+        restored_extra = {}
+        for name, value in (rq.get("adif_extra") or {}).items():
+            if str(value or "").strip() and not local_extra.get(name):
+                restored_extra[name] = value
+        patch: dict[str, Any] = {}
+        if str(rq.get("prop_mode") or "").strip() and not str(q.get("prop_mode") or "").strip():
+            patch["prop_mode"] = rq["prop_mode"]
+        if restored_extra:
+            patch["adif_extra"] = restored_extra
+        if not patch:
+            return None
+        return merge_qso_records(q, patch)
+
     def sync(self, station_profile_id: int, station_map: dict[int, dict[str, Any]] | None = None,
-             *, cancel_event: threading.Event | None = None, progress_callback=None) -> SyncSummary:
+             *, cancel_event: threading.Event | None = None, progress_callback=None,
+             allow_mass_delete: bool = False) -> SyncSummary:
         summary = SyncSummary()
         station_map = station_map or {}
         self._check_cancel(cancel_event)
@@ -3331,6 +3587,27 @@ class SyncEngine:
         # Local ADIF/metadata writes are batched; see sync_write_buffer.py.
         writes = SyncWriteBuffer(self.store, self.db, qso_hash, summary)
         linked_metas = list(self.db.list_meta())
+
+        def club_invisible(q: dict[str, Any] | None) -> bool:
+            q_operator = str((q or {}).get("operator_call") or "").upper()
+            return bool(club_mode and not club_full_visibility and q_operator and q_operator != current_operator)
+
+        # Mass-deletion guard: count linked QSOs that look remotely deleted.
+        linked_wids = [
+            int(m["wavelog_id"]) for m in linked_metas
+            if m.get("wavelog_id") and m.get("status") != "pending_delete"
+        ]
+        missing_wids = [
+            int(m["wavelog_id"]) for m in linked_metas
+            if m.get("wavelog_id") and m.get("status") != "pending_delete"
+            and int(m["wavelog_id"]) not in all_remote_by_id
+            and locals_map.get(m["local_id"]) is not None
+            and not club_invisible(locals_map.get(m["local_id"]))
+        ]
+        mass_threshold = max(self.MASS_DELETE_MIN, int(len(linked_wids) * self.MASS_DELETE_RATIO))
+        withhold_deletions = len(missing_wids) > mass_threshold and not allow_mass_delete
+        if withhold_deletions:
+            summary.deletions_withheld = len(missing_wids)
         self._report_progress(progress_callback, "Verknüpfte QSOs werden abgeglichen", 0, len(linked_metas))
         for index, m in enumerate(linked_metas, 1):
             self._check_cancel(cancel_event)
@@ -3392,6 +3669,30 @@ class SyncEngine:
 
                 local_now_hash = qso_hash(q)
 
+                # A QSO missing from the paged list is only treated as deleted
+                # after Wavelog confirms it with a 404 for its id.
+                if remote is None and not club_invisible(q):
+                    if withhold_deletions:
+                        continue
+                    state, fetched = self._confirm_remote_deleted(wid)
+                    if state == "unknown":
+                        summary.errors += 1
+                        continue
+                    if state == "present" and fetched is not None:
+                        summary.deletion_false_alarms += 1
+                        if remote_station_profile_id(fetched) not in allowed_station_ids:
+                            self.db.set_status(
+                                lid, "error", wavelog_id=wid,
+                                error=("Das verknüpfte Wavelog-QSO gehört zum Stationsprofil "
+                                       f"{remote_station_profile_id(fetched)}, nicht zum ausgewählten Profil "
+                                       f"{station_profile_id}."),
+                            )
+                            summary.errors += 1
+                            continue
+                        remote = fetched
+                        remote_by_id[wid] = fetched
+                        claimed_remote.add(wid)
+
                 # v0.11.0 introduced contest exchange fields into the hash. Existing
                 # v0.10 baselines therefore looked changed on BOTH sides even when
                 # the QSO itself had not changed. Detect that exact schema-only
@@ -3408,7 +3709,7 @@ class SyncEngine:
                                             remote_hash=remote_now_hash_for_migration)
                         continue
 
-                local_changed = bool(m.get("last_synced_hash") and local_now_hash != m.get("last_synced_hash"))
+                local_changed = bool(m.get("last_synced_hash") and not qso_hash_matches(m.get("last_synced_hash"), q))
                 if not m.get("last_synced_hash") and m.get("status") in ("modified", "error"):
                     local_changed = True
 
@@ -3439,7 +3740,7 @@ class SyncEngine:
                     continue
 
                 remote_now_hash = remote_hash(remote)
-                remote_changed = bool(m.get("remote_hash") and remote_now_hash != m.get("remote_hash"))
+                remote_changed = bool(m.get("remote_hash") and not remote_hash_matches(m.get("remote_hash"), remote))
 
                 if local_changed and remote_changed:
                     self.db.set_status(lid, "conflict", wavelog_id=wid, error="both_changed")
@@ -3462,9 +3763,22 @@ class SyncEngine:
                             snapshot=sync_snapshot.get(lid), check_snapshot=True,
                         )
                 else:
-                    # Establish/refresh the baseline for older metadata rows.
-                    writes.defer_status(lid, "synced", snapshot=sync_snapshot.get(lid), wavelog_id=wid,
-                                        last_synced_hash=local_now_hash, remote_hash=remote_now_hash)
+                    # Baselines from before v0.23 (older hash schema): restore
+                    # fields that older versions dropped locally, once.
+                    legacy_baseline = (
+                        not qso_hash_is_current(m.get("last_synced_hash"), q)
+                        or m.get("remote_hash") != remote_now_hash
+                    )
+                    healed = self._restore_missing_fields(q, remote) if legacy_baseline else None
+                    if healed is not None:
+                        writes.upsert(
+                            lid, healed, wavelog_id=wid, remote_hash=remote_now_hash, counter="fields_restored",
+                            snapshot=sync_snapshot.get(lid), check_snapshot=True,
+                        )
+                    else:
+                        # Establish/refresh the baseline for older metadata rows.
+                        writes.defer_status(lid, "synced", snapshot=sync_snapshot.get(lid), wavelog_id=wid,
+                                            last_synced_hash=local_now_hash, remote_hash=remote_now_hash)
             except Exception as e:
                 self.db.set_status(lid, "error", wavelog_id=wid, error=str(e))
                 summary.errors += 1
@@ -3503,8 +3817,11 @@ class SyncEngine:
             if wid in claimed_remote or self.db.get_by_wavelog_id(wid):
                 continue
             q = remote_to_local(r, self._station_for(r, station_map))
+            # Same day first, then the neighbouring days (QSOs around 00:00 UTC).
             bucket = [
-                row for row in candidate_buckets.get((q["call"], q["qso_date"], q["band"]), [])
+                row
+                for day in self._neighbour_dates(q["qso_date"])
+                for row in candidate_buckets.get((q["call"], day, q["band"]), [])
                 if row["local_id"] not in consumed_local_ids
             ]
             match = self._match_local(r, bucket)

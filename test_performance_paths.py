@@ -367,6 +367,14 @@ class FakeClient:
         self.next_id += 1
         return {"id": self.next_id, **payload}
 
+    def get_qso(self, wid):
+        # Single-QSO lookup used to confirm a remote deletion (v0.23).
+        self._count("get_qso")
+        for row in self.remote:
+            if int(row.get("id") or 0) == int(wid):
+                return dict(row)
+        raise logger_core.WavelogError("HTTP 404: not_found: QSO not found", status=404)
+
 
 def remote_row(wid: int, call: str, minute: int, **extra) -> dict:
     row = {
