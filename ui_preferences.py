@@ -322,6 +322,21 @@ ENGLISH = {
 # makes messagebox translations deterministic (dynamic suffixes are handled
 # by PHRASES below).
 ENGLISH.update({
+    # Wavelog radio connection (v0.23)
+    'Wavelog-Verbindung für Funkgerät (ersetzt WaveLogGate)': 'Wavelog radio connection (replaces WaveLogGate)',
+    'Der Logger übernimmt die Aufgaben von WaveLogGate: Wavelog sieht Frequenz und Modus, ein Klick auf einen DX-Spot in Wavelog stellt das Funkgerät ein, und der Rotor kann der Peilung aus Wavelog folgen. WaveLogGate bitte vorher beenden.': "The logger takes over WaveLogGate's tasks: Wavelog sees frequency and mode, a click on a DX spot in Wavelog tunes the radio, and the rotor can follow Wavelog's bearing. Please close WaveLogGate first.",
+    'Frequenz und Modus an Wavelog senden (Token mit radio:write)': 'Send frequency and mode to Wavelog (token with radio:write)',
+    'QSY aus Wavelog annehmen (Klick auf Spot/Bandmap)': 'Accept QSY from Wavelog (click on spot/bandmap)',
+    'Beim QSY auch den Modus setzen': 'Also set the mode on QSY',
+    'Live-Verbindung für Wavelog (in Wavelog Funkgerät „Live - WebSocket“ wählen)': 'Live connection for Wavelog (select radio “Live - WebSocket” in Wavelog)',
+    'Rotor folgt der Peilung aus Wavelog': "Rotor follows Wavelog's bearing",
+    'Name in Wavelog': 'Name in Wavelog',
+    'QSY-Port': 'QSY port',
+    'WebSocket-Port': 'WebSocket port',
+    'Weitere Wavelog-Adressen': 'Additional Wavelog addresses',
+    'Anfragen werden nur von der eingetragenen Wavelog-URL angenommen. Wird Wavelog auch unter einer anderen Adresse geöffnet (z. B. LAN-IP), diese kommagetrennt bei „Weitere Wavelog-Adressen“ ergänzen.': 'Requests are accepted only from the configured Wavelog URL. If Wavelog is also opened under another address (e.g. a LAN IP), add it comma-separated under “Additional Wavelog addresses”.',
+    'Wavelog-Verbindung ist ausgeschaltet.': 'Wavelog connection is switched off.',
+    'Speichern & starten': 'Save & start',
     "ADI-Logbuch zusammengeführt": "ADI logbook merged",
     "Für diese Version liegen keine Versionshinweise vor.": "No release notes are available for this version.",
     "Die wichtigsten Neuerungen auf einen Blick:": "The most important changes at a glance:",

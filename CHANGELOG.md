@@ -2,6 +2,35 @@
 
 **Deutsch** · [English](CHANGELOG.en.md)
 
+## [0.23.0] - 2026-11-08
+
+### Added
+
+- **Wavelog-Verbindung für Funkgerät (ersetzt WaveLogGate):** Frequenz/Modus werden an die Wavelog-API v2 (`radio`) gesendet, QSY-Anfragen aus Wavelog (`http://127.0.0.1:54321/{Hz}/{Modus}`) stellen das Funkgerät ein, ein lokaler WebSocket (`ws://127.0.0.1:54322`) liefert Live-Status für „Live - WebSocket“ in Wavelog, und der Rotor kann `lookup_result`/`satellite_position` aus Wavelog folgen. Beide lokalen Dienste lauschen nur auf `127.0.0.1` und nehmen Browser-Anfragen nur von der eingetragenen Wavelog-Adresse an.
+
+### Fixed
+
+- ADIF-Felder ohne eigenes Eingabefeld (z. B. `DARC_DOK`, `IOTA`, `SAT_NAME`, `SIG`, `QSL_VIA`, QSL-Status) gingen beim Neuschreiben der Logdatei (Bearbeiten, Löschen, Import, Migration, Abgleich) für **alle** QSOs verloren; sie bleiben jetzt vollständig erhalten
+- der vollständige Abgleich ersetzte lokale QSOs durch die verkürzte Wavelog-Darstellung (Sendeleistung, QSO-Ende, MY_*-Angaben gingen verloren); Wavelog-Daten werden jetzt zusammengeführt, beim ersten Abgleich werden verlorene DOK/IOTA/SAT-Angaben aus Wavelog wiederhergestellt
+- Upload und Änderungen übertragen jetzt auch Ausbreitungsart, Satellit, DOK, IOTA, SIG, Bundesland/County, QSL-Via und QSO-Ende
+- ein in der Wavelog-Liste fehlendes QSO wird lokal erst nach einer einzelnen 404-Bestätigung gelöscht; bei ungewöhnlich vielen fehlenden QSOs werden Löschungen zurückgehalten und erst nach Rückfrage übernommen
+- QSOs um 00:00 UTC werden beim Abgleich auch über die Datumsgrenze hinweg verknüpft
+- wird ein vorhandenes lokales QSO erstmals mit Wavelog verknüpft, bleiben die lokalen Angaben erhalten (Wavelog füllt nur leere Felder) und werden direkt nach Wavelog übertragen
+- eigene Angaben (MY_GRIDSQUARE, MY_CITY, MY_POTA/SOTA/WWFF) eines QSOs werden nicht mehr durch die aktuellen Werte des Wavelog-Stationsprofils ersetzt
+- lokal geleerte Felder (Kommentar, Name, QTH, Notizen, Locator, Rapporte, Referenzen) werden auch in Wavelog geleert; eine Änderung setzt die Endzeit in Wavelog nicht mehr auf die Startzeit zurück
+- MODE/SUBMODE-Paare wie MFSK/Q65, PSK/PSK63 oder CW/PCW bleiben beim Neuschreiben gültig; ADIF-Feldnamen mit `-` oder `.` bleiben erhalten
+- nach dem Update erscheinen synchronisierte QSOs nicht mehr fälschlich als „geändert“
+- Club-Mitglieds-Token: QSOs ohne eingetragenen Operator werden nicht als „in Wavelog gelöscht“ entfernt; nur eine echte Wavelog-404-Antwort zählt als Löschbestätigung
+- das API-Token wird bei Weiterleitungen auf einen anderen Server auch als `X-API-Key` nicht weitergegeben
+- „HTTP 401 Missing API token“ bei Webservern, die den `Authorization`-Header verwerfen (Issue #35): das Token wird zusätzlich als `X-API-Key` gesendet
+
+### Changed
+
+- eigene ADIF-Dateien deklarieren ADIF 3.1.8
+- Hash-Schema v3 für den Abgleich; Abgleichstände älterer Versionen werden ohne Massenkonflikte übernommen
+- ADIF-Export aus Wavelog wird über `since_id` statt Seitenzahlen geladen; Export- und Bestätigungsdownloads haben ein Seitenlimit und erkennen Endlosschleifen
+- die CI führt alle Tests (`unittest discover`) aus
+
 ## [0.22.0] - 2026-10-25
 
 ### Changed

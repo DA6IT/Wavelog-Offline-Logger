@@ -627,6 +627,7 @@ class SettingsFeatureMixin:
         self._load_dx_cluster_settings_to_ui()
         self._load_dx_spotter_settings_to_ui()
         self._load_udp_log_settings_to_ui()
+        self._load_wavelog_gate_settings_to_ui()
         if hasattr(self, "wsjtx_settings_panel"):
             self.wsjtx_settings_panel.reload(
                 self.db,
@@ -746,6 +747,7 @@ class SettingsFeatureMixin:
             if self.call_var.get().strip():
                 self._schedule_callbook_lookup(self.call_var.get().strip().upper(), force=True)
             self._reset_wavelog_monitor(delay_ms=300)
+            self._restart_wavelog_gate_after_settings()
             self.status_var.set("Einstellungen gespeichert")
             message = "Einstellungen wurden gespeichert."
             if restart_required:

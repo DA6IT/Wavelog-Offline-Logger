@@ -24,6 +24,8 @@ An offline-first desktop logger for amateur radio: log contacts in the field eve
 - direct QRZ.com pages from the Log QSO form and selected DX Cluster spots
 - integrated DA6IT.de QSL Card Manager with local eQSL matching for email-QSL recommendations
 - optional desktop notification after a locally saved QSO
+- built-in Wavelog connection for radio and rotator (replaces WaveLogGate): frequency/mode in Wavelog, QSY by clicking a DX spot or the bandmap, “Live - WebSocket”
+- every ADIF field of a QSO (e.g. DOK, IOTA, satellite, SIG) is kept when editing, importing and synchronizing
 - bundled Hamlib CAT control including TUNE/ATU and a manual Windows Hamlib updater with rollback
 - Hamlib `rotctld` rotor control with live position, compass, bearing target, STOP and hardware-free Dummy testing
 - Telnet DX Cluster, filters, worked markers and public spotting

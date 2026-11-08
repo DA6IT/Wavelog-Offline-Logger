@@ -18,6 +18,10 @@ Select the QSO under **Logbook & Sync** and read **Sync details**. A sync error 
 
 Enable UDP, use the same free address and port in both apps, and point WSJT-X's primary UDP server to the logger. The secondary logged-contact ADIF broadcast does not send live status. Only one process can bind a given address/port.
 
+## Wavelog radio connection does not start or QSY does not arrive
+
+Port 54321/54322 in use: close WaveLogGate or a second Logger instance and enable the connection under **CAT** again. The radio does not appear in Wavelog: the API v2 token needs the `radio:write` permission. Clicking a spot does nothing: CAT must be running and Wavelog must be opened under exactly the configured Wavelog address. Safari does not support QSY and “Live - WebSocket”.
+
 ## CAT or TUNE fails
 
 Install the radio's USB driver if needed, close competing CAT applications, verify model/port/baud and start CAT manually. TUNE availability depends on Hamlib, radio and firmware. The app does not activate PTT for tuning.

@@ -318,6 +318,19 @@ Sind eigener und fremder Locator bekannt, verwendet das QSO-Log die berechnete P
 
 Beim Profilwechsel, Hamlib-Wechsel und Programmende wird die von der App gestartete Rotorsteuerung beendet.
 
+### Wavelog-Verbindung für Funkgerät (ersetzt WaveLogGate)
+
+Unter **CAT → Wavelog-Verbindung für Funkgerät** übernimmt der Logger die Aufgaben von WaveLogGate. **WaveLogGate vorher beenden**, weil beide dieselben Ports verwenden.
+
+- **Frequenz und Modus an Wavelog senden:** Der Logger meldet nach jeder Änderung Frequenz, Modus und – falls im QSO-Formular eingetragen – die Sendeleistung an Wavelog. In Wavelog erscheint das Funkgerät unter dem eingetragenen Namen (Standard: „Offline Logger“) in der Funkgeräteauswahl. Das API-v2-Token braucht dafür die Berechtigung **radio:write** (in Wavelog z. B. über die Vorlage „WaveLogGate“ erzeugen).
+- **QSY aus Wavelog annehmen:** Ein Klick auf einen DX-Spot oder in die Bandmap von Wavelog stellt das Funkgerät über CAT ein (Port 54321). Optional wird auch der von Wavelog gemeldete Modus gesetzt (z. B. LSB/USB, CW, RTTY, Daten).
+- **Live-Verbindung (WebSocket):** In Wavelog als Funkgerät **„Live - WebSocket“** wählen. Frequenz und Modus erscheinen dann ohne Verzögerung (Port 54322).
+- **Rotor folgt der Peilung aus Wavelog:** Bei einer Rufzeichensuche bzw. Satellitenverfolgung in Wavelog dreht der Rotor auf die gemeldete Richtung. Voraussetzung: Rotor ist verbunden und die Live-Verbindung ist eingeschaltet.
+
+Beide lokalen Dienste lauschen nur auf `127.0.0.1` und nehmen Anfragen ausschließlich von der in den Einstellungen eingetragenen Wavelog-Adresse an. Wird Wavelog im Browser auch unter einer anderen Adresse geöffnet (z. B. LAN-IP), diese unter **Weitere Wavelog-Adressen** ergänzen. Chrome und Edge fragen beim ersten Zugriff eventuell, ob die Seite auf Geräte im lokalen Netzwerk zugreifen darf – das bitte erlauben. Safari blockiert unverschlüsselte Verbindungen von HTTPS-Seiten zu `127.0.0.1`; dort funktionieren QSY und Live-WebSocket derzeit nicht, das Senden an Wavelog schon.
+
+QSOs aus WSJT-X und anderen Programmen nimmt weiterhin **UDP Logging** entgegen und überträgt sie im Online-Modus an Wavelog.
+
 ### Hamlib aktualisieren
 
 Unter Windows kann **Nach Update suchen** im CAT Setup jederzeit von Hand ausgeführt werden. Die App berücksichtigt ausschließlich stabile Hamlib-Versionen, lädt das offizielle Windows-x64-Paket aus dem Hamlib-GitHub-Release und prüft die von GitHub veröffentlichte SHA-256-Summe. Erst danach wird `rigctld --version` als Funktionstest ausgeführt und die neue Laufzeit aktiviert. Laufende CAT- und Rotorverbindungen werden vorher beendet.

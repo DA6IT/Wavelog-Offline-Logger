@@ -93,6 +93,7 @@ class LifecycleFeatureMixin:
             self._stop_dx_cluster_runtime(update_ui=False)
             self._stop_dx_spotter_runtime(update_ui=False)
             self._stop_udp_log_runtime(update_ui=False)
+            self._stop_wavelog_gate_runtime(update_ui=False)
             # Every database operation is committed immediately. A running
             # delete/edit write must complete before the database closes.
             self._wait_qso_write()

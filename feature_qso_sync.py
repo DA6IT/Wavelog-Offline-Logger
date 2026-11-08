@@ -12,7 +12,10 @@ from tkinter import filedialog, messagebox, ttk
 from app_common import write_startup_log
 from dialogs import EditDialog, SyncProgressDialog
 from dx_cluster import normalize_worked_mode
-from logger_core import ContestSyncEngine, SyncEngine, WavelogClient, qso_hash, utc_now_iso
+from logger_core import (
+    ContestSyncEngine, SyncEngine, WavelogClient, merge_qso_records, merge_remote_into_local, qso_hash,
+    utc_now_iso,
+)
 from qsl_storage import QslStorage
 from qso_tree_view import apply_row_diff, insert_row, plan_row_diff
 from wsjtx_sync import format_wsjtx_result, load_wsjtx_settings, should_wsjtx_sync_for_reason, sync_wsjtx_with_local
@@ -22,6 +25,7 @@ from ui_theme import theme
 class QsoSyncFeatureMixin:
     def _init_qso_sync_feature(self) -> None:
         self.sync_busy = False
+        self.sync_withheld_deletions = 0
         self.sync_is_automatic = False
         self.sync_operation = ""
         self.sync_reason = ""
@@ -706,6 +710,9 @@ class QsoSyncFeatureMixin:
                                                        "contest_id","stx","srx","stx_string","srx_string")}
             q.update(profile)
             q.update(self._country_fields_for_call(q.get("call", "")))
+            # Only what the dialog changed; a sync may have updated the record
+            # since the dialog was opened (restored IOTA, remote edits ...).
+            changes = {k: v for k, v in q.items() if k != "_file" and old.get(k, "") != v}
         except Exception as e:
             messagebox.showerror("Bearbeiten fehlgeschlagen", str(e), parent=self)
             return
@@ -713,7 +720,8 @@ class QsoSyncFeatureMixin:
         self.status_var.set(f"QSO {q.get('call', '')} wird gespeichert …")
 
         def write():
-            updated = store.update(local_id, q)
+            current = store.find(local_id) or old
+            updated = store.update(local_id, merge_qso_records(current, changes))
             db.ensure_local(local_id, qso_hash(updated))
             return updated
 
@@ -1202,6 +1210,7 @@ class QsoSyncFeatureMixin:
         automatic: bool,
         reason: str = "manual",
         force_wsjtx: bool = False,
+        allow_mass_delete: bool = False,
     ):
         # Full reconciliation is intentionally available only through an
         # explicit user action.  Automatic start/exit paths use
@@ -1241,8 +1250,9 @@ class QsoSyncFeatureMixin:
                         self.after(0, lambda: self._update_sync_progress(phase, current, total))
                 summary = engine.sync(
                     station_id, smap, cancel_event=self.sync_cancel_event,
-                    progress_callback=progress,
+                    progress_callback=progress, allow_mass_delete=allow_mass_delete,
                 )
+                self.sync_withheld_deletions = summary.deletions_withheld
                 contest_summary = ContestSyncEngine(self.store, self.db, client).sync(station_id)
                 wsjtx_note = ""
                 try:
@@ -1278,6 +1288,12 @@ class QsoSyncFeatureMixin:
                        f"Contests neu {contest_summary.created} / geladen {contest_summary.pulled} / "
                        f"aus QSO-Historie {contest_summary.history_imported} / "
                        f"QSO-Links {contest_summary.linked} / Fehler {contest_summary.errors}")
+                if summary.fields_restored:
+                    msg += f" · Felder aus Wavelog wiederhergestellt {summary.fields_restored}"
+                if summary.deletion_false_alarms:
+                    msg += f" · fälschlich als gelöscht erkannt und behalten {summary.deletion_false_alarms}"
+                if summary.deletions_withheld:
+                    msg += f" · Löschungen zurückgehalten {summary.deletions_withheld}"
                 msg += wsjtx_note
                 if not self.closing:
                     self.after(0, lambda: self._sync_finished(msg, automatic))
@@ -1299,6 +1315,10 @@ class QsoSyncFeatureMixin:
         self.refresh_qsos()
         self.refresh_contest_page()
         self._schedule_wavelog_check(60_000)
+        withheld = int(getattr(self, "sync_withheld_deletions", 0) or 0)
+        self.sync_withheld_deletions = 0
+        if withheld and not automatic and not self.close_requested:
+            self.after(200, lambda count=withheld: self._ask_mass_delete(count))
         if self._complete_sync_progress(True, msg):
             return
         self.sync_reason = ""
@@ -1307,6 +1327,24 @@ class QsoSyncFeatureMixin:
         else:
             # Do not leave a QSO that was entered during the full sync behind.
             self._request_auto_sync(delay_ms=600)
+
+    def _ask_mass_delete(self, count: int):
+        if self.closing or self.sync_busy:
+            return
+        confirmed = messagebox.askyesno(
+            "Viele QSOs in Wavelog gelöscht?",
+            (f"{count} bereits synchronisierte QSOs fehlen in Wavelog.\n\n"
+             "Das kann eine echte Löschung in Wavelog sein, aber auch ein falsches Stationsprofil, "
+             "ein anderes API-Token oder eine unvollständige Antwort des Servers. Deshalb wurden diese "
+             "QSOs lokal NICHT gelöscht.\n\n"
+             "Jetzt einen vollständigen Abgleich starten, der jede Löschung einzeln bei Wavelog prüft "
+             "und bestätigte Löschungen auch lokal übernimmt?\n\n"
+             "Tipp: Vorher unter Datensicherung ein Backup anlegen."),
+            icon="warning",
+            parent=self,
+        )
+        if confirmed:
+            self._start_sync(automatic=False, reason="manual", allow_mass_delete=True)
 
     def _sync_failed(self, msg, automatic: bool = False):
         self.sync_busy = False
@@ -1349,7 +1387,7 @@ class QsoSyncFeatureMixin:
             if remote_deleted:
                 if force_local:
                     # Re-create the locally changed QSO in Wavelog and link the new id.
-                    sid = int(self.db.get_setting("station_profile_id", "0"))
+                    sid = self.db.xota_station_id_for_qso(lid) or int(self.db.get_setting("station_profile_id", "0"))
                     from logger_core import local_to_wavelog, remote_hash
                     remote = client.create_qso(local_to_wavelog(q, sid, include_operator=True))
                     new_wid = int(remote.get("id"))
@@ -1360,9 +1398,9 @@ class QsoSyncFeatureMixin:
                     self.store.delete(lid)
                     self.db.delete_meta(lid)
             elif force_local:
-                sid = int(self.db.get_setting("station_profile_id", "0"))
-                from logger_core import local_to_wavelog, remote_hash
-                remote = client.patch_qso(wid, local_to_wavelog(q, sid))
+                sid = self.db.xota_station_id_for_qso(lid) or int(self.db.get_setting("station_profile_id", "0"))
+                from logger_core import local_patch_payload, remote_hash
+                remote = client.patch_qso(wid, local_patch_payload(q, sid, client.get_qso(wid)))
                 self.db.set_status(lid, "synced", last_synced_hash=qso_hash(q), remote_hash=remote_hash(remote))
             else:
                 from logger_core import remote_to_local, remote_hash
@@ -1371,8 +1409,9 @@ class QsoSyncFeatureMixin:
                 smap = {int(s["id"]): s for s in stations if s.get("id") is not None}
                 rq = remote_to_local(remote, smap.get(int(remote.get("station_id") or 0), {}))
                 rq["local_id"] = lid
-                self.store.update(lid, rq)
-                self.db.set_status(lid, "synced", last_synced_hash=qso_hash(rq), remote_hash=remote_hash(remote))
+                current = self.store.find(lid)
+                stored = self.store.update(lid, merge_remote_into_local(current, rq))
+                self.db.set_status(lid, "synced", last_synced_hash=qso_hash(stored), remote_hash=remote_hash(remote))
             self.refresh_qsos()
         except Exception as e:
             messagebox.showerror("Konflikt konnte nicht aufgelöst werden", str(e), parent=self)

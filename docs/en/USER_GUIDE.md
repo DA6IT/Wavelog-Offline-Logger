@@ -81,6 +81,19 @@ When both station grids are known, the QSO form uses the calculated bearing as t
 
 Profile changes, Hamlib replacement and application shutdown stop the app-managed rotor runtime.
 
+### Wavelog radio connection (replaces WaveLogGate)
+
+Under **CAT → Wavelog radio connection** the Logger takes over WaveLogGate's tasks. **Close WaveLogGate first**, because both use the same ports.
+
+- **Send frequency and mode to Wavelog:** after every change the Logger reports frequency, mode and – if entered in the QSO form – TX power to Wavelog. The radio appears in Wavelog's radio selection under the configured name (default “Offline Logger”). The API v2 token needs the **radio:write** permission (for example create it with Wavelog's “WaveLogGate” preset).
+- **Accept QSY from Wavelog:** a click on a DX spot or the bandmap in Wavelog tunes the radio via CAT (port 54321). Optionally the mode reported by Wavelog is set as well (e.g. LSB/USB, CW, RTTY, data).
+- **Live connection (WebSocket):** select **“Live - WebSocket”** as radio in Wavelog to see frequency and mode without delay (port 54322).
+- **Rotor follows Wavelog's bearing:** a callsign lookup or satellite tracking in Wavelog turns the rotor to the reported direction. Requires a connected rotor and the live connection.
+
+Both local services listen on `127.0.0.1` only and accept requests only from the Wavelog address configured in the settings. If Wavelog is also opened under another address (e.g. a LAN IP), add it under **Additional Wavelog addresses**. Chrome and Edge may ask once whether the site may access devices on the local network – please allow it. Safari blocks unencrypted connections from HTTPS pages to `127.0.0.1`; QSY and the live WebSocket therefore do not work there yet, sending to Wavelog does.
+
+QSOs from WSJT-X and other programs are still received by **UDP logging** and uploaded to Wavelog in online mode.
+
 ### Updating Hamlib
 
 On Windows, **Check for update** in CAT Setup performs an on-demand check. The app accepts stable Hamlib releases only, downloads the official Windows x64 archive from the Hamlib GitHub release, verifies GitHub's published SHA-256 digest and runs `rigctld --version` before activating it. Any active CAT and rotor connections are stopped first.

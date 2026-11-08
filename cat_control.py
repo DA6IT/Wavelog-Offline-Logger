@@ -809,6 +809,22 @@ class HamlibManager:
         with self._io_lock:
             _rigctld_set_command("127.0.0.1", config.port, f"M {hamlib_mode} 0")
 
+    RAW_MODES = frozenset({"USB", "LSB", "CW", "CWR", "FM", "AM", "RTTY", "RTTYR", "PKTUSB", "PKTLSB", "PKTFM"})
+
+    def set_frequency_and_raw_mode(self, frequency_hz: int, hamlib_mode: str = "") -> None:
+        """Tune and optionally set a Hamlib mode directly (QSY from Wavelog)."""
+        raw = (hamlib_mode or "").strip().upper()
+        if raw and raw not in self.RAW_MODES:
+            raise CatError(f"Mode {hamlib_mode!r} wird für QSY nicht unterstützt")
+        with self._io_lock:
+            self.set_frequency(frequency_hz)
+            if raw:
+                with self._lock:
+                    config = self._config
+                if config is None:
+                    raise CatError("CAT ist nicht gestartet")
+                _rigctld_set_command("127.0.0.1", config.port, f"M {raw} 0")
+
     def set_frequency_and_mode(self, frequency_hz: int, logger_mode: str = "") -> None:
         with self._io_lock:
             self.set_frequency(frequency_hz)

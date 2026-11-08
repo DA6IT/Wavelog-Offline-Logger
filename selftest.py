@@ -104,6 +104,8 @@ class FakeClient:
             out.append(row)
         return out
     def get_qso(self, wid):
+        if wid not in self.rows:
+            raise WavelogError("HTTP 404: not_found: QSO not found", status=404)
         return dict(self.rows[wid])
     def export_qsos_adif(self, **kw):
         out = []

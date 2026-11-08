@@ -25,6 +25,8 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - QRZ.com-Seiten direkt aus dem QSO-Formular und aus ausgewählten DX-Cluster-Spots öffnen
 - integrierter DA6IT.de QSL Card Manager mit lokalem eQSL-Abgleich für E-Mail-QSL-Empfehlungen
 - optionale Desktop-Benachrichtigung nach einem lokal gespeicherten QSO
+- eingebaute Wavelog-Verbindung für Funkgerät und Rotor (ersetzt WaveLogGate): Frequenz/Modus in Wavelog, QSY per Klick auf DX-Spot oder Bandmap, „Live - WebSocket“
+- alle ADIF-Felder eines QSOs (z. B. DOK, IOTA, Satellit, SIG) bleiben beim Bearbeiten, Import und Abgleich erhalten
 - CAT über mitgeliefertes Hamlib, inklusive TUNE/ATU und manuellem Windows-Hamlib-Updater mit Rückfallversion
 - Rotorsteuerung über Hamlib `rotctld` mit Live-Position, Kompass, Peilungsübernahme, STOP und Dummy-Test ohne Hardware
 - Telnet-DX-Cluster, Filter, Worked-Markierung und Spotversand

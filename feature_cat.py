@@ -279,6 +279,7 @@ class CatFeatureMixin:
         )
         hint.grid(row=8, column=0, sticky="w", pady=(16, 0))
         self._build_rotor_cat_controls(right, row=9)
+        self._build_wavelog_gate_controls(right, row=10)
         self._refresh_hamlib_update_controls()
         self.after(50, self._load_cat_runtime_info)
 
@@ -962,6 +963,8 @@ class CatFeatureMixin:
         if contest_mode in MODES:
             self.contest_mode_var.set(contest_mode)
         display_mode = normal_mode if normal_mode == contest_mode else f"{normal_mode} / Contest {contest_mode}"
+        # Wavelog gate: forward the radio state (WebSocket + Wavelog radio API).
+        self._gate_radio_update(reading)
         self.cat_status_label.configure(
             text=f"✓ CAT verbunden\nFrequenz: {frequency or '—'} MHz\nHamlib-Modus: {reading.raw_mode} · Logger-Modus: {display_mode or 'unverändert'}",
             fg=theme.OK,
@@ -973,6 +976,7 @@ class CatFeatureMixin:
         self.cat_poll_busy = False
         if generation != self.cat_generation or self.closing:
             return
+        self._gate_radio_lost()
         self.cat_status_label.configure(text="CAT-Lesefehler: " + message, fg=theme.WARN)
         if not self.tuner_busy:
             self._schedule_cat_poll(max(interval_ms, 1500), interval_ms)
@@ -1032,6 +1036,7 @@ class CatFeatureMixin:
 
     def _stop_cat_runtime(self, *, update_ui: bool = True):
         self.cat_generation += 1
+        self._gate_radio_lost()
         self._cancel_cat_poll()
         self.cat_poll_busy = False
         self.cat_starting = False
