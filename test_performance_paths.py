@@ -17,6 +17,7 @@ from unittest import TestCase, main
 from unittest.mock import patch
 
 import logger_core
+from logger_core import _country_part_of_slash_call  # noqa: E402
 from logger_core import (
     CountryDB, LogStore, MetadataDB, SyncEngine, adif_header, parse_adif, qso_hash, qso_to_adif_record,
 )
@@ -323,12 +324,24 @@ class CountryIndexTests(TestCase):
                 return None
             if call in db.exact:
                 return db.exact[call]
+            if "/" in call:
+                # v0.24.0: slash prefixes of CTY.DAT first, then the part of
+                # the call that carries the entity (K6VHF/HR9 -> HR9).
+                for prefix, info in db.prefixes:
+                    if "/" in prefix and call.startswith(prefix):
+                        return info
+                call = _country_part_of_slash_call(call)
+                if not call:
+                    return None
+                if call in db.exact:
+                    return db.exact[call]
             for prefix, info in db.prefixes:
                 if call.startswith(prefix):
                     return info
             return None
 
-        calls = ["", "dl1abc", "DA6IT", "VP8/G4ABC", "3D2AG/P", "ZZ9ZZZ", "KH6XYZ", "R1FJ", "9A1A"]
+        calls = ["", "dl1abc", "DA6IT", "VP8/G4ABC", "3D2AG/P", "ZZ9ZZZ", "KH6XYZ", "R1FJ", "9A1A",
+                 "K6VHF/HR9", "W1AW/KH6", "DL1ABC/MM", "EA8/DL1ABC", "VP2V/NY9K"]
         calls += [prefix + "1XYZ" for prefix, _ in db.prefixes[::7]]
         calls += list(db.exact)[::25]
         for call in calls:

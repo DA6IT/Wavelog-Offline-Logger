@@ -1,6 +1,6 @@
 # Wavelog Offline Logger — architecture and developer notes
 
-> Version: 0.23.0
+> Version: 0.24.0
 > Goal: keep large functional areas independently maintainable without growing `app.py` back into a monolith.
 
 ## Overview
@@ -26,6 +26,7 @@ app.py
 ├── feature_cat.py
 ├── feature_rotor.py
 ├── feature_dxcluster.py
+├── feature_dxpeditions.py
 ├── feature_udp.py
 ├── feature_backup.py
 └── feature_settings.py
@@ -69,6 +70,7 @@ usage_stats.py
 | `feature_cat.py` | CAT, Hamlib, FLRig and TUNE |
 | `feature_rotor.py` | rotor UI, `rotctld` lifecycle, live position and QSO bearing control |
 | `feature_dxcluster.py` | DX Cluster and spotting |
+| `feature_dxpeditions.py` | Active DXpeditions (DA6IT.de calendar, spots, worked status) |
 | `feature_udp.py` | UDP and WSJT-X live logging |
 | `feature_backup.py` | backup and restore |
 | `feature_settings.py` | settings pages |
@@ -106,7 +108,7 @@ The Windows executable is a Go launcher. `bootstrap_windows.go` embeds all `feat
 
 Non-feature modules such as `app_common.py`, `ui_theme.py`, `dialogs.py`, `wsjtx_sync.py`, `qsl_eqsl.py` and `usage_stats.py` must be embedded explicitly.
 
-The runtime directory is derived from `appVersion`. For example, `0.23.0` becomes `app-v0230`, so a new release does not require a second hard-coded runtime-path update.
+The runtime directory is derived from `appVersion`. For example, `0.24.0` becomes `app-v0240`, so a new release does not require a second hard-coded runtime-path update.
 
 Linux and macOS use PyInstaller with `app.py`; normal Python imports are discovered automatically, but real platform builds still need release smoke testing.
 
@@ -116,12 +118,12 @@ At minimum these values must match:
 
 ```python
 # logger_core.py
-VERSION = "0.23.0"
+VERSION = "0.24.0"
 ```
 
 ```go
 // bootstrap_windows.go
-appVersion = "0.23.0"
+appVersion = "0.24.0"
 ```
 
 The Windows build script verifies this relationship. `whats_new.py`, changelogs, user guides and release notes should be updated for every published version.

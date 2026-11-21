@@ -28,7 +28,7 @@ from qso_duplicates import QsoMatcher
 from sync_write_buffer import SyncWriteBuffer
 
 APP_NAME = "DA6IT.de Wavelog Offline Logger"
-VERSION = "0.23.0"
+VERSION = "0.24.0"
 ADIF_VERSION = "3.1.8"
 USER_AGENT = f"DA6IT.de-Wavelog-Offline-Logger/{VERSION}"
 APP_ID_FIELD = "APP_AFUTOOLS_ID"
@@ -531,6 +531,10 @@ class CountryInfo:
     cont: str
     primary_prefix: str
     matched_prefix: str = ""
+    # Approximate entity centre from CTY.DAT (latitude north-positive,
+    # longitude east-positive; CTY.DAT itself stores west as positive).
+    lat: float | None = None
+    lon: float | None = None
 
 
 class CountryDB:
@@ -586,9 +590,9 @@ class CountryDB:
             nonlocal current, aliases
             if not current:
                 return
-            country, cqz, ituz, cont, primary = current
+            country, cqz, ituz, cont, primary, lat, lon = current
             primary = primary.lstrip('*').strip().upper()
-            base_info = CountryInfo(country, cqz, ituz, cont, primary, primary)
+            base_info = CountryInfo(country, cqz, ituz, cont, primary, primary, lat, lon)
             if primary:
                 self.prefixes.append((primary.upper(), base_info))
             text = "".join(aliases)
@@ -597,7 +601,8 @@ class CountryDB:
                 if not base:
                     continue
                 info = CountryInfo(
-                    country, cq_override or cqz, itu_override or ituz, cont_override or cont, primary, base
+                    country, cq_override or cqz, itu_override or ituz, cont_override or cont, primary, base,
+                    lat, lon,
                 )
                 if exact:
                     self.exact[base] = info
@@ -619,7 +624,12 @@ class CountryDB:
                     ituz = str(int(parts[2].strip()))
                     cont = parts[3].strip().upper()
                     primary = parts[7].strip()
-                    current = (country, cqz, ituz, cont, primary)
+                    try:
+                        lat: float | None = float(parts[4].strip())
+                        lon: float | None = -float(parts[5].strip())
+                    except ValueError:
+                        lat = lon = None
+                    current = (country, cqz, ituz, cont, primary, lat, lon)
                 except Exception:
                     current = None
                 continue
@@ -643,15 +653,57 @@ class CountryDB:
             return None
         if call in self.exact:
             return self.exact[call]
+        index = self._prefix_index
+        if "/" in call:
+            # CTY.DAT has entity prefixes containing a slash (VP8/G South
+            # Georgia, 3Y/P Peter 1, FK/C Chesterfield): they win.
+            slash = call.index("/")
+            for length in range(min(len(call), self._max_prefix_len), slash, -1):
+                info = index.get(call[:length])
+                if info is not None:
+                    return info
+            call = _country_part_of_slash_call(call)
+            if not call:
+                return None
+            if call in self.exact:
+                return self.exact[call]
         # Exact portable/special entries can still exist for the full call.
         # Dictionary probes from the longest possible prefix down give the
         # same result as scanning the length-sorted prefix list.
-        index = self._prefix_index
         for length in range(min(len(call), self._max_prefix_len), 0, -1):
             info = index.get(call[:length])
             if info is not None:
                 return info
         return None
+
+# Operating suffixes that do not change the DXCC entity of a callsign.
+_NON_COUNTRY_SUFFIXES = frozenset({"P", "M", "QRP", "QRPP", "A", "LH", "R", "B", "J", "E", "X", "T", "PM"})
+# Maritime/aeronautical mobile: no DXCC entity at all.
+_NO_COUNTRY_SUFFIXES = frozenset({"MM", "AM"})
+
+
+def _country_part_of_slash_call(call: str) -> str:
+    """The part of ``A/B`` that determines the DXCC entity ("" = none).
+
+    ``DL1ABC/P`` -> ``DL1ABC``, ``EA8/DL1ABC`` -> ``EA8``,
+    ``K6VHF/HR9`` -> ``HR9``, ``W1AW/KH6`` -> ``KH6``, ``DL1ABC/MM`` -> "".
+    Of two callsign-like parts the shorter one is the prefix (on a tie the
+    first one, as in ``VP2V/NY9K``).
+    """
+    parts = [part for part in call.split("/") if part]
+    if not parts:
+        return ""
+    if any(part in _NO_COUNTRY_SUFFIXES for part in parts[1:]):
+        return ""
+    parts = [
+        part for index, part in enumerate(parts)
+        if index == 0 or (part not in _NON_COUNTRY_SUFFIXES and not part.isdigit())
+    ]
+    if len(parts) == 1:
+        return parts[0]
+    first, second = parts[0], parts[1]
+    return second if len(second) < len(first) else first
+
 
 def _qso_hash_with_fields(qso: dict[str, Any], fields: list[str]) -> str:
     obj = {}

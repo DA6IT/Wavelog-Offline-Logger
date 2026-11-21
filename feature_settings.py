@@ -42,7 +42,7 @@ class SettingsFeatureMixin:
         notebook.add(online_tab, text="Callbook & Online-Dienste")
         notebook.add(qsl_tab, text="QSL Card Manager")
         notebook.add(data_tab, text="Daten & Verbindungen")
-        notebook.add(wsjtx_tab, text="WSJT-X Sync")
+        notebook.add(wsjtx_tab, text="WSJT-X / WS Sync")
         for tab in (general_tab, station_tab, online_tab, qsl_tab, data_tab, wsjtx_tab):
             tab.columnconfigure(0, weight=1)
             tab.columnconfigure(1, weight=1)
@@ -539,6 +539,21 @@ class SettingsFeatureMixin:
         )
         self.dx_spotter_status_label.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
+        # Created before the optional-help collection below so its help texts
+        # also yield space in compact windows.
+        self.wsjtx_settings_panel = WsjtxSyncSettingsPanel(
+            wsjtx_tab,
+            self.db,
+            language=self.language,
+            sync_callback=self.sync_wsjtx_now,
+        )
+        self.wsjtx_settings_panel.grid(
+            row=0,
+            column=0,
+            columnspan=2,
+            sticky="nsew",
+        )
+
         # Descriptive copy remains visible at normal size.  In compact
         # windows it yields space to the actual fields and buttons instead of
         # pushing them beyond the lower edge of the page.
@@ -554,19 +569,6 @@ class SettingsFeatureMixin:
                         pass
         collect_optional_help(notebook)
         self._settings_optional_help.append(hint)
-
-        self.wsjtx_settings_panel = WsjtxSyncSettingsPanel(
-            wsjtx_tab,
-            self.db,
-            language=self.language,
-            sync_callback=self.sync_wsjtx_now,
-        )
-        self.wsjtx_settings_panel.grid(
-            row=0,
-            column=0,
-            columnspan=2,
-            sticky="nsew",
-        )
 
         savebar = ttk.Frame(p)
         savebar.grid(row=1, column=0, sticky="ew", pady=(10, 0))

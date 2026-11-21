@@ -33,7 +33,7 @@ class LifecycleFeatureMixin:
             self._stop_udp_log_runtime(update_ui=False)
         if self.sync_busy:
             if self.sync_operation == "wsjtx":
-                self.status_var.set("Beenden wartet auf den laufenden WSJT-X-Abgleich …")
+                self.status_var.set("Beenden wartet auf den laufenden WSJT-X/WS-Abgleich …")
             else:
                 self.status_var.set("Laufende Wavelog-Übertragung wird sicher abgebrochen …")
                 self.cancel_active_sync()

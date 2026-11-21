@@ -501,6 +501,7 @@ class UiShellFeatureMixin:
             ("qsl", "✉   QSL Card Manager"),
             ("stats", "▤   Statistiken"),
             ("dx_cluster", "◎   DX Cluster"),
+            ("dxpeditions", "✈   Live DXpeditionen"),
             ("cat", "⌁   CAT Setup"),
             ("udp_log", "◉   UDP Logging"),
             ("settings", "⚙   Einstellungen"),
@@ -592,7 +593,7 @@ class UiShellFeatureMixin:
         return f
 
     def _show_page(self, name: str):
-        titles = {"log": "QSO loggen", "fast_log": "Fast Log / DXpedition", "contest": "Contest Logging", "xota": "xOTA", "qsos": "Logbuch & Sync", "qsl": "QSL Card Manager", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "udp_log": "UDP Logging", "settings": "Einstellungen"}
+        titles = {"log": "QSO loggen", "fast_log": "Fast Log / DXpedition", "contest": "Contest Logging", "xota": "xOTA", "qsos": "Logbuch & Sync", "qsl": "QSL Card Manager", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "dxpeditions": "Live DXpeditionen", "udp_log": "UDP Logging", "settings": "Einstellungen"}
         subtitles = {
             "log": "Neues QSO erfassen und sicher lokal speichern.",
             "fast_log": "Pileups zügig abarbeiten: Rufzeichen und Enter.",
@@ -603,6 +604,7 @@ class UiShellFeatureMixin:
             "stats": "Das lokale Logbuch auf einen Blick.",
             "cat": "Funkgerät über das eingebettete Hamlib steuern.",
             "dx_cluster": "Live-Spots empfangen, filtern und an den TRX übergeben.",
+            "dxpeditions": "Gerade aktive DXpeditionen: wo, auf welchem Band und ob schon gearbeitet.",
             "udp_log": "QSOs von WSJT-X und kompatiblen Programmen empfangen.",
             "settings": "Stationsprofil, Online-Dienste und lokale Daten verwalten.",
         }
@@ -641,6 +643,8 @@ class UiShellFeatureMixin:
             self.refresh_stats()
         elif name == "cat":
             self._refresh_cat_ports()
+        elif name == "dxpeditions":
+            self._dxped_page_shown()
 
     def _card(self, parent, **grid):
         outer = tk.Frame(parent, bg=theme.CARD, highlightbackground=theme.BORDER, highlightthickness=1)

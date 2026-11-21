@@ -1,6 +1,6 @@
 # Wavelog Offline Logger – Architektur & Entwicklerhinweise
 
-> Stand: 0.23.0
+> Stand: 0.24.0
 > Ziel: große Funktionsbereiche getrennt entwickeln, ohne die zentrale `app.py` wieder wachsen zu lassen.
 
 ## Überblick
@@ -38,6 +38,7 @@ app.py
 ├── feature_cat.py
 ├── feature_rotor.py
 ├── feature_dxcluster.py
+├── feature_dxpeditions.py
 ├── feature_udp.py
 ├── feature_backup.py
 └── feature_settings.py
@@ -92,6 +93,7 @@ usage_stats.py
 | `feature_cat.py` | CAT/Hamlib/FLRig/TUNE-UI |
 | `feature_rotor.py` | Rotor-UI, `rotctld`-Lifecycle, Live-Position und QSO-Peilungssteuerung |
 | `feature_dxcluster.py` | DX-Cluster und Spots |
+| `feature_dxpeditions.py` | Aktive DXpeditionen (DA6IT.de-Kalender, Spots, Gearbeitet-Status) |
 | `feature_udp.py` | UDP-/WSJT-X-Live-Logging |
 | `feature_backup.py` | Backup/Restore |
 | `feature_settings.py` | Einstellungsseiten |
@@ -372,13 +374,13 @@ Der Verzeichnisname wird aus `appVersion` erzeugt.
 Beispiel:
 
 ```go
-appVersion = "0.23.0"
+appVersion = "0.24.0"
 ```
 
 ergibt:
 
 ```text
-app-v0230
+app-v0240
 ```
 
 Damit muss der Runtime-Pfad beim nächsten Release nicht mehr separat von Hand geändert werden.
@@ -412,13 +414,13 @@ Mindestens diese beiden Werte müssen übereinstimmen:
 `logger_core.py`:
 
 ```python
-VERSION = "0.23.0"
+VERSION = "0.24.0"
 ```
 
 `bootstrap_windows.go`:
 
 ```go
-appVersion = "0.23.0"
+appVersion = "0.24.0"
 ```
 
 Das Windows-Buildscript prüft diesen Zustand absichtlich und bricht bei einem Konflikt ab.

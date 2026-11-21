@@ -50,7 +50,12 @@ POTA candidates use a locally cached official catalogue. Nearby markers up to 10
 
 ![Logbook and sync](../screenshots/en/logbook-sync.png)
 
-Important states are `LOCAL ONLY`, `WAVELOG ✓`, changed, conflict and sync error. Deleted QSOs disappear from the list immediately while the logbook is saved in the background. Until that save has finished – usually less than a second even for large logbooks – further deleting, editing and switching profiles are briefly locked, and closing the app waits for it. Select a row to see the stored reason. A conflict is resolved only by explicitly choosing the local or Wavelog version. Missing external ADI data is never interpreted as an automatic remote-deletion request.
+Important states are `LOCAL ONLY`, `WAVELOG ✓`, changed, conflict and sync error.
+
+**Search callsign:** while you type, the search field above the table shows only QSOs whose callsign contains the text – `dl1` finds DL1AB and DL1XYZ/P, for example. Case does not matter; `*` stands for any number of characters, `?` for exactly one (`DL?AB`). The number of matches is shown next to the field. **Ctrl+F** jumps to the search field, **Esc** or **✕** clears it, **arrow down** moves into the results. Editing, deleting and sending QSLs work on the selected matches as usual; synchronization, statistics and the normal **Export ADIF** button always use the whole logbook.
+
+**Filters:** below the search field the list can additionally be narrowed by **band**, **mode**, **period** (today, last 7/30 days, last 12 months or a year), **country** (DXCC entity of the callsign from CTY.DAT, otherwise the name stored in the QSO; "(no country)" for unknown ones), **QSL** status (confirmed by any service, not confirmed, LoTW/QRZ/eQSL/ClubLog/DCL confirmed, e-mail QSL sent/not sent) and **sync** status (local only, synchronized, open/conflict/error). All filters and the callsign search apply together; "N of M QSOs" is shown next to the search field. The lists only contain values present in the logbook. **Reset filters** shows everything again, **Export filtered** writes exactly the QSOs shown to an ADIF file. In narrow windows the filters use two lines.
+ Deleted QSOs disappear from the list immediately while the logbook is saved in the background. Until that save has finished – usually less than a second even for large logbooks – further deleting, editing and switching profiles are briefly locked, and closing the app waits for it. Select a row to see the stored reason. A conflict is resolved only by explicitly choosing the local or Wavelog version. Missing external ADI data is never interpreted as an automatic remote-deletion request.
 
 Online mode pushes only new, never-linked QSOs. Optional startup and shutdown delta syncs also upload only new local QSOs; they never download, edit, delete, reconcile integrity or resolve conflicts. Those complete reconciliation operations remain available through manual sync only. Automatic delta sync displays a blocking progress window and a final summary before the app becomes usable or closes. Cancelling a shutdown delta sync continues closing the app immediately. Existing automatic startup and shutdown settings are migrated safely to the matching delta-sync settings without overwriting an explicitly selected new option; a cancelled manual full sync retains its checkpoint and journal for resume.
 
@@ -119,7 +124,11 @@ Discovery runs only when **Find FLRig** is clicked. Manual configuration remains
 
 ![DX Cluster](../screenshots/en/dx-cluster.png)
 
-Connect manually to receive live spots. Filter by band, mode, time and spotter region; sort by headings. Worked markers compare band and mode. Double-click tunes the radio without changing page; **Use for QSO** fills the log form and **Open QRZ.com** opens the selected spot callsign in the browser. Public spotting uses a separate profile-specific DXSpider connection.
+### Live DXpeditions
+
+The **Live DXpeditions** page lists only DXpeditions spotted within the **last 30 minutes**, one line per active band and mode with frequency, age of the spot, country, heading and distance from your locator (from the DXpedition grid, otherwise approximately from the CTY.DAT centre of the entity) and end date. Sources: the DA6IT.de DXpedition calendar and its spot summary, plus spots of your own DX Cluster connection. Data is fetched only while the page is open (spots every minute, calendar every three hours; automatic refresh can be switched off). **Status** compares with your local logbook per band and mode: **New country!** (red), **New band/mode** (orange, entity missing on this band/mode), **Country ✓, new call** (blue) and **✓ worked** (green). **Worked** lists every band/mode already logged with the DXpedition; **Only not yet worked** hides green lines. The newest spot is on top by default; click a column heading to sort by it (click again to reverse). Double-click or Enter tunes the radio, **Use for QSO** fills the form, **Open QRZ.com** opens the callsign page.
+
+Connect manually to receive live spots. Filter by band, mode, time and spotter region; sort by headings. The spots are a table with fixed columns (UTC, DX call, DX country, Worked, MHz, band, mode, spotter, spotter country, comment); new spots are inserted without moving the selection or scroll position. New spots (< 2 min) are light blue, worked ones green, and the **Worked** column shows "✓ Call" or "✓ Country". Worked markers compare band and mode. Double-click or Enter tunes the radio without changing page; **Use for QSO** fills the log form and **Open QRZ.com** opens the selected spot callsign in the browser. Public spotting uses a separate profile-specific DXSpider connection.
 
 ## 10. UDP / WSJT-X
 
@@ -131,9 +140,9 @@ External QSOs are saved locally first, deduplicated and optionally enriched from
 
 ### WSJT-X file synchronization
 
-The dedicated **WSJT-X Sync** settings tab links the active Logger profile to one WSJT-X log file. It supports the normal `%LOCALAPPDATA%\WSJT-X\wsjtx_log.adi`, `--rig-name` profiles below `%LOCALAPPDATA%\WSJT-X - <rig-name>\wsjtx_log.adi`, and a manually selected path.
+The dedicated **WSJT-X / WS Sync** settings tab links the active Logger profile to one log file of WSJT-X or **WS** (WS – Digital Mode Suite, formerly WSJT-X Improved). It supports `%LOCALAPPDATA%\WS\wsjtx_log.adi` and `%LOCALAPPDATA%\WS - <rig-name>\wsjtx_log.adi`, the WSJT-X folders `%LOCALAPPDATA%\WSJT-X[ - <rig-name>]\wsjtx_log.adi`, a log file chosen in WS/WSJT-X itself (read-only from `WS.ini` / `WS - <rig-name>.ini`, together with your callsign for display), and a manually selected path. WS profiles are listed first; WS copies the WSJT-X log once and then only writes to its own folder, so the tab warns when an old WSJT-X folder with a WS counterpart is still selected.
 
-Startup, shutdown and manual synchronization can be enabled independently per Logger profile. **Sync now** runs the file merge immediately.
+Synchronize at any time with **Synchronize with WSJT-X / WS now** in the tab or **Sync WSJT-X / WS** on **Logbook & Sync**. With Wavelog configured and reachable this runs the full three-way sync, otherwise only the local file merge. The time and result of the last sync are shown below the button. Startup, shutdown and manual full sync triggers can additionally be enabled per Logger profile.
 
 The Offline Logger remains the local merge hub. Missing QSOs are added between the Offline Logger and WSJT-X; with Wavelog configured, the normal full synchronization can combine this into a controlled three-way workflow. A missing record is never treated as an automatic deletion request.
 
@@ -154,7 +163,7 @@ The app checks GitHub Releases silently. After confirmation it downloads only th
 
 ## 14. Privacy and troubleshooting
 
-Core logging, profiles, ADI, statistics and CTY.DAT work offline. Network can be used by configured Wavelog, QRZ, the DA6IT.de QSL Card Manager, the locally evaluated eQSL member-list download, xOTA, DX Cluster/spotting, release checks, initial Windows runtime setup and the pseudonymous usage statistics enabled after the first-start notice. The usage heartbeat contains only the random installation ID, application version and operating-system family; it can be disabled and deleted from Settings. See [Troubleshooting](TROUBLESHOOTING.md), [Privacy](../../PRIVACY.md) and [Security](../../SECURITY.md).
+Core logging, profiles, ADI, statistics and CTY.DAT work offline. Network can be used by configured Wavelog, QRZ, the DA6IT.de QSL Card Manager, the locally evaluated eQSL member-list download, xOTA, DX Cluster/spotting, the Live DXpeditions page (DA6IT.de calendar and spot summary, only while the page is open), release checks, initial Windows runtime setup and the pseudonymous usage statistics enabled after the first-start notice. The usage heartbeat contains only the random installation ID, application version and operating-system family; it can be disabled and deleted from Settings. See [Troubleshooting](TROUBLESHOOTING.md), [Privacy](../../PRIVACY.md) and [Security](../../SECURITY.md).
 
 ## DA6IT.de QSL Card Manager
 

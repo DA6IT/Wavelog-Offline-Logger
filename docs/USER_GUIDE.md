@@ -152,15 +152,20 @@ Die eQSL.cc-Zugangsdaten bleiben für einen späteren direkten eQSL-Upload/-Sync
 - Standard: `dxcluster.afu-tools.de`, Port `7301`.
 - Das Login-Rufzeichen wird automatisch aus dem aktiven Stationsprofil übernommen.
 
-### 4.5 WSJT-X Sync
+### 4.5 WSJT-X / WS Sync
 
-Der separate Einstellungs-Tab **WSJT-X Sync** verbindet das lokale Logger-Profil mit genau einer WSJT-X-Logdatei. Unterstützt werden:
+Der separate Einstellungs-Tab **WSJT-X / WS Sync** verbindet das lokale Logger-Profil mit genau einer Logdatei von WSJT-X oder **WS** (WS – Digital Mode Suite, früher WSJT-X Improved). Unterstützt werden:
 
-- die Standarddatei `%LOCALAPPDATA%\WSJT-X\wsjtx_log.adi`
-- mit `--rig-name` gestartete Profile unter `%LOCALAPPDATA%\WSJT-X - <Rig-Name>\wsjtx_log.adi`
+- WS: `%LOCALAPPDATA%\WS\wsjtx_log.adi`, mit `--rig-name` gestartet `%LOCALAPPDATA%\WS - <Rig-Name>\wsjtx_log.adi` (z. B. `WS - DA6IT`)
+- WSJT-X: `%LOCALAPPDATA%\WSJT-X\wsjtx_log.adi` bzw. `%LOCALAPPDATA%\WSJT-X - <Rig-Name>\wsjtx_log.adi`
+- ein in WS/WSJT-X unter *Settings → General → Log file* selbst gewählter Pfad: Der Logger liest ihn (nur lesend) aus `WS.ini` bzw. `WS - <Rig-Name>.ini`, ebenso das eigene Rufzeichen für die Anzeige
 - ein manuell ausgewählter Dateipfad
 
-Für jedes Logger-Profil kann getrennt festgelegt werden, ob der WSJT-X-Abgleich beim **Start**, beim **Beenden** und/oder beim **manuellen Synchronisieren** ausgeführt wird. Die Schaltfläche **Jetzt vollständig abgleichen** führt den Abgleich bewusst sofort aus.
+WS-Profile stehen in der Auswahl vor WSJT-X-Profilen. WS übernimmt beim ersten Start einmalig eine Kopie des WSJT-X-Logs und schreibt danach nur noch in den eigenen Ordner. Ist noch ein WSJT-X-Ordner ausgewählt, zu dem es ein WS-Gegenstück gibt, weist der Tab darauf hin.
+
+Abgeglichen wird jederzeit über **Jetzt mit WSJT-X / WS abgleichen** im Tab oder über **WSJT-X / WS abgleichen** unter **Logbuch & Sync**. Ist Wavelog eingerichtet und erreichbar, läuft dabei der vollständige Drei-Wege-Abgleich mit Wavelog, sonst nur der lokale Dateiabgleich. Unter dem Knopf steht, wann zuletzt abgeglichen wurde und mit welchem Ergebnis.
+
+Für jedes Logger-Profil kann zusätzlich getrennt festgelegt werden, ob der Abgleich automatisch beim **Start**, beim **Beenden** und/oder beim **manuellen Gesamtsync** (Knopf **Synchronisieren**) ausgeführt wird.
 
 Der Offline Logger behandelt seine lokale ADI-Datei als Merge-Hub. Fehlende QSOs werden zwischen Offline Logger und WSJT-X ergänzt; zusammen mit dem Wavelog-Vollsync entsteht bei vorhandener Wavelog-Konfiguration ein kontrollierter Drei-Wege-Abgleich. Es werden **keine automatischen Löschungen** aus einem bloßen Fehlen auf einer Seite abgeleitet.
 
@@ -256,6 +261,10 @@ Die Tabelle zeigt lokale QSOs und deren Zustand:
 - `GEÄNDERT` – lokal nach dem letzten Sync geändert
 - `KONFLIKT` – lokal und in Wavelog unterschiedlich geändert
 - `SYNC-FEHLER` – Übertragung nicht eindeutig erfolgreich
+
+**Rufzeichen suchen:** Das Suchfeld über der Tabelle zeigt beim Tippen nur noch QSOs, deren Rufzeichen den eingegebenen Text enthält – `dl1` findet zum Beispiel DL1AB und DL1XYZ/P. Groß-/Kleinschreibung spielt keine Rolle; `*` steht für beliebig viele Zeichen, `?` für genau ein Zeichen (`DL?AB`). Neben dem Feld steht die Trefferzahl. **Strg+F** springt ins Suchfeld, **Esc** oder **✕** leert die Suche, **Pfeil runter** wechselt in die Trefferliste. Bearbeiten, Löschen und QSL-Versand wirken wie gewohnt auf die ausgewählten Treffer; Abgleich, Statistik und der normale Knopf **ADIF exportieren** berücksichtigen immer das ganze Logbuch.
+
+**Filter:** Unter dem Suchfeld lässt sich die Liste zusätzlich nach **Band**, **Mode**, **Zeitraum** (heute, letzte 7/30 Tage, letzte 12 Monate oder ein Jahr), **Land** (DXCC-Gebiet des Rufzeichens laut CTY.DAT, sonst der im QSO gespeicherte Name; „(ohne Land)“ für unbekannte), **QSL**-Status (bestätigt bei irgendeinem Dienst, nicht bestätigt, LoTW/QRZ/eQSL/ClubLog/DCL bestätigt, E-Mail-QSL versendet/nicht versendet) und **Sync**-Status (nur lokal, synchronisiert, offen/Konflikt/Fehler) eingrenzen. Alle Filter und die Rufzeichensuche gelten gemeinsam; neben dem Suchfeld steht „N von M QSOs“. Die Auswahllisten enthalten nur Werte, die im Logbuch vorkommen. **Filter zurücksetzen** zeigt wieder alles, **Gefilterte exportieren** schreibt genau die angezeigten QSOs in eine ADIF-Datei. In schmalen Fenstern verteilen sich die Filter auf zwei Zeilen.
 
 Ein QSO kann lokal bearbeitet oder gelöscht werden. Gelöschte QSOs verschwinden sofort aus der Liste; das Logbuch wird im Hintergrund gespeichert. Bis dieser Speichervorgang abgeschlossen ist – bei großen Logbüchern meist unter einer Sekunde –, sind weiteres Löschen, Bearbeiten und der Profilwechsel kurz gesperrt, und beim Beenden wartet das Programm darauf. Bei einem Konflikt entscheidet der Benutzer ausdrücklich zwischen lokaler und Wavelog-Version. Ein außerhalb der App fehlendes lokales ADI-QSO ist kein automatischer Auftrag, es aus Wavelog zu löschen.
 
@@ -369,17 +378,33 @@ Funktionen:
 - Filter nach Band, Mode und Spotter-Region
 - Sortierung über jede Tabellenüberschrift
 - Offline-Ländererkennung für DX und Spotter
-- hellblaue Markierung neuer Spots
-- grüne Schrift für bereits gearbeitetes Rufzeichen oder Land
+- Tabelle mit festen Spalten (UTC, DX-Rufzeichen, DX-Land, Gearbeitet, MHz, Band, Mode, Spotter, Spotter-Land, Kommentar); neue Spots werden eingefügt, ohne dass Auswahl oder Scrollposition springen
+- hellblaue Markierung neuer Spots (jünger als 2 Minuten)
+- grüne Schrift für bereits gearbeitetes Rufzeichen oder Land; die Spalte **Gearbeitet** zeigt „✓ Call“ bzw. „✓ Land“
 
 Worked-Markierungen vergleichen immer **Band und Mode**. Ein 20-m-FT8-QSO markiert daher keinen 20-m-USB-Spot und kein QSO auf 15 m.
 
 Fehlt der Mode, wertet die App Kommentar, typische FT8-Frequenzen und eindeutige IARU-Region-1-Bandplanbereiche aus. Mehrdeutiges SSB wird bandabhängig als LSB oder USB behandelt.
 
-- **Doppelklick:** TRX auf Frequenz und Mode abstimmen; kein Seitenwechsel
+- **Doppelklick oder Enter:** TRX auf Frequenz und Mode abstimmen; kein Seitenwechsel
 - **QSO übernehmen:** ausgewählten Spot in das QSO-Formular übertragen
 - **QRZ.com öffnen:** QRZ.com-Seite des ausgewählten Spot-Rufzeichens im Browser öffnen
 - **DX-Spot senden:** aktuellen QSO-Kandidaten über die getrennte DXSpider-Verbindung melden. Nach dem Speichern und Leeren des Formulars bleibt das letzte QSO als eigener Spot-Kandidat erhalten.
+
+### 12.1 Live DXpeditionen
+
+Die Seite **Live DXpeditionen** zeigt nur DXpeditionen, die in den **letzten 30 Minuten** gespottet wurden – je aktivem Band und Mode eine Zeile mit Frequenz, „Spot vor“, Land, Richtung und Entfernung vom eigenen Locator (aus dem Grid der DXpedition, sonst ca. aus dem CTY.DAT-Mittelpunkt des Landes) und Enddatum.
+
+Quellen: der DXpedition-Kalender von DA6IT.de (Rufzeichen, Varianten, Zeitraum, QSL-Weg, Infos) und dessen Spot-Übersicht (letzter Spot je Band der letzten Stunde), zusätzlich die Spots der eigenen DX-Cluster-Verbindung, falls verbunden. Abgerufen wird nur, solange die Seite offen ist: die Spots jede Minute, der Kalender alle drei Stunden; **Jede Minute automatisch aktualisieren** lässt sich abschalten. Ohne Internet bleibt der zuletzt geladene Kalender erhalten.
+
+Die Spalte **Status** vergleicht mit dem lokalen Logbuch (Rufzeichen samt Varianten, DXCC-Land, je Band und Mode):
+
+- **Neues Land!** (rot): Das Land ist noch auf keinem Band gearbeitet.
+- **Neu auf Band/Mode** (orange): Das Land fehlt auf diesem Band in diesem Mode.
+- **Land ✓, Call neu** (blau): Das Land ist auf Band und Mode schon gearbeitet, aber nicht diese DXpedition.
+- **✓ gearbeitet** (grün): Diese DXpedition ist auf Band und Mode schon im Log.
+
+**Gearbeitet** listet alle Bänder/Modes, auf denen die DXpedition schon im Log steht. **Nur noch nicht gearbeitete** blendet grüne Zeilen aus. Standardmäßig steht der aktuellste Spot oben; ein Klick auf eine Spaltenüberschrift sortiert danach, ein zweiter Klick dreht die Reihenfolge um. Doppelklick oder Enter stimmt den TRX per CAT ab, **QSO übernehmen** füllt das QSO-Formular, **QRZ.com öffnen** zeigt die QRZ-Seite. Unter der Tabelle stehen Zeitraum, IOTA, QSL-Weg und Infos der ausgewählten DXpedition.
 
 ## 13. UDP Logging / WSJT-X
 
@@ -425,6 +450,7 @@ Netzwerk können aktivierte, konfigurierte oder ausdrücklich gestartete Funktio
 - Download der eQSL-Mitgliederliste für lokale QSL-Empfehlungen
 - pseudonyme Nutzungsstatistik nach Bestätigung des Erststart-Hinweises
 - DX-Cluster-Empfang und Spotversand
+- Seite **Live DXpeditionen**: Abruf des DXpedition-Kalenders und der Spot-Übersicht von `da6it.de` (nur solange die Seite offen ist, abschaltbar; es werden keine Profil- oder QSO-Daten gesendet)
 - Release-Prüfung
 - einmalige Windows-Runtime-Einrichtung
 

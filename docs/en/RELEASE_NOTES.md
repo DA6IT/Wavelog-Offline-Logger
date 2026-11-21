@@ -1,16 +1,14 @@
-# DA6IT.de Wavelog Offline Logger v0.23.0
+# DA6IT.de Wavelog Offline Logger v0.24.0
 
-v0.23.0 replaces WaveLogGate with a built-in Wavelog connection for radio and rotator and keeps every detail of a QSO when editing, importing and synchronizing.
+v0.24.0 adds the new **Live DXpeditions** page, logbook filters, a calm DX spot table and file synchronization with **WS** (formerly WSJT-X Improved).
 
 ### Highlights
 
-- **Wavelog radio connection:** frequency, mode and TX power appear in Wavelog; a click on a DX spot or the bandmap tunes the radio; “Live - WebSocket” shows the radio status directly; the rotator can follow the bearing from Wavelog. Enable it under **CAT → Wavelog radio connection** – close WaveLogGate first. The API token needs the `radio:write` permission.
-- **Every QSO detail is kept:** fields such as DOK, IOTA, satellite, SIG, state/county or QSL hints that the Logger does not display itself are kept when editing, deleting, importing and synchronizing.
-- **Synchronization adds instead of replacing:** TX power, QSO end time and your own data such as a portable locator or POTA reference are kept. Details lost earlier, such as DOK or IOTA, are restored from Wavelog by the first complete synchronization.
-- **More data exchanged:** satellite QSOs, DOK, IOTA, SIG, state/county and the QSO end time are exchanged with Wavelog; fields cleared locally are cleared in Wavelog as well.
-- **Safer deletion:** a QSO is only removed locally once Wavelog confirms the deletion individually; if unusually many QSOs are missing, the Logger asks first.
-- **More reliable matching:** QSOs around midnight UTC are recognised instead of being duplicated; the connection also works with servers that reported “Missing API token”.
+- **Live DXpeditions:** shows only DXpeditions spotted within the last 30 minutes – per band and mode with frequency, spot age, country, heading and distance from your locator. Colours show whether the country is new, the band/mode is missing or already worked. The newest spot is on top and every column can be sorted; double-click tunes the radio. Data from the DA6IT.de DXpedition calendar, only while the page is open.
+- **Search and filter the logbook:** callsign search (with `*`/`?`, Ctrl+F) plus filters for band, mode, period, country, QSL status and sync status; **Export filtered** writes exactly the QSOs shown as ADIF.
+- **WS instead of WSJT-X:** the file sync finds `%LOCALAPPDATA%\WS` and `WS - <rig name>` automatically, uses a log path chosen in WS and warns when an old WSJT-X folder is still selected. Sync now with the **Sync WSJT-X / WS** button on **Logbook & Sync**.
+- **Calm DX spot list:** fixed columns, a new "Worked" column, selection and scroll position no longer jump; Enter tunes the radio.
+- **Fewer backup copies:** the WSJT-X/WS sync keeps the newest 10 backups plus one per day of the last week.
+- **More accurate countries:** imported QSOs with another country spelling count as a worked country again; calls such as `K6VHF/HR9` get the right country.
 
-Tip: create a backup (**Settings → General → Data & backup**) before the first complete synchronization after the update.
-
-Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.23.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.23.0/docs/en/USER_GUIDE.md)
+Dokumentation: [Deutsch](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.24.0/docs/USER_GUIDE.md) · [English](https://github.com/DA6IT/Wavelog-Offline-Logger/blob/v0.24.0/docs/en/USER_GUIDE.md)

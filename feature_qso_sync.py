@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -17,7 +17,10 @@ from logger_core import (
     utc_now_iso,
 )
 from qsl_storage import QslStorage
-from qso_tree_view import apply_row_diff, insert_row, plan_row_diff
+from qso_tree_view import (
+    NO_COUNTRY, PERIOD_CHOICES, QSL_CHOICES, SYNC_CHOICES, QsoFilter, apply_row_diff, filter_choices, filter_rows, insert_row,
+    normalize_call_query, plan_row_diff,
+)
 from wsjtx_sync import format_wsjtx_result, load_wsjtx_settings, should_wsjtx_sync_for_reason, sync_wsjtx_with_local
 from ui_theme import theme
 
@@ -62,22 +65,99 @@ class QsoSyncFeatureMixin:
         # a refresh that scanned before the write must not show them again.
         self._qso_hidden_ids: set[str] = set()
         self._qso_cached_summary: dict[str, object] = {}
+        # Callsign search and filters in the logbook view (v0.24.0).
+        # ``_qso_tree_filter`` is the filter the Treeview currently shows.
+        self._qso_filter = QsoFilter()
+        self._qso_tree_filter = QsoFilter()
+        self._qso_filter_job = None
+        # DXCC country per local_id (not a visible column; for the filter).
+        self._qso_cached_countries: dict[str, str] = {}
+        self._qso_filter_maps: dict[str, dict[str, str]] = {}
+        self._qso_render_source: list[tuple[str, str, tuple]] = []
 
     def _build_qsos_page(self):
         p = self._new_page("qsos")
         p.columnconfigure(0, weight=1)
         p.rowconfigure(1, weight=1)
-        top = self._card(p, row=0, column=0, sticky="ew", pady=(0, 10))
+        card_top = self._card(p, row=0, column=0, sticky="ew", pady=(0, 10))
+        # Buttons on the first line, sync status on its own line below so a
+        # long status text is never squeezed away by the buttons.
+        top = ttk.Frame(card_top, style="Card.TFrame")
+        top.pack(side="top", fill="x")
         ttk.Button(top, text="Synchronisieren", style="Primary.TButton", command=self.sync_now).pack(side="left")
         ttk.Button(top, text="ADI-Ordner öffnen", style="Secondary.TButton", command=self.open_log_dir).pack(side="left", padx=8)
         ttk.Button(top, text="ADIF importieren", style="Secondary.TButton", command=self.import_adif).pack(side="left")
         ttk.Button(top, text="ADIF exportieren", style="Secondary.TButton", command=self.export_adif).pack(side="left", padx=8)
-        self.sync_label = tk.Label(top, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9))
-        self.sync_label.pack(side="right")
+        # v0.24.0: the WSJT-X/WS file sync used to be reachable only from the
+        # bottom of its settings tab; give it its own visible button here.
+        self.wsjtx_sync_button = ttk.Button(
+            top, text="WSJT-X / WS abgleichen", style="Secondary.TButton", command=self.sync_wsjtx_now,
+        )
+        self.wsjtx_sync_button.pack(side="left")
+        self.sync_label = tk.Label(card_top, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9), anchor="w")
+        self.sync_label.pack(side="top", fill="x", pady=(6, 0))
 
         card = self._card(p, row=1, column=0, sticky="nsew")
         card.columnconfigure(0, weight=1)
-        card.rowconfigure(0, weight=1)
+        card.rowconfigure(1, weight=1)
+
+        search = ttk.Frame(card, style="Card.TFrame")
+        search.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        search_row = ttk.Frame(search, style="Card.TFrame")
+        search_row.pack(side="top", fill="x")
+        ttk.Label(search_row, text="Rufzeichen suchen", style="Card.TLabel").pack(side="left")
+        self.qso_search_var = tk.StringVar()
+        self.qso_search_entry = ttk.Entry(search_row, textvariable=self.qso_search_var, width=18)
+        self.qso_search_entry.pack(side="left", padx=(8, 4))
+        self.qso_search_clear_button = ttk.Button(
+            search_row, text="✕", width=3, style="Secondary.TButton", command=self.clear_qso_search,
+        )
+        self.qso_search_clear_button.pack(side="left")
+        self.qso_filter_reset_button = ttk.Button(
+            search_row, text="Filter zurücksetzen", style="Secondary.TButton", command=self.reset_qso_filters,
+        )
+        self.qso_filter_reset_button.pack(side="left", padx=(10, 0))
+        self.qso_export_filtered_button = ttk.Button(
+            search_row, text="Gefilterte exportieren", style="Secondary.TButton", command=self.export_filtered_adif,
+        )
+        self.qso_export_filtered_button.pack(side="left", padx=(8, 0))
+        self.qso_search_result_label = tk.Label(search_row, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9))
+        self.qso_search_result_label.pack(side="left", padx=(10, 0))
+        self.qso_search_var.trace_add("write", lambda *_: self._qso_search_changed())
+        self.qso_search_entry.bind("<Escape>", lambda _e: self.clear_qso_search())
+        self.qso_search_entry.bind("<Return>", lambda _e: self._apply_qso_search_now())
+        self.qso_search_entry.bind("<Down>", lambda _e: self._focus_first_qso_row())
+        self.bind("<Control-f>", self._focus_qso_search, add="+")
+        self.bind("<Control-F>", self._focus_qso_search, add="+")
+
+        # Filters (v0.24.0): all combine with the callsign search (AND).
+        filter_row = ttk.Frame(search, style="Card.TFrame")
+        filter_row.pack(side="top", fill="x", pady=(8, 0))
+        self.qso_filter_vars: dict[str, tk.StringVar] = {}
+        self.qso_filter_combos: dict[str, ttk.Combobox] = {}
+        self._qso_filter_cells: list[ttk.Frame] = []
+        for key, label, width in (
+            ("band", "Band", 10),
+            ("mode", "Mode", 10),
+            ("period", "Zeitraum", 15),
+            ("country", "Land", 21),
+            ("qsl", "QSL", 22),
+            ("sync", "Sync", 18),
+        ):
+            cell = ttk.Frame(filter_row, style="Card.TFrame")
+            ttk.Label(cell, text=label, style="Card.TLabel").pack(side="left", padx=(0, 4))
+            var = tk.StringVar()
+            combo = ttk.Combobox(cell, textvariable=var, state="readonly", width=width)
+            combo.pack(side="left")
+            combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_qso_search_now())
+            self.qso_filter_vars[key] = var
+            self.qso_filter_combos[key] = combo
+            self._qso_filter_cells.append(cell)
+        self._qso_filter_columns = 0
+        filter_row.bind("<Configure>", lambda event: self._layout_qso_filter_cells(event.width), add="+")
+        self._layout_qso_filter_cells(0)
+        self._update_qso_filter_choices()
+
         cols = ("date", "time", "call", "operator", "contest", "band", "mode", "freq", "rst", "status", "email_qsl", "qrz", "lotw", "eqsl", "clublog", "dcl")
         self.tree = ttk.Treeview(card, columns=cols, show="headings", selectmode="extended")
         headings = {"date":"Datum UTC", "time":"Zeit", "call":"Call", "operator":"Operator", "contest":"Contest", "band":"Band", "mode":"Mode", "freq":"MHz", "rst":"RST", "status":"Sync", "email_qsl":"E-Mail QSL",
@@ -87,9 +167,9 @@ class QsoSyncFeatureMixin:
         for c in cols:
             self.tree.heading(c, text=self._tr(headings[c]))
             self.tree.column(c, width=widths[c], minwidth=45, stretch=(c in ("call", "contest")))
-        self.tree.grid(row=0, column=0, sticky="nsew")
+        self.tree.grid(row=1, column=0, sticky="nsew")
         sb = ttk.Scrollbar(card, orient="vertical", command=self.tree.yview)
-        sb.grid(row=0, column=1, sticky="ns")
+        sb.grid(row=1, column=1, sticky="ns")
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.tag_configure("local", foreground=theme.MUTED)
         self.tree.tag_configure("wavelog", foreground=theme.OK)
@@ -100,7 +180,7 @@ class QsoSyncFeatureMixin:
         self.tree.bind("<<TreeviewSelect>>", self._sync_selection_changed)
 
         actions = ttk.Frame(card, style="Card.TFrame")
-        actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Button(actions, text="QSO bearbeiten", style="Secondary.TButton", command=self.edit_selected_qso).pack(side="left")
         self.delete_qso_button = ttk.Button(
             actions,
@@ -125,12 +205,222 @@ class QsoSyncFeatureMixin:
             card, text="Keine offenen Sync-Details.", bg=theme.CARD, fg=theme.MUTED,
             font=("Segoe UI", 9), anchor="w", justify="left", wraplength=1050,
         )
-        self.sync_detail_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(9, 0))
+        self.sync_detail_label.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(9, 0))
 
         legend = tk.Label(card, text="QSL-Status: ✓ bestätigt · ↑ gesendet/hochgeladen · … wartet · — kein Status · ? nicht verfügbar · E-Mail QSL: ✅ versendet · — nicht versendet",
                           bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 8), anchor="w")
-        legend.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        legend.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         self._sync_selection_changed()
+
+    # -- callsign search ------------------------------------------------------
+    def _qso_search_changed(self):
+        """Typing: filter after a short pause so large logbooks stay fluid."""
+        if self._qso_filter_job is not None:
+            try:
+                self.after_cancel(self._qso_filter_job)
+            except tk.TclError:
+                pass
+        self._qso_filter_job = self.after(200, self._apply_qso_search_now)
+
+    def _apply_qso_search_now(self):
+        self._qso_filter_job = None
+        if self.closing:
+            return
+        criteria = self._current_qso_filter()
+        if criteria == self._qso_filter:
+            return
+        self._qso_filter = criteria
+        self._ensure_qso_tree_rendered()
+        self._update_qso_search_result()
+
+    def _current_qso_filter(self) -> QsoFilter:
+        values: dict[str, str] = {}
+        for key, var in getattr(self, "qso_filter_vars", {}).items():
+            values[key] = self._qso_filter_maps.get(key, {}).get(var.get(), "")
+        if values.get("period"):
+            # Relative periods ("today", "7d") change at UTC midnight.
+            values["day"] = datetime.now(timezone.utc).date().isoformat()
+        return QsoFilter(call=normalize_call_query(self.qso_search_var.get()), **values)
+
+    def _update_qso_filter_choices(self, found: dict | None = None):
+        """Fill the filter lists from the current logbook; keep selections."""
+        combos = getattr(self, "qso_filter_combos", None)
+        if not combos:
+            return
+        if found is None:
+            found = filter_choices(self._qso_cached_rows, self._qso_cached_countries)
+        if found == getattr(self, "_qso_filter_choices_shown", None):
+            return  # unchanged (the normal case after saving a QSO)
+        self._qso_filter_choices_shown = found
+        tr = self._tr
+        maps: dict[str, list[tuple[str, str]]] = {
+            "band": [(tr("Alle Bänder"), "")] + [(band, band) for band in found["bands"]],
+            "mode": [(tr("Alle Modes"), "")] + [(mode, mode) for mode in found["modes"]],
+            "period": [(tr(label), key) for key, label in PERIOD_CHOICES]
+            + [(year, f"year:{year}") for year in found["years"]],
+            "country": [(tr("Alle Länder"), "")] + [(name, name) for name in found["countries"]]
+            + ([(tr("(ohne Land)"), NO_COUNTRY)] if found.get("no_country") else []),
+            "qsl": [(tr(label), key) for key, label in QSL_CHOICES],
+            "sync": [(tr(label), key) for key, label in SYNC_CHOICES],
+        }
+        for key, entries in maps.items():
+            combo = combos[key]
+            var = self.qso_filter_vars[key]
+            previous_key = self._qso_filter_maps.get(key, {}).get(var.get(), "")
+            self._qso_filter_maps[key] = {display: value for display, value in entries}
+            combo.configure(values=[display for display, _value in entries])
+            display = next((d for d, value in entries if value == previous_key), None)
+            if display is None:
+                # The selected value vanished from the logbook (e.g. last QSO
+                # of that band deleted): keep filtering by it visibly.
+                display = previous_key.split(":", 1)[-1] if previous_key else entries[0][0]
+                if previous_key:
+                    self._qso_filter_maps[key][display] = previous_key
+            var.set(display)
+
+    def _layout_qso_filter_cells(self, width: int):
+        """One line when the window is wide enough, otherwise two lines of
+        three filters, so no filter is ever cut off at the right edge."""
+        cells = getattr(self, "_qso_filter_cells", [])
+        if not cells:
+            return
+        gap = 12
+        needed = sum(cell.winfo_reqwidth() for cell in cells) + gap * (len(cells) - 1)
+        columns = len(cells) if width <= 1 or needed <= width else (len(cells) + 1) // 2
+        if columns == self._qso_filter_columns:
+            return
+        self._qso_filter_columns = columns
+        for index, cell in enumerate(cells):
+            row, column = divmod(index, columns)
+            cell.grid(
+                row=row, column=column, sticky="w",
+                padx=(0 if column == 0 else gap, 0), pady=(0 if row == 0 else 6, 0),
+            )
+
+    def reset_qso_filters(self):
+        for key, var in getattr(self, "qso_filter_vars", {}).items():
+            entries = list(self._qso_filter_maps.get(key, {}))
+            var.set(entries[0] if entries else "")
+        if self.qso_search_var.get():
+            self.qso_search_var.set("")
+        self._apply_qso_search_now()
+
+    def export_filtered_adif(self):
+        if not self._qso_filter.active:
+            self.export_adif()
+            return
+        if self._qso_view_dirty or self._qso_write_running or self._qso_refresh_running:
+            # The table may not yet show the latest edits/deletions; export
+            # only what the user can actually see after the refresh.
+            self.refresh_qsos(immediate=True)
+            messagebox.showinfo(
+                "ADIF exportieren",
+                self._tr("Das Logbuch wird gerade aktualisiert. Bitte gleich noch einmal exportieren."),
+                parent=self,
+            )
+            return
+        rows = self._visible_qso_rows()
+        if not rows:
+            messagebox.showinfo(
+                "ADIF exportieren", self._tr("Der aktuelle Filter zeigt keine QSOs."), parent=self,
+            )
+            return
+        name = self._current_profile().get("name", "profil")
+        target = filedialog.asksaveasfilename(
+            title="ADIF exportieren", defaultextension=".adi",
+            initialfile=f"wavelog-offline-{name}-filter.adi",
+            filetypes=(("ADIF-Datei", "*.adi"), ("Alle Dateien", "*.*")), parent=self,
+        )
+        if not target:
+            return
+        local_ids = [row[0] for row in rows]
+        store = self.store
+        button = getattr(self, "qso_export_filtered_button", None)
+        if button is not None:
+            button.state(["disabled"])
+        self.status_var.set(self._tr("ADIF-Export läuft …"))
+
+        def finish(report=None, error=None):
+            if self.closing:
+                return
+            self._update_qso_search_result()  # re-enables the button
+            if error is not None:
+                self.status_var.set(self._tr("ADIF-Export fehlgeschlagen"))
+                messagebox.showerror("ADIF-Export fehlgeschlagen", error, parent=self)
+                return
+            self.status_var.set(f"ADIF-Export: {report['exported']} QSO(s)")
+            messagebox.showinfo(
+                "ADIF-Export abgeschlossen",
+                f"{report['exported']} QSO(s) exportiert nach:\n{report['target']}", parent=self,
+            )
+
+        def worker():
+            # Reading the ADIF store takes ~1 s for very large logbooks.
+            try:
+                report = store.export_adif(Path(target), local_ids=local_ids)
+            except Exception as exc:
+                message = str(exc)
+                if not self.closing:
+                    self.after(0, lambda: finish(error=message))
+                return
+            if not self.closing:
+                self.after(0, lambda: finish(report=report))
+
+        threading.Thread(target=worker, name="adif-export-filtered", daemon=True).start()
+
+    def clear_qso_search(self):
+        if self.qso_search_var.get():
+            self.qso_search_var.set("")
+        self._apply_qso_search_now()
+        self.qso_search_entry.focus_set()
+
+    def _focus_qso_search(self, _event=None):
+        if getattr(self, "current_page", "") != "qsos":
+            return None
+        self.qso_search_entry.focus_set()
+        self.qso_search_entry.select_range(0, "end")
+        return "break"
+
+    def _focus_first_qso_row(self):
+        children = self.tree.get_children()
+        if children:
+            self.tree.focus_set()
+            self.tree.selection_set(children[0])
+            self.tree.focus(children[0])
+            self.tree.see(children[0])
+        return "break"
+
+    def _visible_qso_rows(self) -> list[tuple[str, str, tuple]]:
+        hidden = self._qso_hidden_ids
+        rows = [row for row in self._qso_cached_rows if row[0] and row[0] not in hidden]
+        return filter_rows(rows, self._qso_filter, self._qso_cached_countries)
+
+    def _update_qso_search_result(self):
+        label = getattr(self, "qso_search_result_label", None)
+        if label is None:
+            return
+        criteria = self._qso_filter
+        export_button = getattr(self, "qso_export_filtered_button", None)
+        reset_button = getattr(self, "qso_filter_reset_button", None)
+        for button in (export_button, reset_button):
+            if button is not None:
+                button.state(["!disabled"] if criteria.active else ["disabled"])
+        if not criteria.active:
+            label.configure(text="")
+            return
+        count = len(self._qso_tree_rows) if self._qso_tree_rows is not None else len(self._visible_qso_rows())
+        if criteria.only_call:
+            if count:
+                text = f"{count} Treffer" if self.language != "en" else f"{count} match{'es' if count != 1 else ''}"
+            else:
+                text = self._tr("Kein QSO mit diesem Rufzeichen")
+        else:
+            total = sum(1 for row in self._qso_cached_rows if row[0] and row[0] not in self._qso_hidden_ids)
+            if count:
+                text = f"{count} von {total} QSOs" if self.language != "en" else f"{count} of {total} QSOs"
+            else:
+                text = self._tr("Keine QSOs für diesen Filter")
+        label.configure(text=text, fg=theme.MUTED if count else theme.WARN)
 
     @staticmethod
     def _display_qsl_status(value: str | None) -> str:
@@ -283,6 +573,9 @@ class QsoSyncFeatureMixin:
                 )
 
                 rows: list[tuple[str, str, tuple]] = []
+                countries: dict[str, str] = {}
+                country_memo: dict[str, str] = {}
+                country_db = getattr(self, "country_db", None)
                 fastlog_worked_keys: set[tuple[str, str, str]] = set()
                 # Formatting memos: identical inputs repeat thousands of times.
                 mode_memo: dict[tuple[str, str], str] = {}
@@ -304,6 +597,21 @@ class QsoSyncFeatureMixin:
                         fastlog_worked_keys.add((qso_call, qso_band, qso_mode))
                     meta = meta_by_id.get(local_id)
                     status_text, tag = self._display_sync_status(meta)
+
+                    # One spelling per DXCC entity: the CTY.DAT name of the
+                    # callsign wins over stored names ("FEDERAL REPUBLIC OF
+                    # GERMANY" from Wavelog vs "Fed. Rep. of Germany").
+                    country = country_memo.get(qso_call, "") if qso_call else ""
+                    if qso_call and qso_call not in country_memo:
+                        try:
+                            info = country_db.lookup(qso_call) if country_db is not None else None
+                        except Exception:
+                            info = None
+                        country = country_memo[qso_call] = info.country if info else ""
+                    if not country:
+                        country = str(q.get("country") or "").strip()
+                    if country:
+                        countries[local_id] = country
 
                     tm = str(q.get("time_on") or "")
                     if len(tm) >= 6:
@@ -373,6 +681,9 @@ class QsoSyncFeatureMixin:
                 result = {
                     "qsos": qsos,
                     "rows": rows,
+                    "countries": countries,
+                    # Built here, not on the Tk thread (~0.2 s for 30k QSOs).
+                    "filter_choices": filter_choices(rows, countries),
                     "meta_by_id": meta_by_id,
                     "qsl_by_wid": qsl_by_wid,
                     "fastlog_worked_keys": fastlog_worked_keys,
@@ -419,6 +730,8 @@ class QsoSyncFeatureMixin:
             if q.get("local_id")
         }
         self._qso_cached_rows = list(result["rows"])
+        self._qso_cached_countries = dict(result.get("countries") or {})
+        self._update_qso_filter_choices(result.get("filter_choices"))
         if self._qso_hidden_ids:
             self._qso_hidden_ids.intersection_update(self._qso_cached_by_id)
         self._qso_cached_meta_by_id = dict(result["meta_by_id"])
@@ -497,11 +810,13 @@ class QsoSyncFeatureMixin:
     def _ensure_qso_tree_rendered(self):
         if not self._qso_view_loaded:
             return
-        if self._qso_tree_generation == self._qso_cache_generation:
+        if (
+            self._qso_tree_generation == self._qso_cache_generation
+            and self._qso_tree_filter == self._qso_filter
+        ):
             return
 
-        hidden = self._qso_hidden_ids
-        rows = [row for row in self._qso_cached_rows if row[0] and row[0] not in hidden]
+        rows = self._visible_qso_rows()
         if self._qso_tree_rows is not None and self._qso_tree_rows:
             ops = plan_row_diff(self._qso_tree_rows, rows)
             if ops is not None:
@@ -514,6 +829,8 @@ class QsoSyncFeatureMixin:
                 if ops is not None:
                     self._qso_tree_rows = rows
                     self._qso_tree_generation = self._qso_cache_generation
+                    self._qso_tree_filter = self._qso_filter
+                    self._update_qso_search_result()
                     restore = self._qso_restore_selection
                     if restore and self.tree.exists(restore):
                         self.tree.selection_set(restore)
@@ -532,6 +849,8 @@ class QsoSyncFeatureMixin:
         self._qso_render_generation += 1
         render_generation = self._qso_render_generation
         self._qso_tree_rows = None
+        self._qso_render_source = rows
+        self._qso_render_filter = self._qso_filter
         self.tree.delete(*self.tree.get_children())
 
         # Render in chunks. Tk gets control back between chunks, so even a
@@ -553,7 +872,7 @@ class QsoSyncFeatureMixin:
         if self.closing or render_generation != self._qso_render_generation:
             return
 
-        rows = self._qso_cached_rows
+        rows = self._qso_render_source
         batch_size = 400
         end = min(len(rows), start + batch_size)
         if start == 0:
@@ -583,7 +902,9 @@ class QsoSyncFeatureMixin:
             return
 
         self._qso_tree_generation = self._qso_cache_generation
+        self._qso_tree_filter = getattr(self, "_qso_render_filter", self._qso_filter)
         self._qso_tree_rows = list(rendered)
+        self._update_qso_search_result()
         if selected and self.tree.exists(selected):
             self.tree.selection_set(selected)
             self.tree.focus(selected)
@@ -857,6 +1178,7 @@ class QsoSyncFeatureMixin:
             self.tree.delete(*existing)
         if self._qso_tree_rows is not None:
             self._qso_tree_rows = [row for row in self._qso_tree_rows if row[0] not in wanted]
+            self._update_qso_search_result()
         if anchor and self.tree.exists(anchor):
             self.tree.selection_set(anchor)
             self.tree.focus(anchor)
@@ -906,10 +1228,17 @@ class QsoSyncFeatureMixin:
             thread.join(timeout)
 
     def configure_wsjtx_sync(self):
+        self._show_page("settings")
         if hasattr(self, "settings_notebook") and hasattr(self, "settings_wsjtx_tab"):
             self.settings_notebook.select(self.settings_wsjtx_tab)
-            return
-        self._show_page("settings")
+
+    def _refresh_wsjtx_panel(self):
+        panel = getattr(self, "wsjtx_settings_panel", None)
+        if panel is not None:
+            try:
+                panel.refresh_last_result()
+            except Exception:
+                pass
 
     def _maybe_startup_wsjtx_sync(self):
         if self.closing or self.close_requested:
@@ -939,8 +1268,8 @@ class QsoSyncFeatureMixin:
     def sync_wsjtx_now(self):
         if self.sync_busy:
             messagebox.showwarning(
-                "WSJT-X Sync",
-                "Es läuft bereits eine Synchronisierung.",
+                "WSJT-X/WS Sync",
+                self._tr("Es läuft bereits eine Synchronisierung."),
                 parent=self,
             )
             return
@@ -948,6 +1277,11 @@ class QsoSyncFeatureMixin:
         wsjtx_settings = load_wsjtx_settings(self.db)
         if wsjtx_settings.log_path is None:
             self.configure_wsjtx_sync()
+            messagebox.showinfo(
+                "WSJT-X/WS Sync",
+                self._tr("Bitte zuerst unter Einstellungen → WSJT-X / WS Sync das Profil bzw. die Logdatei auswählen."),
+                parent=self,
+            )
             return
 
         # Wenn Wavelog verfügbar ist, führt "jetzt abgleichen" bewusst den
@@ -972,12 +1306,12 @@ class QsoSyncFeatureMixin:
         try:
             wsjtx_settings = load_wsjtx_settings(self.db)
             if wsjtx_settings.log_path is None:
-                raise ValueError("Kein WSJT-X Profil bzw. keine wsjtx_log.adi ausgewählt.")
+                raise ValueError("Kein WSJT-X/WS Profil bzw. keine wsjtx_log.adi ausgewählt.")
         except Exception as exc:
             if reason == "manual":
-                messagebox.showerror("WSJT-X Sync", str(exc), parent=self)
+                messagebox.showerror("WSJT-X/WS Sync", str(exc), parent=self)
             else:
-                write_startup_log("WSJT-X Sync konnte nicht gestartet werden: " + repr(exc))
+                write_startup_log("WSJT-X/WS Sync konnte nicht gestartet werden: " + repr(exc))
             if reason == "shutdown" and self.close_requested:
                 self._finalize_close()
             return
@@ -988,11 +1322,11 @@ class QsoSyncFeatureMixin:
         self.sync_reason = reason
 
         if reason == "startup":
-            progress_text = "WSJT-X Start-Sync läuft …"
+            progress_text = "WSJT-X/WS Start-Sync läuft …"
         elif reason == "shutdown":
-            progress_text = "WSJT-X Abschluss-Sync läuft …"
+            progress_text = "WSJT-X/WS Abschluss-Sync läuft …"
         else:
-            progress_text = "WSJT-X wird mit dem lokalen Logbuch abgeglichen …"
+            progress_text = "WSJT-X/WS wird mit dem lokalen Logbuch abgeglichen …"
 
         self.status_var.set(progress_text)
         if hasattr(self, "sync_label"):
@@ -1032,11 +1366,15 @@ class QsoSyncFeatureMixin:
 
         self.refresh_qsos()
         self.refresh_stats()
+        self._refresh_wsjtx_panel()
 
-        self.status_var.set(
-            f"WSJT-X Sync fertig · lokal +{result.imported_to_local} · "
-            f"WSJT-X +{result.appended_to_wsjtx}"
+        status_text = (
+            f"WSJT-X/WS fertig · lokal +{result.imported_to_local} · "
+            f"Datei +{result.appended_to_wsjtx}"
         )
+        self.status_var.set(status_text)
+        if hasattr(self, "sync_label"):
+            self.sync_label.configure(text=status_text)
 
         # Neu aus WSJT-X übernommene QSOs dürfen den bestehenden Online-Push
         # nutzen, aber nur wenn der Nutzer diesen ohnehin aktiviert hat.
@@ -1045,7 +1383,7 @@ class QsoSyncFeatureMixin:
 
         if reason == "manual" and not self.close_requested:
             messagebox.showinfo(
-                "WSJT-X Sync",
+                "WSJT-X/WS Sync",
                 format_wsjtx_result(result, self.language),
                 parent=self,
             )
@@ -1061,11 +1399,14 @@ class QsoSyncFeatureMixin:
         self.sync_is_automatic = False
         self.sync_operation = ""
         self.sync_reason = ""
-        self.status_var.set("WSJT-X Sync fehlgeschlagen")
-        write_startup_log("WSJT-X Sync fehlgeschlagen: " + message)
+        self.status_var.set("WSJT-X/WS Sync fehlgeschlagen")
+        self._refresh_wsjtx_panel()
+        if hasattr(self, "sync_label"):
+            self.sync_label.configure(text="WSJT-X/WS Sync fehlgeschlagen")
+        write_startup_log("WSJT-X/WS Sync fehlgeschlagen: " + message)
 
         if reason == "manual" and not self.close_requested:
-            messagebox.showerror("WSJT-X Sync", message, parent=self)
+            messagebox.showerror("WSJT-X/WS Sync", message, parent=self)
 
         if self.close_requested:
             if reason == "shutdown":
@@ -1270,15 +1611,15 @@ class QsoSyncFeatureMixin:
                             push_errors = followup.errors
                             ContestSyncEngine(self.store, self.db, client).link_pending()
                         wsjtx_note = (
-                            f" · WSJT-X: lokal +{wsjtx_result.imported_to_local}"
-                            f" / WSJT-X +{wsjtx_result.appended_to_wsjtx}"
+                            f" · WSJT-X/WS: lokal +{wsjtx_result.imported_to_local}"
+                            f" / WSJT-X/WS +{wsjtx_result.appended_to_wsjtx}"
                             f" / danach Wavelog +{pushed_from_wsjtx}"
                         )
                         if push_errors:
                             wsjtx_note += f" / Push-Fehler {push_errors}"
                 except Exception as wsjtx_exc:
                     # WSJT-X darf einen ansonsten erfolgreichen Wavelog-Sync nicht kaputt machen.
-                    wsjtx_note = f" · WSJT-X Fehler: {wsjtx_exc}"
+                    wsjtx_note = f" · WSJT-X/WS Fehler: {wsjtx_exc}"
                 msg = (f"Upload {summary.pushed} · zu Wavelog geändert {summary.patched} · "
                        f"neu aus Wavelog {summary.pulled} · aus Wavelog aktualisiert {summary.remote_updated} · "
                        f"remote gelöscht {summary.remote_deleted} · verknüpft {summary.linked} · "
@@ -1313,6 +1654,7 @@ class QsoSyncFeatureMixin:
         self._set_wavelog_mode_ui(True)
         self.status_var.set(("Auto-Sync fertig · " if automatic else "Sync fertig · ") + msg)
         self.refresh_qsos()
+        self._refresh_wsjtx_panel()
         self.refresh_contest_page()
         self._schedule_wavelog_check(60_000)
         withheld = int(getattr(self, "sync_withheld_deletions", 0) or 0)

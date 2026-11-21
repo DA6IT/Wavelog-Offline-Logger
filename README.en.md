@@ -29,6 +29,7 @@ An offline-first desktop logger for amateur radio: log contacts in the field eve
 - bundled Hamlib CAT control including TUNE/ATU and a manual Windows Hamlib updater with rollback
 - Hamlib `rotctld` rotor control with live position, compass, bearing target, STOP and hardware-free Dummy testing
 - Telnet DX Cluster, filters, worked markers and public spotting
+- **Live DXpeditions** page: only DXpeditions spotted in the last 30 minutes, with band/mode/frequency, worked status per band and mode, heading and distance (data from the DA6IT.de DXpedition calendar)
 - bidirectional WSJT-X file synchronization through `wsjtx_log.adi` with backup, duplicate protection and optional startup/shutdown synchronization
 - WSJT-X live status and logged-contact reception remain available over UDP
 - complete German and English UI, Light and Dark themes

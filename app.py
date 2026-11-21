@@ -16,6 +16,7 @@ from feature_backup import BackupFeatureMixin
 from feature_cat import CatFeatureMixin
 from feature_contest import ContestFeatureMixin
 from feature_dxcluster import DxClusterFeatureMixin
+from feature_dxpeditions import DxpeditionsFeatureMixin
 from feature_fastlog import FastLogFeatureMixin
 from feature_lifecycle import LifecycleFeatureMixin
 from feature_logbook import LogbookFeatureMixin
@@ -55,6 +56,7 @@ class LoggerApp(
     RotorFeatureMixin,
     WavelogGateFeatureMixin,
     DxClusterFeatureMixin,
+    DxpeditionsFeatureMixin,
     UdpFeatureMixin,
     BackupFeatureMixin,
     SettingsFeatureMixin,
@@ -116,6 +118,7 @@ class LoggerApp(
         self._init_wavelog_gate_feature()
         self._init_udp_feature()
         self._init_dxcluster_feature()
+        self._init_dxpeditions_feature()
         self._init_fastlog_feature()
         self._init_stats_feature()
         self._init_logbook_feature()
@@ -137,6 +140,7 @@ class LoggerApp(
         self._build_stats_page()
         self._build_cat_page()
         self._build_dx_cluster_page()
+        self._build_dxpeditions_page()
         self._build_udp_log_page()
         self._build_settings_page()
         self._load_settings_to_ui()
