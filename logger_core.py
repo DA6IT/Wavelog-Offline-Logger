@@ -653,15 +653,57 @@ class CountryDB:
             return None
         if call in self.exact:
             return self.exact[call]
+        index = self._prefix_index
+        if "/" in call:
+            # CTY.DAT has entity prefixes containing a slash (VP8/G South
+            # Georgia, 3Y/P Peter 1, FK/C Chesterfield): they win.
+            slash = call.index("/")
+            for length in range(min(len(call), self._max_prefix_len), slash, -1):
+                info = index.get(call[:length])
+                if info is not None:
+                    return info
+            call = _country_part_of_slash_call(call)
+            if not call:
+                return None
+            if call in self.exact:
+                return self.exact[call]
         # Exact portable/special entries can still exist for the full call.
         # Dictionary probes from the longest possible prefix down give the
         # same result as scanning the length-sorted prefix list.
-        index = self._prefix_index
         for length in range(min(len(call), self._max_prefix_len), 0, -1):
             info = index.get(call[:length])
             if info is not None:
                 return info
         return None
+
+# Operating suffixes that do not change the DXCC entity of a callsign.
+_NON_COUNTRY_SUFFIXES = frozenset({"P", "M", "QRP", "QRPP", "A", "LH", "R", "B", "J", "E", "X", "T", "PM"})
+# Maritime/aeronautical mobile: no DXCC entity at all.
+_NO_COUNTRY_SUFFIXES = frozenset({"MM", "AM"})
+
+
+def _country_part_of_slash_call(call: str) -> str:
+    """The part of ``A/B`` that determines the DXCC entity ("" = none).
+
+    ``DL1ABC/P`` -> ``DL1ABC``, ``EA8/DL1ABC`` -> ``EA8``,
+    ``K6VHF/HR9`` -> ``HR9``, ``W1AW/KH6`` -> ``KH6``, ``DL1ABC/MM`` -> "".
+    Of two callsign-like parts the shorter one is the prefix (on a tie the
+    first one, as in ``VP2V/NY9K``).
+    """
+    parts = [part for part in call.split("/") if part]
+    if not parts:
+        return ""
+    if any(part in _NO_COUNTRY_SUFFIXES for part in parts[1:]):
+        return ""
+    parts = [
+        part for index, part in enumerate(parts)
+        if index == 0 or (part not in _NON_COUNTRY_SUFFIXES and not part.isdigit())
+    ]
+    if len(parts) == 1:
+        return parts[0]
+    first, second = parts[0], parts[1]
+    return second if len(second) < len(first) else first
+
 
 def _qso_hash_with_fields(qso: dict[str, Any], fields: list[str]) -> str:
     obj = {}

@@ -636,7 +636,7 @@ class DxClusterFeatureMixin:
             if not country:
                 country = str(qso.get("country") or "").strip()
             raw_mode = str(qso.get("mode") or "")
-            band = str(qso.get("band") or "").strip()
+            band = str(qso.get("band") or "").strip().lower()  # "20M" from some ADIF files
             if band:
                 # The frequency only matters without a band (band derivation
                 # and SSB sideband), so it is not parsed here.
@@ -675,6 +675,8 @@ class DxClusterFeatureMixin:
         self._update_qso_worked_status()
         if hasattr(self, "dx_cluster_tree"):
             self._refresh_dx_cluster_spots()
+        if getattr(self, "current_page", "") == "dxpeditions" and hasattr(self, "_dxped_render"):
+            self._dxped_render()  # a just logged QSO changes the worked status
 
     def _dx_cluster_country(self, callsign: str) -> str:
         key = (callsign or "").strip().upper()

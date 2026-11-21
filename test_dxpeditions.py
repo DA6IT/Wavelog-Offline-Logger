@@ -90,6 +90,25 @@ class ActiveSlotTests(unittest.TestCase):
         self.assertIn("dx-3x|20m|FT8", slots)
         self.assertAlmostEqual(NOW + 7200 - slots["dx-3x|20m|FT8"].spotted_ts, 600, delta=1)
 
+    def test_spots_age_out_without_new_download(self):
+        # Downloaded at NOW (skew 0); 25 minutes later only spots younger than
+        # 5 minutes at download time are still active.
+        later = active_slots(self.calendar, SPOTS, now=NOW + 25 * 60, skew=0.0)
+        self.assertEqual({slot.key for slot in later}, {"dx-vk9|10m|FT4", "dx-vk9|17m|SSB"})
+        self.assertEqual(active_slots(self.calendar, SPOTS, now=NOW + 7200, skew=0.0), [])
+        # Local clock 1 h behind the server: skew from the download keeps ages right.
+        shifted = slots_by_key(active_slots(self.calendar, SPOTS, now=NOW - 3600 + 60, skew=-3600.0))
+        self.assertAlmostEqual(NOW - 3600 + 60 - shifted["dx-3x|20m|FT8"].spotted_ts, 660, delta=1)
+
+    def test_missing_mode_is_guessed_or_marked(self):
+        payload = {"server_time": NOW, "items": {"dx-3x": {"call": "3X4U", "last_ts": NOW - 60, "frequency_khz": 14074,
+                                                            "band": "20m", "mode": "", "bands_60m": [
+                                                                {"call": "3X4U", "last_ts": NOW - 60, "frequency_khz": 50313.5,
+                                                                 "band": "6m", "mode": ""}]}}}
+        keys = {slot.key for slot in active_slots(self.calendar, payload, now=NOW)}
+        self.assertIn("dx-3x|20m|FT8", keys)
+        self.assertEqual(len(keys), 2)
+
     def test_local_cluster_spot_adds_and_refreshes(self):
         spotted = datetime.fromtimestamp(NOW - 60, timezone.utc)
         local = [
@@ -146,6 +165,13 @@ class WorkedTests(unittest.TestCase):
         self.assertEqual(format_worked(worked), "15m CW · 10m FT4")
         self.assertEqual(format_worked([]), "—")
 
+    def test_worked_wins_over_unknown_country_index(self):
+        call_index, country_index = build_worked_index({("3X4U", "20m", "FT8")}, set())
+        status, worked = worked_status(self.slots["dx-3x|20m|FT8"], "Guinea", call_index, country_index)
+        self.assertEqual(status, "worked")
+        self.assertEqual(worked, [("20m", "FT8")])
+        self.assertEqual(format_worked([("17m", "USB"), ("40m", "LSB")]), "17m SSB · 40m SSB")
+
     def test_new_slot_when_entity_not_on_band(self):
         call_index, country_index = build_worked_index(set(), {("Christmas Island", "40m", "CW")})
         self.assertEqual(worked_status(self.slots["dx-vk9|15m|CW"], "Christmas Island", call_index, country_index)[0], "new_slot")
@@ -177,6 +203,43 @@ class FormatTests(unittest.TestCase):
         self.assertEqual(format_age(12 * 60 + 5), "12 Min.")
         self.assertEqual(format_until("2026-11-28"), "28.11.")
         self.assertEqual(format_until(""), "—")
+        self.assertEqual(format_until("2026-11-28", language="en"), "Nov 28")
+
+
+class SlashCallCountryTests(unittest.TestCase):
+    def test_prefix_after_slash(self):
+        from pathlib import Path
+
+        from logger_core import CountryDB
+
+        db = CountryDB(Path(__file__).resolve().parent / "cty.dat")
+        expected = {
+            "DL1ABC/P": "Fed. Rep. of Germany", "EA8/DL1ABC": "Canary Islands", "K6VHF/HR9": "Honduras",
+            "W1AW/KH6": "Hawaii", "VP2V/NY9K": "British Virgin Islands", "W1AW/4": "United States",
+            "DL1ABC/P/QRP": "Fed. Rep. of Germany", "DL1ABC": "Fed. Rep. of Germany",
+            "VP8/G4ABC": "South Georgia Island", "3Y/P1XYZ": "Peter 1 Island", "FK/C1XYZ": "Chesterfield Islands",
+        }
+        for call, country in expected.items():
+            info = db.lookup(call)
+            self.assertEqual(info.country if info else None, country, call)
+        self.assertIsNone(db.lookup("DL1ABC/MM"))
+        self.assertIsNone(db.lookup("/P"))
+
+
+class WorkedCacheBandCaseTests(unittest.TestCase):
+    def test_upper_case_band_counts_as_worked(self):
+        from pathlib import Path
+        from types import SimpleNamespace
+
+        from feature_dxcluster import DxClusterFeatureMixin
+        from logger_core import CountryDB
+
+        fake = SimpleNamespace(country_db=CountryDB(Path(__file__).resolve().parent / "cty.dat"))
+        data = DxClusterFeatureMixin._compute_dx_cluster_worked_cache(
+            fake, [{"call": "3X4U", "band": "20M", "mode": "FT8", "country": "GUINEA"}],
+        )
+        self.assertIn(("3X4U", "20m", "FT8"), data["calls"])
+        self.assertIn(("Guinea", "20m", "FT8"), data["countries"])
 
 
 if __name__ == "__main__":

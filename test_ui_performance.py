@@ -128,7 +128,7 @@ def eager_worked_cache(country_db, qsos):
             frequency_hz = int(round(float(str(qso.get("freq") or "0").replace(",", ".")) * 1_000_000))
         except (TypeError, ValueError):
             pass
-        band = str(qso.get("band") or "").strip()
+        band = str(qso.get("band") or "").strip().lower()
         if not band and frequency_hz:
             band = band_from_mhz(frequency_hz / 1_000_000) or ""
         mode = normalize_worked_mode(str(qso.get("mode") or ""), frequency_hz, band)

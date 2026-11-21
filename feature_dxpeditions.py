@@ -31,7 +31,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from app_common import write_startup_log
-from dx_cluster import DxSpot, normalize_worked_mode
+from dx_cluster import DxSpot, bandplan_spot_mode, normalize_worked_mode
 from logger_core import APP_NAME, VERSION, app_data_dir, band_from_mhz, secure_urlopen
 from qso_tree_view import apply_row_diff, insert_row, plan_row_diff
 from ui_theme import theme
@@ -63,12 +63,12 @@ DXPED_COLUMNS = (
     ("country", "Land", 130, "w", False),
     ("band", "Band", 50, "center", False),
     ("mode", "Mode", 52, "center", False),
-    ("frequency", "MHz", 76, "e", False),
+    ("frequency", "MHz", 70, "e", False),
     ("age", "Spot vor", 66, "e", False),
     ("status", "Status", 124, "w", False),
-    ("worked", "Gearbeitet", 130, "w", True),
     ("heading", "Richtung", 80, "e", False),
     ("distance", "Entfernung", 92, "e", False),
+    ("worked", "Gearbeitet", 130, "w", True),
     ("until", "bis", 56, "center", False),
 )
 
@@ -160,12 +160,15 @@ def active_slots(
     *,
     now: float | None = None,
     window_seconds: int = DXPED_ACTIVE_SECONDS,
+    skew: float | None = None,
 ) -> list[ActiveSlot]:
     """All band/mode slots of DXpeditions spotted within ``window_seconds``.
 
-    DA6IT.de timestamps are compared with its ``server_time`` (so a wrong
-    local clock does not matter) and converted to local time; spots of the
-    logger's own DX Cluster connection are compared with ``now``.
+    DA6IT.de timestamps are converted to local time with ``skew`` = local
+    time at download minus the payload's ``server_time`` (so a wrong local
+    clock does not matter), then compared with ``now`` – spots therefore age
+    and drop out even when no newer download arrives.  ``skew=None`` means
+    "downloaded just now".  Own DX Cluster spots are compared with ``now``.
     """
     now = time.time() if now is None else float(now)
     by_id = {dxped.id: dxped for dxped in calendar}
@@ -183,11 +186,12 @@ def active_slots(
             current.extra_calls.add(slot.call)
 
     if isinstance(spots_payload, dict) and isinstance(spots_payload.get("items"), dict):
-        try:
-            server_time = float(spots_payload.get("server_time") or now)
-        except (TypeError, ValueError):
-            server_time = now
-        skew = now - server_time
+        if skew is None:
+            try:
+                server_time = float(spots_payload.get("server_time") or now)
+            except (TypeError, ValueError):
+                server_time = now
+            skew = now - server_time
         for ident, item in list(spots_payload["items"].items())[:2000]:
             dxped = by_id.get(str(ident))
             if dxped is None or not isinstance(item, dict):
@@ -201,18 +205,25 @@ def active_slots(
                     last_ts = float(entry.get("last_ts") or 0)
                 except (TypeError, ValueError):
                     continue
-                if not last_ts or server_time - last_ts > window_seconds or last_ts - server_time > 300:
+                spotted_ts = last_ts + skew
+                if not last_ts or now - spotted_ts > window_seconds or spotted_ts - now > 300:
                     continue
                 band = _text(entry.get("band"), 10).lower()
                 mode = _text(entry.get("mode"), 12).upper()
                 frequency_hz = _frequency_hz(entry.get("frequency_khz"))
                 if not band and frequency_hz:
                     band = band_from_mhz(frequency_hz / 1_000_000) or ""
+                if not mode and frequency_hz:
+                    mode = bandplan_spot_mode(frequency_hz) or ""
+                if mode in {"LSB", "USB"}:
+                    mode = "SSB"
+                if not mode:
+                    mode = "?"
                 offer(ActiveSlot(
                     dxpedition=dxped,
                     call=_text(entry.get("call") or item.get("call") or dxped.callsign, 40).upper(),
                     band=band, mode=mode, frequency_hz=frequency_hz,
-                    spotted_ts=last_ts + skew, spotter=_text(entry.get("spotter"), 20).upper(),
+                    spotted_ts=spotted_ts, spotter=_text(entry.get("spotter"), 20).upper(),
                 ))
 
     alias_index: dict[str, Dxpedition] = {}
@@ -233,6 +244,8 @@ def active_slots(
         mode = normalize_worked_mode(spot.mode, spot.frequency_hz, spot.band)
         if mode in {"LSB", "USB"}:
             mode = "SSB"
+        if not mode:
+            mode = "?"
         offer(ActiveSlot(
             dxpedition=dxped, call=call, band=(spot.band or "").lower(), mode=mode,
             frequency_hz=int(spot.frequency_hz or 0), spotted_ts=spotted_ts,
@@ -271,11 +284,11 @@ def worked_status(
     for call in calls:
         worked |= call_index.get(call, set())
     current = (slot.band, _slot_mode(slot.mode, slot.band, slot.frequency_hz))
-    entity = country_index.get(country, set()) if country else set()
-    if country and not entity:
-        status = "new_country"
-    elif current in worked:
+    entity = (country_index.get(country, set()) | worked) if country else set()
+    if current in worked:
         status = "worked"
+    elif country and not entity:
+        status = "new_country"
     elif country and current not in entity:
         status = "new_slot"
     elif country:
@@ -300,7 +313,7 @@ def _band_order(band: str) -> float:
 def format_worked(pairs: list[tuple[str, str]], limit: int = 6) -> str:
     if not pairs:
         return "—"
-    shown = [f"{band} {mode}" for band, mode in pairs[:limit]]
+    shown = [f"{band} {'SSB' if mode in {'USB', 'LSB'} else mode}" for band, mode in pairs[:limit]]
     more = len(pairs) - limit
     return " · ".join(shown) + (f" · +{more}" if more > 0 else "")
 
@@ -317,7 +330,9 @@ def format_until(end: str, today: date | None = None, language: str = "de") -> s
         end_date = date.fromisoformat(end[:10])
     except (TypeError, ValueError):
         return "—"
-    return end_date.strftime("%d.%m." if language != "en" else "%m-%d")
+    if language == "en":
+        return f"{end_date.strftime('%b')} {end_date.day}"
+    return end_date.strftime("%d.%m.")
 
 
 def beam(
@@ -382,6 +397,8 @@ class DxpeditionsFeatureMixin:
         self.dxped_calendar_fetched = 0.0
         self.dxped_spots_payload: dict | None = None
         self.dxped_spots_fetched = 0.0
+        # local time at download - server_time of that payload
+        self.dxped_spots_skew = 0.0
         self.dxped_fetch_running = False
         self.dxped_last_error = ""
         self.dxped_refresh_job = None
@@ -402,6 +419,8 @@ class DxpeditionsFeatureMixin:
             raw = json.loads(self._dxped_cache_path().read_text(encoding="utf-8"))
             self.dxped_calendar = parse_calendar(raw.get("payload"))
             self.dxped_calendar_fetched = float(raw.get("fetched_at") or 0)
+            if self.dxped_calendar_fetched > time.time() + 300:
+                self.dxped_calendar_fetched = 0.0  # wrong clock once: refresh normally
         except (OSError, ValueError, TypeError, AttributeError):
             self.dxped_calendar = []
             self.dxped_calendar_fetched = 0.0
@@ -451,6 +470,9 @@ class DxpeditionsFeatureMixin:
             top, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9), anchor="w", justify="left",
         )
         self.dxped_status_label.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        self.dxped_status_label.bind(
+            "<Configure>", lambda event: self.dxped_status_label.configure(wraplength=max(200, event.width - 10)),
+        )
 
         table = self._card(p, row=1, column=0, sticky="nsew")
         table.columnconfigure(0, weight=1)
@@ -513,9 +535,15 @@ class DxpeditionsFeatureMixin:
     def _dxped_settings_ready(self) -> bool:
         return getattr(self, "db", None) is not None
 
-    def _dxped_page_shown(self):
+    def _dxped_sync_auto_setting(self):
+        """The setting is per profile; follow profile switches."""
         if self._dxped_settings_ready():
-            self.dxped_auto_var.set(self.db.get_setting(SETTING_DXPED_AUTO, "1") != "0")
+            value = self.db.get_setting(SETTING_DXPED_AUTO, "1") != "0"
+            if value != self.dxped_auto_var.get():
+                self.dxped_auto_var.set(value)
+
+    def _dxped_page_shown(self):
+        self._dxped_sync_auto_setting()
         self._dxped_render()
         # Switching pages back and forth must not hammer da6it.de.
         if self.dxped_auto_var.get() and time.time() - self.dxped_spots_fetched > 30:
@@ -554,6 +582,12 @@ class DxpeditionsFeatureMixin:
         self.dxped_render_job = None
         if not self._dxped_page_visible():
             return
+        auto_before = self.dxped_auto_var.get()
+        self._dxped_sync_auto_setting()
+        if self.dxped_auto_var.get() != auto_before:
+            self._dxped_schedule()  # profile switched: start/stop downloads
+            if self.dxped_auto_var.get():
+                self._dxped_fetch()
         self._dxped_render()
         self.dxped_render_job = self.after(DXPED_RENDER_TICK_MS, self._dxped_render_tick)
 
@@ -578,19 +612,31 @@ class DxpeditionsFeatureMixin:
         def worker():
             calendar_payload = None
             spots_payload = None
-            error = ""
-            try:
-                if need_calendar:
+            spots_received = 0.0
+            errors: list[str] = []
+            # Separate requests: a failing calendar must not stop the spots.
+            if need_calendar:
+                try:
                     calendar_payload = fetch_json(DXPED_CALENDAR_URL)
+                except Exception as exc:  # network, TLS, JSON
+                    errors.append(str(exc) or exc.__class__.__name__)
+            try:
                 spots_payload = fetch_json(DXPED_SPOTS_URL)
-            except Exception as exc:  # network, TLS, JSON
-                error = str(exc) or exc.__class__.__name__
-            if not getattr(self, "closing", False):
-                self.after(0, lambda: self._dxped_fetch_done(calendar_payload, spots_payload, error))
+                spots_received = time.time()
+            except Exception as exc:
+                errors.append(str(exc) or exc.__class__.__name__)
+            if getattr(self, "closing", False):
+                return
+            try:
+                self.after(
+                    0, lambda: self._dxped_fetch_done(calendar_payload, spots_payload, spots_received, "; ".join(errors)),
+                )
+            except (RuntimeError, tk.TclError):
+                pass  # window already destroyed
 
         threading.Thread(target=worker, name="dxpeditions-fetch", daemon=True).start()
 
-    def _dxped_fetch_done(self, calendar_payload, spots_payload, error: str):
+    def _dxped_fetch_done(self, calendar_payload, spots_payload, spots_received: float, error: str):
         self.dxped_fetch_running = False
         now = time.time()
         if calendar_payload is not None:
@@ -600,21 +646,28 @@ class DxpeditionsFeatureMixin:
                 self.dxped_calendar_fetched = now
                 self._dxped_store_calendar(calendar_payload, now)
         if isinstance(spots_payload, dict):
+            try:
+                server_time = float(spots_payload.get("server_time") or spots_received)
+            except (TypeError, ValueError):
+                server_time = spots_received
             self.dxped_spots_payload = spots_payload
-            self.dxped_spots_fetched = now
-        self.dxped_last_error = error
-        if error:
+            self.dxped_spots_fetched = spots_received or now
+            self.dxped_spots_skew = (spots_received or now) - server_time
+        if error and error != self.dxped_last_error:
+            # Only changes are logged: offline, this would repeat every minute.
             write_startup_log("DXpeditionen konnten nicht geladen werden: " + error)
+        self.dxped_last_error = error
         self._dxped_render()
 
     # -- rendering ---------------------------------------------------------------
     def _dxped_worked_index(self):
         calls = getattr(self, "dx_cluster_worked_calls", None) or set()
         countries = getattr(self, "dx_cluster_worked_countries", None) or set()
-        source = (id(calls), len(calls), id(countries), len(countries))
-        if source != self._dxped_index_source:
+        source = self._dxped_index_source
+        if source is None or source[0] is not calls or source[1] is not countries or source[2] != (len(calls), len(countries)):
             self._dxped_index = build_worked_index(calls, countries)
-            self._dxped_index_source = source
+            # Keep references (not ids): a freed set's id could be reused.
+            self._dxped_index_source = (calls, countries, (len(calls), len(countries)))
         return self._dxped_index
 
     def _dxped_country_info(self, call: str):
@@ -629,7 +682,9 @@ class DxpeditionsFeatureMixin:
     def _dxped_rows(self) -> tuple[list[tuple[str, str, tuple]], dict[str, ActiveSlot]]:
         local_spots = [spot for _id, spot in getattr(self, "dx_cluster_spots", [])]
         now = time.time()
-        slots = active_slots(self.dxped_calendar, self.dxped_spots_payload, local_spots, now=now)
+        slots = active_slots(
+            self.dxped_calendar, self.dxped_spots_payload, local_spots, now=now, skew=self.dxped_spots_skew,
+        )
         call_index, country_index = self._dxped_worked_index()
         own_locator = self.db.get_setting("locator", "") if self._dxped_settings_ready() else ""
         language = getattr(self, "language", "de")
@@ -655,8 +710,8 @@ class DxpeditionsFeatureMixin:
                 slot.key, status,
                 (
                     slot.call, country or slot.dxpedition.dxcc or "—", slot.band, slot.mode, frequency,
-                    format_age(age, language), self._tr(DXPED_STATUS_LABELS[status]), format_worked(worked),
-                    heading, distance, format_until(slot.dxpedition.end, language=language),
+                    format_age(age, language), self._tr(DXPED_STATUS_LABELS[status]),
+                    heading, distance, format_worked(worked), format_until(slot.dxpedition.end, language=language),
                 ),
             ))
             by_id[slot.key] = slot
@@ -685,6 +740,8 @@ class DxpeditionsFeatureMixin:
         if self.dxped_selected_id in by_id:
             if tuple(tree.selection()) != (self.dxped_selected_id,):
                 tree.selection_set(self.dxped_selected_id)
+            if tree.focus() != self.dxped_selected_id:
+                tree.focus(self.dxped_selected_id)
         else:
             self.dxped_selected_id = None
         self._dxped_selection_changed()
