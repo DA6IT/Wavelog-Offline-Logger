@@ -2,7 +2,7 @@
 
 [Deutsch](CHANGELOG.md) · **English**
 
-## 0.24.0 — unreleased
+## 0.24.0 — 2026-11-21
 
 ### Added
 

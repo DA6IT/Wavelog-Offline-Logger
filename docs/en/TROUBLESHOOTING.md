@@ -18,6 +18,14 @@ Select the QSO under **Logbook & Sync** and read **Sync details**. A sync error 
 
 Enable UDP, use the same free address and port in both apps, and point WSJT-X's primary UDP server to the logger. The secondary logged-contact ADIF broadcast does not send live status. Only one process can bind a given address/port.
 
+## WSJT-X/WS sync finds no new QSOs
+
+After its first start WS (formerly WSJT-X Improved) writes only to its own folder `%LOCALAPPDATA%\WS` or `WS - <rig name>`. Select the WS profile under **Settings → WSJT-X / WS Sync** (the tab warns when an old WSJT-X folder is still selected) and check with **Synchronize with WSJT-X / WS now**. File and result of the last sync are shown below the button.
+
+## Live DXpeditions stays empty
+
+Only DXpeditions spotted within the last 30 minutes are listed, so an empty list is often correct. The status line shows when data was last loaded, whether `da6it.de` was reachable and whether the spot data is outdated. Enter your locator in **Settings** for heading and distance.
+
 ## Wavelog radio connection does not start or QSY does not arrive
 
 Port 54321/54322 in use: close WaveLogGate or a second Logger instance and enable the connection under **CAT** again. The radio does not appear in Wavelog: the API v2 token needs the `radio:write` permission. Clicking a spot does nothing: CAT must be running and Wavelog must be opened under exactly the configured Wavelog address. Safari does not support QSY and “Live - WebSocket”.

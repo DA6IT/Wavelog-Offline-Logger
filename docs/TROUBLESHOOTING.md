@@ -56,6 +56,14 @@ Tokens niemals in einem öffentlichen Issue posten.
 
 Bei `CERTIFICATE_VERIFY_FAILED` verwendet ein aktueller Build zuerst den nativen Zertifikatsspeicher des Betriebssystems und zusätzlich ein gebündeltes CA-Paket als Fallback. Prüfe trotzdem Systemdatum, ausstehende Betriebssystem-Zertifikatsupdates sowie TLS-inspektierende Firmen-Proxys oder Virenscanner. Die Zertifikatsprüfung wird aus Sicherheitsgründen nicht abschaltbar gemacht.
 
+## WSJT-X/WS-Abgleich findet keine neuen QSOs
+
+WS (früher WSJT-X Improved) schreibt nach dem ersten Start nur noch in den eigenen Ordner `%LOCALAPPDATA%\WS` bzw. `WS - <Rig-Name>`. Unter **Einstellungen → WSJT-X / WS Sync** das WS-Profil wählen (der Tab weist auf einen noch gewählten alten WSJT-X-Ordner hin) und mit **Jetzt mit WSJT-X / WS abgleichen** prüfen. Unter dem Knopf stehen Datei und Ergebnis des letzten Abgleichs.
+
+## Live DXpeditionen bleibt leer
+
+Angezeigt werden nur DXpeditionen, die in den letzten 30 Minuten gespottet wurden – eine leere Liste ist also oft korrekt. Die Statuszeile zeigt, wann zuletzt geladen wurde, ob `da6it.de` erreichbar war und ob die Spot-Daten veraltet sind. Für Richtung und Entfernung den eigenen Locator unter **Einstellungen** eintragen.
+
 ## Wavelog-Verbindung für Funkgerät startet nicht oder QSY kommt nicht an
 
 - **Port belegt:** WaveLogGate oder eine zweite Logger-Instanz nutzt bereits Port 54321/54322. WaveLogGate beenden und die Verbindung unter **CAT** neu einschalten.
