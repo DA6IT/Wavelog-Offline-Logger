@@ -134,9 +134,9 @@ External QSOs are saved locally first, deduplicated and optionally enriched from
 
 ### WSJT-X file synchronization
 
-The dedicated **WSJT-X Sync** settings tab links the active Logger profile to one WSJT-X log file. It supports the normal `%LOCALAPPDATA%\WSJT-X\wsjtx_log.adi`, `--rig-name` profiles below `%LOCALAPPDATA%\WSJT-X - <rig-name>\wsjtx_log.adi`, and a manually selected path.
+The dedicated **WSJT-X / WS Sync** settings tab links the active Logger profile to one log file of WSJT-X or **WS** (WS – Digital Mode Suite, formerly WSJT-X Improved). It supports `%LOCALAPPDATA%\WS\wsjtx_log.adi` and `%LOCALAPPDATA%\WS - <rig-name>\wsjtx_log.adi`, the WSJT-X folders `%LOCALAPPDATA%\WSJT-X[ - <rig-name>]\wsjtx_log.adi`, a log file chosen in WS/WSJT-X itself (read-only from `WS.ini` / `WS - <rig-name>.ini`, together with your callsign for display), and a manually selected path. WS profiles are listed first; WS copies the WSJT-X log once and then only writes to its own folder, so the tab warns when an old WSJT-X folder with a WS counterpart is still selected.
 
-Startup, shutdown and manual synchronization can be enabled independently per Logger profile. **Sync now** runs the file merge immediately.
+Synchronize at any time with **Synchronize with WSJT-X / WS now** in the tab or **WSJT-X / WS abgleichen** (Sync WSJT-X / WS) on **Logbook & Sync**. With Wavelog configured and reachable this runs the full three-way sync, otherwise only the local file merge. The time and result of the last sync are shown below the button. Startup, shutdown and manual full sync triggers can additionally be enabled per Logger profile.
 
 The Offline Logger remains the local merge hub. Missing QSOs are added between the Offline Logger and WSJT-X; with Wavelog configured, the normal full synchronization can combine this into a controlled three-way workflow. A missing record is never treated as an automatic deletion request.
 

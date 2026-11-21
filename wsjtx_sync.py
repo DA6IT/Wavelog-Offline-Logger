@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
+import re
 import shutil
 import sys
+import urllib.parse
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -30,6 +33,7 @@ SETTING_PROFILE_NAME = "wsjtx_sync_profile_name"
 SETTING_ON_STARTUP = "wsjtx_sync_on_startup"
 SETTING_ON_SHUTDOWN = "wsjtx_sync_on_shutdown"
 SETTING_ON_MANUAL = "wsjtx_sync_on_manual"
+SETTING_LAST_RESULT = "wsjtx_sync_last_result"
 
 _MISSING = "__WSJTX_SETTING_MISSING__"
 
@@ -73,6 +77,7 @@ class WsjtxSyncResult:
     backup_path: str = ""
     local_after: int = 0
     wsjtx_after: int = 0
+    log_path: str = ""
 
 
 def _as_bool(value: Any) -> bool:
@@ -163,11 +168,52 @@ def should_wsjtx_sync_for_reason(
 
 
 def _wsjtx_root() -> Path:
+    """Data location (QStandardPaths::DataLocation parent) of WSJT-X and WS."""
     if sys.platform == "win32":
         return Path(os.environ.get("LOCALAPPDATA", Path.home()))
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support"
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+
+
+def _wsjtx_config_root() -> Path:
+    """Where WSJT-X/WS keep ``<AppName>.ini`` outside Windows.
+
+    On Windows the ini lives in the program's data folder itself
+    (``%LOCALAPPDATA%\\WS\\WS.ini``); Linux and macOS keep all ini files side
+    by side in one configuration directory.
+    """
+    if sys.platform == "win32":
+        return _wsjtx_root()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Preferences"
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+
+# WS ("WS - Digital Mode Suite", formerly WSJT-X Improved, since 3.2.0) uses
+# the application name "WS" and, started with --rig-name <name>, "WS - <name>".
+# Its data folder is named after the application (%LOCALAPPDATA%\WS - DA6IT)
+# and the ADIF log keeps the WSJT-X file name wsjtx_log.adi unless the user
+# picked another file (Configuration/MyLog in the ini).
+_WS_DIR_RE = re.compile(r"^ws(?: - (?P<instance>.+))?$", re.IGNORECASE)
+_WSJTX_DIR_RE = re.compile(r"^wsjt-x(?P<rest>.*)$", re.IGNORECASE)
+WSJTX_DEFAULT_LOG_NAME = "wsjtx_log.adi"
+
+
+def classify_wsjtx_dir(dirname: str) -> tuple[str, str] | None:
+    """Return ``(program, instance)`` for a WSJT-X or WS data folder name.
+
+    ``program`` is ``"WS"`` or ``"WSJT-X"``; ``instance`` is the --rig-name
+    part ("" for the standard instance).  Other folders return ``None``.
+    """
+    raw = str(dirname or "").strip()
+    match = _WS_DIR_RE.match(raw)
+    if match:
+        return "WS", (match.group("instance") or "").strip()
+    match = _WSJTX_DIR_RE.match(raw)
+    if match:
+        return "WSJT-X", match.group("rest").lstrip(" -_").strip()
+    return None
 
 
 def re_strip_wsjt_prefix(value: str) -> str:
@@ -177,13 +223,125 @@ def re_strip_wsjt_prefix(value: str) -> str:
 
 
 def _profile_name_from_dir(dirname: str) -> str:
-    raw = dirname.strip()
-    if raw.casefold() == "wsjt-x":
-        return "Standard"
-    return re_strip_wsjt_prefix(raw)
+    classified = classify_wsjtx_dir(dirname)
+    if classified is None:
+        return dirname.strip()
+    program, instance = classified
+    return f"{program} · {instance}" if instance else program
+
+
+def _decode_qsettings_value(raw: str) -> str:
+    """Decode a QSettings ini string value (quotes and backslash escapes)."""
+    value = raw.strip()
+    if value.startswith("@"):
+        # @Variant(...), @ByteArray(...) etc. are not plain paths/callsigns.
+        return ""
+    out: list[str] = []
+    in_quotes = False
+    i = 0
+    while i < len(value):
+        ch = value[i]
+        if ch == '"':
+            in_quotes = not in_quotes
+        elif ch == "\\" and i + 1 < len(value):
+            nxt = value[i + 1]
+            if nxt == "x":
+                j = i + 2
+                digits = ""
+                while j < len(value) and len(digits) < 4 and value[j] in "0123456789abcdefABCDEF":
+                    digits += value[j]
+                    j += 1
+                if digits:
+                    out.append(chr(int(digits, 16)))
+                    i = j
+                    continue
+            out.append({"n": "\n", "t": "\t", "r": "\r", "0": "\0"}.get(nxt, nxt))
+            i += 2
+            continue
+        elif ch == ";" and not in_quotes:
+            break
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out).strip()
+
+
+def read_wsjtx_ini(path: Path) -> dict[str, str]:
+    """Read a WSJT-X/WS ini into ``{"Section/Key/Sub": value}`` (read-only)."""
+    result: dict[str, str] = {}
+    try:
+        text = _read_text(Path(path))
+    except (OSError, UnicodeError):
+        return result
+    section = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(";"):
+            continue
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = urllib.parse.unquote(stripped[1:-1].strip())
+            if section.casefold() == "general":
+                section = ""
+            continue
+        if "=" not in stripped:
+            continue
+        key, _sep, value = stripped.partition("=")
+        key = key.strip().replace("\\", "/")
+        full = f"{section}/{key}" if section else key
+        result[full] = _decode_qsettings_value(value)
+    return result
+
+
+def _ini_candidates(directory: Path) -> list[Path]:
+    name = directory.name
+    candidates = [directory / f"{name}.ini", _wsjtx_config_root() / f"{name}.ini"]
+    unique: list[Path] = []
+    for candidate in candidates:
+        if candidate not in unique:
+            unique.append(candidate)
+    return unique
+
+
+def _configured_logs(directory: Path) -> tuple[list[tuple[str, Path]], str]:
+    """Log files named in the program's ini plus the station callsign.
+
+    Returns ``([(configuration_label, log_path), ...], my_call)``.  The active
+    configuration comes first; alternative configurations (MultiSettings)
+    follow when they name a different file.
+    """
+    for ini_path in _ini_candidates(directory):
+        try:
+            if not ini_path.is_file():
+                continue
+        except OSError:
+            continue
+        values = read_wsjtx_ini(ini_path)
+        logs: list[tuple[str, Path]] = []
+        active = values.get("Configuration/MyLog", "").strip()
+        if active:
+            logs.append(("", Path(active)))
+        for key, value in sorted(values.items()):
+            if key == "Configuration/MyLog" or not key.endswith("/Configuration/MyLog"):
+                continue
+            if not value.strip():
+                continue
+            label = key[: -len("/Configuration/MyLog")].split("/")[-1]
+            logs.append((label, Path(value.strip())))
+        my_call = values.get("Configuration/MyCall", "").strip().upper()
+        return logs, my_call
+    return [], ""
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    return os.path.normcase(os.path.normpath(str(a))) == os.path.normcase(os.path.normpath(str(b)))
 
 
 def discover_wsjtx_profiles() -> list[WsjtxProfile]:
+    """Find WS and WSJT-X data folders (incl. --rig-name instances).
+
+    WS folders come first because WS replaces WSJT-X Improved and keeps a
+    one-off copy of the old WSJT-X log; the old folder is no longer written.
+    """
     root = _wsjtx_root()
     if not root.exists():
         return []
@@ -193,22 +351,58 @@ def discover_wsjtx_profiles() -> list[WsjtxProfile]:
     except OSError:
         return []
 
-    profiles: list[WsjtxProfile] = []
+    found: list[tuple[int, str, WsjtxProfile]] = []
     for child in children:
+        classified = classify_wsjtx_dir(child.name)
+        if classified is None:
+            continue
         try:
-            if not child.is_dir() or not child.name.casefold().startswith("wsjt-x"):
+            if not child.is_dir():
                 continue
         except OSError:
             continue
 
-        profiles.append(
-            WsjtxProfile(
-                name=_profile_name_from_dir(child.name),
-                directory=child,
-                log_path=child / "wsjtx_log.adi",
+        program, instance = classified
+        base_name = _profile_name_from_dir(child.name)
+        configured, my_call = _configured_logs(child)
+        label = f"{base_name} ({my_call})" if my_call else base_name
+        default_log = child / WSJTX_DEFAULT_LOG_NAME
+        entries = configured or [("", default_log)]
+        seen: list[Path] = []
+        for config_label, log_path in entries:
+            if any(_same_path(log_path, other) for other in seen):
+                continue
+            seen.append(log_path)
+            name = f"{label} – {config_label}" if config_label else label
+            found.append(
+                (
+                    0 if program == "WS" else 1,
+                    child.name.casefold(),
+                    WsjtxProfile(name=name, directory=child, log_path=log_path),
+                )
             )
-        )
-    return profiles
+
+    found.sort(key=lambda item: (item[0], item[1]))
+    return [profile for _order, _name, profile in found]
+
+
+def ws_replacement_hint(log_path: Path | None, profiles: Iterable[WsjtxProfile] | None = None) -> WsjtxProfile | None:
+    """Return the WS profile that replaced the selected WSJT-X folder, if any.
+
+    WS copies the WSJT-X log once and then writes only into its own folder,
+    so a sync that still points at ``WSJT-X[ - rig]`` misses new QSOs.
+    """
+    if log_path is None:
+        return None
+    classified = classify_wsjtx_dir(Path(log_path).parent.name)
+    if classified is None or classified[0] != "WSJT-X":
+        return None
+    instance = classified[1].casefold()
+    for profile in profiles if profiles is not None else discover_wsjtx_profiles():
+        other = classify_wsjtx_dir(profile.directory.name)
+        if other and other[0] == "WS" and other[1].casefold() == instance:
+            return profile
+    return None
 
 
 def _read_text(path: Path) -> str:
@@ -570,8 +764,67 @@ def sync_wsjtx_with_local(
     result.backup_path = backup
     result.local_after = len(store.scan())
     result.wsjtx_after = len(read_wsjtx_qsos(path))
+    result.log_path = str(path)
 
+    _remember_last_result(db, result)
     return result
+
+
+def _remember_last_result(db, result: WsjtxSyncResult) -> None:
+    """Store when and with which outcome the last sync ran (for the UI)."""
+    try:
+        db.set_setting(
+            SETTING_LAST_RESULT,
+            json.dumps(
+                {
+                    "at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "path": result.log_path,
+                    "imported": result.imported_to_local,
+                    "appended": result.appended_to_wsjtx,
+                    "local": result.local_after,
+                    "wsjtx": result.wsjtx_after,
+                },
+                ensure_ascii=False,
+            ),
+        )
+    except Exception:
+        # Purely informational; never fail a finished sync because of it.
+        pass
+
+
+def load_last_result(db) -> dict[str, Any]:
+    try:
+        data = json.loads(db.get_setting(SETTING_LAST_RESULT, "") or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def format_last_result(data: dict[str, Any], language: str = "de") -> str:
+    if not data.get("at"):
+        return (
+            "Noch kein Abgleich für dieses Logger-Profil."
+            if language != "en"
+            else "No synchronization for this Logger profile yet."
+        )
+    at = str(data.get("at"))
+    try:
+        stamp = datetime.strptime(at, "%Y-%m-%d %H:%M").strftime(
+            "%d.%m.%Y %H:%M" if language != "en" else "%Y-%m-%d %H:%M"
+        )
+    except ValueError:
+        stamp = at
+    imported = int(data.get("imported") or 0)
+    appended = int(data.get("appended") or 0)
+    if language == "en":
+        return (
+            f"Last synchronization: {stamp} · local +{imported} · "
+            f"WSJT-X/WS +{appended} · {data.get('wsjtx', 0)} QSOs in the file"
+        )
+    return (
+        f"Letzter Abgleich: {stamp} · lokal +{imported} · "
+        f"WSJT-X/WS +{appended} · {data.get('wsjtx', 0)} QSOs in der Datei"
+    )
 
 
 def format_wsjtx_result(
@@ -580,43 +833,67 @@ def format_wsjtx_result(
 ) -> str:
     if language == "en":
         lines = [
-            "WSJT-X synchronization completed.",
+            "WSJT-X/WS synchronization completed.",
             "",
             f"Local log: {result.local_before} → {result.local_after}",
-            f"WSJT-X log: {result.wsjtx_before} → {result.wsjtx_after}",
+            f"WSJT-X/WS log: {result.wsjtx_before} → {result.wsjtx_after}",
             f"Imported into local log: {result.imported_to_local}",
-            f"Added to WSJT-X: {result.appended_to_wsjtx}",
+            f"Added to WSJT-X/WS: {result.appended_to_wsjtx}",
             f"Existing/duplicates ignored: {result.duplicates_from_wsjtx}",
-            f"Invalid WSJT-X records skipped: {result.invalid_from_wsjtx}",
+            f"Invalid WSJT-X/WS records skipped: {result.invalid_from_wsjtx}",
             f"Other station calls skipped: {result.scope_skipped_from_wsjtx}",
         ]
 
+        if result.log_path:
+            lines.extend(["", f"File: {result.log_path}"])
         if result.backup_path:
             lines.extend(["", f"Backup: {result.backup_path}"])
+        hint = ws_replacement_hint(Path(result.log_path)) if result.log_path else None
+        if hint is not None:
+            lines.extend(["", _ws_hint_text(hint, "en")])
 
         return "\n".join(lines)
 
     lines = [
-        "WSJT-X-Abgleich abgeschlossen.",
+        "WSJT-X/WS-Abgleich abgeschlossen.",
         "",
         f"Lokales Log: {result.local_before} → {result.local_after}",
-        f"WSJT-X-Log: {result.wsjtx_before} → {result.wsjtx_after}",
+        f"WSJT-X/WS-Log: {result.wsjtx_before} → {result.wsjtx_after}",
         f"Neu ins lokale Log übernommen: {result.imported_to_local}",
-        f"Neu zu WSJT-X ergänzt: {result.appended_to_wsjtx}",
+        f"Neu zu WSJT-X/WS ergänzt: {result.appended_to_wsjtx}",
         f"Vorhanden/Dubletten ignoriert: {result.duplicates_from_wsjtx}",
-        f"Ungültige WSJT-X-Datensätze übersprungen: {result.invalid_from_wsjtx}",
+        f"Ungültige WSJT-X/WS-Datensätze übersprungen: {result.invalid_from_wsjtx}",
         f"Andere Stationsrufzeichen übersprungen: {result.scope_skipped_from_wsjtx}",
     ]
 
+    if result.log_path:
+        lines.extend(["", f"Datei: {result.log_path}"])
     if result.backup_path:
         lines.extend(["", f"Backup: {result.backup_path}"])
+    hint = ws_replacement_hint(Path(result.log_path)) if result.log_path else None
+    if hint is not None:
+        lines.extend(["", _ws_hint_text(hint, "de")])
 
     return "\n".join(lines)
 
 
+def _ws_hint_text(profile: WsjtxProfile, language: str) -> str:
+    if language == "en":
+        return (
+            f"Note: WS was found ({profile.name}). WS writes new QSOs only to "
+            f"{profile.log_path}; the selected WSJT-X log is no longer updated. "
+            "Select the WS profile in Settings → WSJT-X / WS Sync."
+        )
+    return (
+        f"Hinweis: WS gefunden ({profile.name}). WS schreibt neue QSOs nur noch in "
+        f"{profile.log_path}; die gewählte WSJT-X-Datei wird nicht mehr fortgeschrieben. "
+        "Bitte unter Einstellungen → WSJT-X / WS Sync das WS-Profil wählen."
+    )
+
+
 
 class WsjtxSyncSettingsPanel(ttk.Frame):
-    """Embedded WSJT-X settings page for the main Settings notebook."""
+    """Embedded WSJT-X / WS settings page for the main Settings notebook."""
 
     def __init__(
         self,
@@ -632,6 +909,7 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
         self.sync_callback = sync_callback
         self.profiles: list[WsjtxProfile] = []
         self.profile_by_display: dict[str, WsjtxProfile] = {}
+        de = self.language == "de"
 
         self.profile_var = tk.StringVar()
         self.path_var = tk.StringVar()
@@ -639,69 +917,47 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
         self.shutdown_var = tk.BooleanVar(value=False)
         self.manual_var = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar(value="")
+        self.last_result_var = tk.StringVar(value="")
 
-        self.columnconfigure(0, weight=1)
-        self.columnconfigure(1, weight=1)
+        # Equal columns: a long text on one side must not squeeze the other.
+        self.columnconfigure(0, weight=1, uniform="wsjtx_cards")
+        self.columnconfigure(1, weight=1, uniform="wsjtx_cards")
         self.rowconfigure(0, weight=1)
 
-        profile_card = ttk.Frame(
-            self,
-            style="Card.TFrame",
-            padding=18,
-        )
-        profile_card.grid(
-            row=0,
-            column=0,
-            sticky="nsew",
-            padx=(0, 8),
-        )
+        profile_card = ttk.Frame(self, style="Card.TFrame", padding=18)
+        profile_card.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         profile_card.columnconfigure(0, weight=1)
 
-        timing_card = ttk.Frame(
-            self,
-            style="Card.TFrame",
-            padding=18,
-        )
-        timing_card.grid(
-            row=0,
-            column=1,
-            sticky="nsew",
-            padx=(8, 0),
-        )
+        timing_card = ttk.Frame(self, style="Card.TFrame", padding=18)
+        timing_card.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
         timing_card.columnconfigure(0, weight=1)
 
+        # -- left: program/profile, log file and the manual sync -------------
         ttk.Label(
             profile_card,
-            text=(
-                "WSJT-X Profil & Logdatei"
-                if self.language == "de"
-                else "WSJT-X profile & log file"
-            ),
+            text="WSJT-X / WS Profil & Logdatei" if de else "WSJT-X / WS profile & log file",
             style="CardTitle.TLabel",
         ).grid(row=0, column=0, sticky="w")
 
         ttk.Label(
             profile_card,
             text=(
-                "Wähle das WSJT-X Profil, das zu diesem Offline-Logger-Profil gehört. "
-                "Auch mit --rig-name gestartete Instanzen werden getrennt erkannt."
-                if self.language == "de"
+                "Wähle das WS- oder WSJT-X-Profil, das zu diesem Offline-Logger-Profil gehört. "
+                "WS (früher WSJT-X Improved) wird unter „WS“ bzw. „WS - <Rigname>“ erkannt, "
+                "auch mit --rig-name gestartete Instanzen."
+                if de
                 else
-                "Select the WSJT-X profile belonging to this Offline Logger profile. "
-                "Instances started with --rig-name are detected separately."
+                "Select the WS or WSJT-X profile belonging to this Offline Logger profile. "
+                "WS (formerly WSJT-X Improved) is detected as \"WS\" or \"WS - <rig name>\", "
+                "including instances started with --rig-name."
             ),
             style="Muted.Card.TLabel",
             wraplength=480,
-        ).grid(
-            row=1,
-            column=0,
-            sticky="ew",
-            pady=(4, 16),
-        )
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 12))
 
         ttk.Label(
             profile_card,
-            text="WSJT-X Profil" if self.language == "de" else "WSJT-X profile",
+            text="Programm / Profil" if de else "Program / profile",
             style="Card.TLabel",
         ).grid(row=2, column=0, sticky="w", pady=(0, 3))
 
@@ -709,89 +965,84 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
         profile_row.grid(row=3, column=0, sticky="ew")
         profile_row.columnconfigure(0, weight=1)
 
-        self.profile_combo = ttk.Combobox(
-            profile_row,
-            textvariable=self.profile_var,
-            state="readonly",
-        )
+        self.profile_combo = ttk.Combobox(profile_row, textvariable=self.profile_var, state="readonly")
         self.profile_combo.grid(row=0, column=0, sticky="ew")
-        self.profile_combo.bind(
-            "<<ComboboxSelected>>",
-            self._profile_selected,
-        )
+        self.profile_combo.bind("<<ComboboxSelected>>", self._profile_selected)
 
         ttk.Button(
             profile_row,
-            text="Neu suchen" if self.language == "de" else "Rescan",
+            text="Neu suchen" if de else "Rescan",
             command=self._discover,
         ).grid(row=0, column=1, padx=(8, 0))
 
         ttk.Label(
             profile_card,
-            text="wsjtx_log.adi",
+            text="Logdatei (wsjtx_log.adi)" if de else "Log file (wsjtx_log.adi)",
             style="Card.TLabel",
-        ).grid(row=4, column=0, sticky="w", pady=(16, 3))
+        ).grid(row=4, column=0, sticky="w", pady=(12, 3))
 
         path_row = ttk.Frame(profile_card, style="Card.TFrame")
         path_row.grid(row=5, column=0, sticky="ew")
         path_row.columnconfigure(0, weight=1)
 
-        ttk.Entry(
-            path_row,
-            textvariable=self.path_var,
-        ).grid(row=0, column=0, sticky="ew")
+        path_entry = ttk.Entry(path_row, textvariable=self.path_var)
+        path_entry.grid(row=0, column=0, sticky="ew")
+        path_entry.bind("<FocusOut>", lambda _e: self._update_status())
 
         ttk.Button(
             path_row,
-            text="Datei wählen …" if self.language == "de" else "Choose file …",
+            text="Datei wählen …" if de else "Choose file …",
             command=self._browse,
         ).grid(row=0, column=1, padx=(8, 0))
 
-        ttk.Separator(profile_card).grid(
-            row=6,
-            column=0,
-            sticky="ew",
-            pady=(18, 14),
-        )
+        ttk.Separator(profile_card).grid(row=6, column=0, sticky="ew", pady=(16, 12))
 
         ttk.Label(
             profile_card,
-            text=(
-                "Synchronisationsprinzip"
-                if self.language == "de"
-                else "Synchronization principle"
-            ),
+            text="Manuell abgleichen" if de else "Synchronize manually",
             style="CardTitle.TLabel",
         ).grid(row=7, column=0, sticky="w")
 
+        self.sync_button = ttk.Button(
+            profile_card,
+            text="Jetzt mit WSJT-X / WS abgleichen" if de else "Synchronize with WSJT-X / WS now",
+            style="Primary.TButton",
+            command=self._save_and_sync,
+        )
+        self.sync_button.grid(row=8, column=0, sticky="ew", pady=(8, 0))
+
+        ttk.Label(
+            profile_card,
+            textvariable=self.last_result_var,
+            style="Card.TLabel",
+            wraplength=480,
+        ).grid(row=9, column=0, sticky="ew", pady=(8, 0))
+
+        ttk.Label(
+            profile_card,
+            textvariable=self.status_var,
+            style="Card.TLabel",
+            wraplength=480,
+        ).grid(row=10, column=0, sticky="ew", pady=(6, 0))
+
         ttk.Label(
             profile_card,
             text=(
-                "Das lokale Logbuch ist der Merge-Hub. Fehlende QSOs werden aus WSJT-X "
-                "ins lokale ADI übernommen und fehlende lokale QSOs zu WSJT-X ergänzt. "
-                "Es wird nichts automatisch gelöscht."
-                if self.language == "de"
+                "Speichert die Auswahl und gleicht sofort ab – unabhängig von den "
+                "automatischen Auslösern rechts. Den Knopf gibt es auch unter „Logbuch & Sync“."
+                if de
                 else
-                "The local logbook is the merge hub. Missing QSOs are imported from "
-                "WSJT-X into the local ADI and missing local QSOs are added to WSJT-X. "
-                "Nothing is deleted automatically."
+                "Saves the selection and synchronizes immediately, independent of the "
+                "automatic triggers on the right. The button is also on \"Logbook & Sync\"."
             ),
             style="Muted.Card.TLabel",
             wraplength=480,
-        ).grid(
-            row=8,
-            column=0,
-            sticky="ew",
-            pady=(4, 0),
-        )
+        ).grid(row=11, column=0, sticky="ew", pady=(6, 0))
 
+        # -- right: automatic triggers, principle and safety ------------------
         ttk.Label(
             timing_card,
-            text=(
-                "Automatischer Abgleich"
-                if self.language == "de"
-                else "Automatic synchronization"
-            ),
+            text="Automatischer Abgleich" if de else "Automatic synchronization",
             style="CardTitle.TLabel",
         ).grid(row=0, column=0, sticky="w")
 
@@ -800,119 +1051,88 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
             text=(
                 "Diese Optionen gelten nur für das aktuell ausgewählte Offline-Logger-Profil "
                 "und können unabhängig voneinander aktiviert werden."
-                if self.language == "de"
+                if de
                 else
                 "These options apply only to the currently selected Offline Logger profile "
                 "and can be enabled independently."
             ),
             style="Muted.Card.TLabel",
             wraplength=480,
-        ).grid(
-            row=1,
-            column=0,
-            sticky="ew",
-            pady=(4, 14),
-        )
+        ).grid(row=1, column=0, sticky="ew", pady=(4, 10))
 
         ttk.Checkbutton(
             timing_card,
-            text=(
-                "Beim Start des Offline Loggers"
-                if self.language == "de"
-                else "When the Offline Logger starts"
-            ),
+            text="Beim Start des Offline Loggers" if de else "When the Offline Logger starts",
             variable=self.startup_var,
-        ).grid(row=2, column=0, sticky="w", pady=5)
+        ).grid(row=2, column=0, sticky="w", pady=4)
 
         ttk.Checkbutton(
             timing_card,
-            text=(
-                "Beim Beenden des Offline Loggers"
-                if self.language == "de"
-                else "When the Offline Logger closes"
-            ),
+            text="Beim Beenden des Offline Loggers" if de else "When the Offline Logger closes",
             variable=self.shutdown_var,
-        ).grid(row=3, column=0, sticky="w", pady=5)
+        ).grid(row=3, column=0, sticky="w", pady=4)
 
         ttk.Checkbutton(
             timing_card,
-            text=(
-                "Beim manuellen Gesamtsync"
-                if self.language == "de"
-                else "During a manual full sync"
-            ),
+            text="Beim manuellen Gesamtsync" if de else "During a manual full sync",
             variable=self.manual_var,
-        ).grid(row=4, column=0, sticky="w", pady=5)
-
-        ttk.Separator(timing_card).grid(
-            row=5,
-            column=0,
-            sticky="ew",
-            pady=(18, 14),
-        )
+        ).grid(row=4, column=0, sticky="w", pady=4)
 
         ttk.Label(
             timing_card,
             text=(
-                "Sicherheit"
-                if self.language == "de"
-                else "Safety"
+                "Gesamtsync = Knopf „Synchronisieren“ unter Logbuch & Sync (mit Wavelog)."
+                if de
+                else "Full sync = the \"Synchronize\" button on Logbook & Sync (with Wavelog)."
             ),
+            style="Muted.Card.TLabel",
+            wraplength=480,
+        ).grid(row=5, column=0, sticky="ew", pady=(0, 2))
+
+        ttk.Separator(timing_card).grid(row=6, column=0, sticky="ew", pady=(14, 12))
+
+        ttk.Label(
+            timing_card,
+            text="Synchronisationsprinzip & Sicherheit" if de else "Principle & safety",
             style="CardTitle.TLabel",
-        ).grid(row=6, column=0, sticky="w")
+        ).grid(row=7, column=0, sticky="w")
 
         ttk.Label(
             timing_card,
             text=(
-                "Vor Änderungen an einer vorhandenen wsjtx_log.adi wird automatisch ein "
-                "Backup angelegt. Dubletten werden anhand von Rufzeichen, Band, Mode und "
-                "Zeit mit kleiner Toleranz erkannt. Explizit fremde STATION_CALLSIGNs "
-                "werden nicht in dieses Profil importiert."
-                if self.language == "de"
+                "Das lokale Logbuch ist der Merge-Hub: Fehlende QSOs werden aus WSJT-X/WS "
+                "übernommen und fehlende lokale QSOs in die Logdatei ergänzt. Es wird nichts "
+                "gelöscht. Vor Änderungen an einer vorhandenen Logdatei entsteht ein Backup; "
+                "Dubletten werden über Rufzeichen, Band, Mode und Zeit erkannt, fremde "
+                "STATION_CALLSIGNs nicht übernommen."
+                if de
                 else
-                "Before an existing wsjtx_log.adi is changed, a backup is created "
-                "automatically. Duplicates are matched by callsign, band, mode and time "
-                "with a small tolerance. Explicitly different STATION_CALLSIGN values "
-                "are not imported into this profile."
+                "The local logbook is the merge hub: missing QSOs are imported from WSJT-X/WS "
+                "and missing local QSOs are added to the log file. Nothing is deleted. A backup "
+                "is made before an existing log file is changed; duplicates are matched by "
+                "callsign, band, mode and time, other STATION_CALLSIGNs are not imported."
             ),
             style="Muted.Card.TLabel",
             wraplength=480,
-        ).grid(
-            row=7,
-            column=0,
-            sticky="ew",
-            pady=(4, 18),
-        )
+        ).grid(row=8, column=0, sticky="ew", pady=(4, 0))
 
-        actions = ttk.Frame(timing_card, style="Card.TFrame")
-        actions.grid(row=8, column=0, sticky="ew")
-        actions.columnconfigure(0, weight=1)
-
-        self.sync_button = ttk.Button(
-            actions,
-            text=(
-                "Jetzt vollständig abgleichen"
-                if self.language == "de"
-                else "Synchronize now"
-            ),
-            style="Primary.TButton",
-            command=self._save_and_sync,
-        )
-        self.sync_button.grid(row=0, column=0, sticky="ew")
-
-        ttk.Label(
-            timing_card,
-            textvariable=self.status_var,
-            style="Muted.Card.TLabel",
-            wraplength=480,
-        ).grid(
-            row=9,
-            column=0,
-            sticky="ew",
-            pady=(12, 0),
-        )
+        # Wrap texts to the real card width so nothing is cut off in small
+        # windows or with Windows display scaling.
+        for card in (profile_card, timing_card):
+            card.bind("<Configure>", lambda event, c=card: self._rewrap(c, event.width), add="+")
 
         self.reload(db, language=self.language)
+
+    @staticmethod
+    def _rewrap(card, width: int) -> None:
+        wrap = max(200, int(width) - 40)
+        for child in card.winfo_children():
+            if isinstance(child, ttk.Label):
+                try:
+                    if int(str(child.cget("wraplength") or 0)) not in (0, wrap):
+                        child.configure(wraplength=wrap)
+                except (tk.TclError, ValueError):
+                    pass
 
     def reload(self, db=None, *, language: str | None = None):
         if db is not None:
@@ -930,9 +1150,8 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
 
         selected = False
         if current.log_path:
-            saved = str(current.log_path)
             for display, profile in self.profile_by_display.items():
-                if str(profile.log_path) == saved:
+                if _same_path(profile.log_path, current.log_path):
                     self.profile_var.set(display)
                     selected = True
                     break
@@ -940,7 +1159,14 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
         if not selected:
             self.profile_var.set("")
 
+        self.refresh_last_result()
         self._update_status()
+
+    def refresh_last_result(self):
+        try:
+            self.last_result_var.set(format_last_result(load_last_result(self.db), self.language))
+        except Exception:
+            self.last_result_var.set("")
 
     def save_to_db(self, db=None) -> WsjtxSyncSettings:
         if db is not None:
@@ -954,16 +1180,12 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
     def _discover(self, select_saved: bool = True):
         previous_path = self.path_var.get().strip()
         self.profiles = discover_wsjtx_profiles()
-        self.profile_by_display = {
-            profile.display_name: profile
-            for profile in self.profiles
-        }
-        values = list(self.profile_by_display)
-        self.profile_combo.configure(values=values)
+        self.profile_by_display = {profile.display_name: profile for profile in self.profiles}
+        self.profile_combo.configure(values=list(self.profile_by_display))
 
         if previous_path:
             for display, profile in self.profile_by_display.items():
-                if str(profile.log_path) == previous_path:
+                if _same_path(profile.log_path, Path(previous_path).expanduser()):
                     self.profile_var.set(display)
                     self._update_status()
                     return
@@ -983,24 +1205,21 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
 
     def _browse(self):
         initial = self.path_var.get().strip()
-        initialdir = (
-            str(Path(initial).parent)
-            if initial
-            else str(_wsjtx_root())
-        )
+        initialdir = str(Path(initial).parent) if initial else str(_wsjtx_root())
 
         selected = filedialog.askopenfilename(
             parent=self.winfo_toplevel(),
             title="wsjtx_log.adi",
             initialdir=initialdir,
-            filetypes=[
-                ("ADIF", "*.adi"),
-                ("All files", "*.*"),
-            ],
+            filetypes=[("ADIF", "*.adi *.adif"), ("All files", "*.*")],
         )
         if selected:
             self.path_var.set(selected)
             self.profile_var.set("")
+            for display, profile in self.profile_by_display.items():
+                if _same_path(profile.log_path, Path(selected)):
+                    self.profile_var.set(display)
+                    break
         self._update_status()
 
     def _settings(self) -> WsjtxSyncSettings:
@@ -1009,17 +1228,13 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
         profile = self.profile_by_display.get(self.profile_var.get())
         profile_name = profile.name if profile else ""
 
-        any_mode = (
-            self.startup_var.get()
-            or self.shutdown_var.get()
-            or self.manual_var.get()
-        )
+        any_mode = self.startup_var.get() or self.shutdown_var.get() or self.manual_var.get()
 
         if any_mode and path is None:
             raise WsjtxSyncError(
-                "Bitte ein WSJT-X Profil auswählen."
+                "Bitte ein WSJT-X/WS Profil auswählen."
                 if self.language == "de"
-                else "Select a WSJT-X profile."
+                else "Select a WSJT-X/WS profile."
             )
 
         return WsjtxSyncSettings(
@@ -1032,14 +1247,19 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
         )
 
     def _save_and_sync(self):
+        if not self.path_var.get().strip():
+            messagebox.showerror(
+                "WSJT-X/WS Sync",
+                "Bitte zuerst ein WSJT-X/WS Profil oder eine Logdatei auswählen."
+                if self.language == "de"
+                else "Select a WSJT-X/WS profile or log file first.",
+                parent=self.winfo_toplevel(),
+            )
+            return
         try:
             self.save_to_db()
         except Exception as exc:
-            messagebox.showerror(
-                "WSJT-X Sync",
-                str(exc),
-                parent=self.winfo_toplevel(),
-            )
+            messagebox.showerror("WSJT-X/WS Sync", str(exc), parent=self.winfo_toplevel())
             return
 
         if self.sync_callback is not None:
@@ -1047,35 +1267,47 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
 
     def _update_status(self, *, saved: bool = False):
         path_text = self.path_var.get().strip()
+        de = self.language == "de"
+        count = len(self.profiles)
 
         if not path_text:
-            text = (
-                "Noch kein WSJT-X Profil ausgewählt."
-                if self.language == "de"
-                else "No WSJT-X profile selected yet."
-            )
+            if count:
+                text = (
+                    f"Noch kein Profil ausgewählt · {count} WSJT-X/WS-Profil(e) gefunden."
+                    if de
+                    else f"No profile selected yet · {count} WSJT-X/WS profile(s) found."
+                )
+            else:
+                text = (
+                    "Kein WSJT-X/WS-Ordner gefunden. Logdatei über „Datei wählen …“ auswählen."
+                    if de
+                    else "No WSJT-X/WS folder found. Choose the log file with \"Choose file …\"."
+                )
         else:
             path = Path(path_text).expanduser()
             if path.exists():
                 text = (
-                    f"✓ Logdatei gefunden · {len(self.profiles)} WSJT-X Profil(e) erkannt"
-                    if self.language == "de"
-                    else f"✓ Log file found · {len(self.profiles)} WSJT-X profile(s) detected"
+                    f"✓ Logdatei gefunden · {count} WSJT-X/WS-Profil(e) erkannt"
+                    if de
+                    else f"✓ Log file found · {count} WSJT-X/WS profile(s) detected"
                 )
             else:
                 text = (
                     "Hinweis: Die ausgewählte Logdatei existiert noch nicht. "
-                    "Sie kann beim ersten QSO bzw. Sync angelegt werden."
-                    if self.language == "de"
+                    "Sie wird beim ersten QSO bzw. Abgleich angelegt."
+                    if de
                     else
                     "Note: The selected log file does not exist yet. "
-                    "It can be created by the first QSO or synchronization."
+                    "It will be created by the first QSO or synchronization."
                 )
+            hint = ws_replacement_hint(path, self.profiles)
+            if hint is not None:
+                text += "\n" + _ws_hint_text(hint, self.language)
 
         if saved:
             text = (
                 "✓ Einstellungen für dieses Logger-Profil gespeichert. " + text
-                if self.language == "de"
+                if de
                 else "✓ Settings saved for this Logger profile. " + text
             )
 

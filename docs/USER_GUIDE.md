@@ -152,15 +152,20 @@ Die eQSL.cc-Zugangsdaten bleiben für einen späteren direkten eQSL-Upload/-Sync
 - Standard: `dxcluster.afu-tools.de`, Port `7301`.
 - Das Login-Rufzeichen wird automatisch aus dem aktiven Stationsprofil übernommen.
 
-### 4.5 WSJT-X Sync
+### 4.5 WSJT-X / WS Sync
 
-Der separate Einstellungs-Tab **WSJT-X Sync** verbindet das lokale Logger-Profil mit genau einer WSJT-X-Logdatei. Unterstützt werden:
+Der separate Einstellungs-Tab **WSJT-X / WS Sync** verbindet das lokale Logger-Profil mit genau einer Logdatei von WSJT-X oder **WS** (WS – Digital Mode Suite, früher WSJT-X Improved). Unterstützt werden:
 
-- die Standarddatei `%LOCALAPPDATA%\WSJT-X\wsjtx_log.adi`
-- mit `--rig-name` gestartete Profile unter `%LOCALAPPDATA%\WSJT-X - <Rig-Name>\wsjtx_log.adi`
+- WS: `%LOCALAPPDATA%\WS\wsjtx_log.adi`, mit `--rig-name` gestartet `%LOCALAPPDATA%\WS - <Rig-Name>\wsjtx_log.adi` (z. B. `WS - DA6IT`)
+- WSJT-X: `%LOCALAPPDATA%\WSJT-X\wsjtx_log.adi` bzw. `%LOCALAPPDATA%\WSJT-X - <Rig-Name>\wsjtx_log.adi`
+- ein in WS/WSJT-X unter *Settings → General → Log file* selbst gewählter Pfad: Der Logger liest ihn (nur lesend) aus `WS.ini` bzw. `WS - <Rig-Name>.ini`, ebenso das eigene Rufzeichen für die Anzeige
 - ein manuell ausgewählter Dateipfad
 
-Für jedes Logger-Profil kann getrennt festgelegt werden, ob der WSJT-X-Abgleich beim **Start**, beim **Beenden** und/oder beim **manuellen Synchronisieren** ausgeführt wird. Die Schaltfläche **Jetzt vollständig abgleichen** führt den Abgleich bewusst sofort aus.
+WS-Profile stehen in der Auswahl vor WSJT-X-Profilen. WS übernimmt beim ersten Start einmalig eine Kopie des WSJT-X-Logs und schreibt danach nur noch in den eigenen Ordner. Ist noch ein WSJT-X-Ordner ausgewählt, zu dem es ein WS-Gegenstück gibt, weist der Tab darauf hin.
+
+Abgeglichen wird jederzeit über **Jetzt mit WSJT-X / WS abgleichen** im Tab oder über **WSJT-X / WS abgleichen** unter **Logbuch & Sync**. Ist Wavelog eingerichtet und erreichbar, läuft dabei der vollständige Drei-Wege-Abgleich mit Wavelog, sonst nur der lokale Dateiabgleich. Unter dem Knopf steht, wann zuletzt abgeglichen wurde und mit welchem Ergebnis.
+
+Für jedes Logger-Profil kann zusätzlich getrennt festgelegt werden, ob der Abgleich automatisch beim **Start**, beim **Beenden** und/oder beim **manuellen Gesamtsync** (Knopf **Synchronisieren**) ausgeführt wird.
 
 Der Offline Logger behandelt seine lokale ADI-Datei als Merge-Hub. Fehlende QSOs werden zwischen Offline Logger und WSJT-X ergänzt; zusammen mit dem Wavelog-Vollsync entsteht bei vorhandener Wavelog-Konfiguration ein kontrollierter Drei-Wege-Abgleich. Es werden **keine automatischen Löschungen** aus einem bloßen Fehlen auf einer Seite abgeleitet.
 

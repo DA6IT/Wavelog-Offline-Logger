@@ -78,6 +78,12 @@ class QsoSyncFeatureMixin:
         ttk.Button(top, text="ADI-Ordner öffnen", style="Secondary.TButton", command=self.open_log_dir).pack(side="left", padx=8)
         ttk.Button(top, text="ADIF importieren", style="Secondary.TButton", command=self.import_adif).pack(side="left")
         ttk.Button(top, text="ADIF exportieren", style="Secondary.TButton", command=self.export_adif).pack(side="left", padx=8)
+        # v0.24.0: the WSJT-X/WS file sync used to be reachable only from the
+        # bottom of its settings tab; give it its own visible button here.
+        self.wsjtx_sync_button = ttk.Button(
+            top, text="WSJT-X / WS abgleichen", style="Secondary.TButton", command=self.sync_wsjtx_now,
+        )
+        self.wsjtx_sync_button.pack(side="left")
         self.sync_label = tk.Label(top, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9))
         self.sync_label.pack(side="right")
 
@@ -1003,10 +1009,17 @@ class QsoSyncFeatureMixin:
             thread.join(timeout)
 
     def configure_wsjtx_sync(self):
+        self._show_page("settings")
         if hasattr(self, "settings_notebook") and hasattr(self, "settings_wsjtx_tab"):
             self.settings_notebook.select(self.settings_wsjtx_tab)
-            return
-        self._show_page("settings")
+
+    def _refresh_wsjtx_panel(self):
+        panel = getattr(self, "wsjtx_settings_panel", None)
+        if panel is not None:
+            try:
+                panel.refresh_last_result()
+            except Exception:
+                pass
 
     def _maybe_startup_wsjtx_sync(self):
         if self.closing or self.close_requested:
@@ -1036,8 +1049,8 @@ class QsoSyncFeatureMixin:
     def sync_wsjtx_now(self):
         if self.sync_busy:
             messagebox.showwarning(
-                "WSJT-X Sync",
-                "Es läuft bereits eine Synchronisierung.",
+                "WSJT-X/WS Sync",
+                self._tr("Es läuft bereits eine Synchronisierung."),
                 parent=self,
             )
             return
@@ -1045,6 +1058,11 @@ class QsoSyncFeatureMixin:
         wsjtx_settings = load_wsjtx_settings(self.db)
         if wsjtx_settings.log_path is None:
             self.configure_wsjtx_sync()
+            messagebox.showinfo(
+                "WSJT-X/WS Sync",
+                self._tr("Bitte zuerst unter Einstellungen → WSJT-X / WS Sync das Profil bzw. die Logdatei auswählen."),
+                parent=self,
+            )
             return
 
         # Wenn Wavelog verfügbar ist, führt "jetzt abgleichen" bewusst den
@@ -1069,12 +1087,12 @@ class QsoSyncFeatureMixin:
         try:
             wsjtx_settings = load_wsjtx_settings(self.db)
             if wsjtx_settings.log_path is None:
-                raise ValueError("Kein WSJT-X Profil bzw. keine wsjtx_log.adi ausgewählt.")
+                raise ValueError("Kein WSJT-X/WS Profil bzw. keine wsjtx_log.adi ausgewählt.")
         except Exception as exc:
             if reason == "manual":
-                messagebox.showerror("WSJT-X Sync", str(exc), parent=self)
+                messagebox.showerror("WSJT-X/WS Sync", str(exc), parent=self)
             else:
-                write_startup_log("WSJT-X Sync konnte nicht gestartet werden: " + repr(exc))
+                write_startup_log("WSJT-X/WS Sync konnte nicht gestartet werden: " + repr(exc))
             if reason == "shutdown" and self.close_requested:
                 self._finalize_close()
             return
@@ -1085,11 +1103,11 @@ class QsoSyncFeatureMixin:
         self.sync_reason = reason
 
         if reason == "startup":
-            progress_text = "WSJT-X Start-Sync läuft …"
+            progress_text = "WSJT-X/WS Start-Sync läuft …"
         elif reason == "shutdown":
-            progress_text = "WSJT-X Abschluss-Sync läuft …"
+            progress_text = "WSJT-X/WS Abschluss-Sync läuft …"
         else:
-            progress_text = "WSJT-X wird mit dem lokalen Logbuch abgeglichen …"
+            progress_text = "WSJT-X/WS wird mit dem lokalen Logbuch abgeglichen …"
 
         self.status_var.set(progress_text)
         if hasattr(self, "sync_label"):
@@ -1129,11 +1147,15 @@ class QsoSyncFeatureMixin:
 
         self.refresh_qsos()
         self.refresh_stats()
+        self._refresh_wsjtx_panel()
 
-        self.status_var.set(
-            f"WSJT-X Sync fertig · lokal +{result.imported_to_local} · "
-            f"WSJT-X +{result.appended_to_wsjtx}"
+        status_text = (
+            f"WSJT-X/WS fertig · lokal +{result.imported_to_local} · "
+            f"Datei +{result.appended_to_wsjtx}"
         )
+        self.status_var.set(status_text)
+        if hasattr(self, "sync_label"):
+            self.sync_label.configure(text=status_text)
 
         # Neu aus WSJT-X übernommene QSOs dürfen den bestehenden Online-Push
         # nutzen, aber nur wenn der Nutzer diesen ohnehin aktiviert hat.
@@ -1142,7 +1164,7 @@ class QsoSyncFeatureMixin:
 
         if reason == "manual" and not self.close_requested:
             messagebox.showinfo(
-                "WSJT-X Sync",
+                "WSJT-X/WS Sync",
                 format_wsjtx_result(result, self.language),
                 parent=self,
             )
@@ -1158,11 +1180,13 @@ class QsoSyncFeatureMixin:
         self.sync_is_automatic = False
         self.sync_operation = ""
         self.sync_reason = ""
-        self.status_var.set("WSJT-X Sync fehlgeschlagen")
-        write_startup_log("WSJT-X Sync fehlgeschlagen: " + message)
+        self.status_var.set("WSJT-X/WS Sync fehlgeschlagen")
+        if hasattr(self, "sync_label"):
+            self.sync_label.configure(text="WSJT-X/WS Sync fehlgeschlagen")
+        write_startup_log("WSJT-X/WS Sync fehlgeschlagen: " + message)
 
         if reason == "manual" and not self.close_requested:
-            messagebox.showerror("WSJT-X Sync", message, parent=self)
+            messagebox.showerror("WSJT-X/WS Sync", message, parent=self)
 
         if self.close_requested:
             if reason == "shutdown":
@@ -1367,15 +1391,15 @@ class QsoSyncFeatureMixin:
                             push_errors = followup.errors
                             ContestSyncEngine(self.store, self.db, client).link_pending()
                         wsjtx_note = (
-                            f" · WSJT-X: lokal +{wsjtx_result.imported_to_local}"
-                            f" / WSJT-X +{wsjtx_result.appended_to_wsjtx}"
+                            f" · WSJT-X/WS: lokal +{wsjtx_result.imported_to_local}"
+                            f" / WSJT-X/WS +{wsjtx_result.appended_to_wsjtx}"
                             f" / danach Wavelog +{pushed_from_wsjtx}"
                         )
                         if push_errors:
                             wsjtx_note += f" / Push-Fehler {push_errors}"
                 except Exception as wsjtx_exc:
                     # WSJT-X darf einen ansonsten erfolgreichen Wavelog-Sync nicht kaputt machen.
-                    wsjtx_note = f" · WSJT-X Fehler: {wsjtx_exc}"
+                    wsjtx_note = f" · WSJT-X/WS Fehler: {wsjtx_exc}"
                 msg = (f"Upload {summary.pushed} · zu Wavelog geändert {summary.patched} · "
                        f"neu aus Wavelog {summary.pulled} · aus Wavelog aktualisiert {summary.remote_updated} · "
                        f"remote gelöscht {summary.remote_deleted} · verknüpft {summary.linked} · "
@@ -1410,6 +1434,7 @@ class QsoSyncFeatureMixin:
         self._set_wavelog_mode_ui(True)
         self.status_var.set(("Auto-Sync fertig · " if automatic else "Sync fertig · ") + msg)
         self.refresh_qsos()
+        self._refresh_wsjtx_panel()
         self.refresh_contest_page()
         self._schedule_wavelog_check(60_000)
         withheld = int(getattr(self, "sync_withheld_deletions", 0) or 0)

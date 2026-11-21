@@ -7,6 +7,7 @@ from __future__ import annotations
 WHATS_NEW: dict[str, tuple[str, ...]] = {
 
     "0.24.0": (
+        "WS (früher WSJT-X Improved) wird beim Datei-Abgleich automatisch gefunden, auch mehrere Instanzen wie „WS - DA6IT“. Abgleichen geht jetzt mit dem Knopf „WSJT-X / WS abgleichen“ unter Logbuch & Sync.",
         "Im Logbuch gibt es jetzt ein Suchfeld für Rufzeichen: Die Liste zeigt sofort nur noch passende QSOs, auch bei Teilen eines Rufzeichens wie „DL1“. Mit * und ? lassen sich Platzhalter verwenden, Strg+F springt ins Suchfeld und Esc leert die Suche.",
     ),
     "0.23.0": (
@@ -109,6 +110,10 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
 
+    "0.24.0": (
+        "WS (formerly WSJT-X Improved) is found automatically for the file sync, including several instances such as \"WS - DA6IT\". Sync now with the \"WSJT-X / WS abgleichen\" button on Logbook & Sync.",
+        "The logbook now has a callsign search field: the list immediately shows only matching QSOs, also for parts of a callsign such as \"DL1\". * and ? work as wildcards, Ctrl+F jumps to the search field and Esc clears it.",
+    ),
     "0.22.0": (
         "Large logbooks load and refresh much faster; editing and deleting individual QSOs stays responsive even with many thousands of entries.",
         "Complete Wavelog synchronization is considerably faster for large logbooks, especially when an existing Wavelog logbook is downloaded for the first time.",

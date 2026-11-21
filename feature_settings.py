@@ -42,7 +42,7 @@ class SettingsFeatureMixin:
         notebook.add(online_tab, text="Callbook & Online-Dienste")
         notebook.add(qsl_tab, text="QSL Card Manager")
         notebook.add(data_tab, text="Daten & Verbindungen")
-        notebook.add(wsjtx_tab, text="WSJT-X Sync")
+        notebook.add(wsjtx_tab, text="WSJT-X / WS Sync")
         for tab in (general_tab, station_tab, online_tab, qsl_tab, data_tab, wsjtx_tab):
             tab.columnconfigure(0, weight=1)
             tab.columnconfigure(1, weight=1)
@@ -554,6 +554,7 @@ class SettingsFeatureMixin:
                         pass
         collect_optional_help(notebook)
         self._settings_optional_help.append(hint)
+
 
         self.wsjtx_settings_panel = WsjtxSyncSettingsPanel(
             wsjtx_tab,
