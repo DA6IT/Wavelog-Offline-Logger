@@ -10,7 +10,7 @@
 - **Visible WSJT-X/WS sync button:** **Sync WSJT-X / WS** on **Logbook & Sync** and **Synchronize with WSJT-X / WS now** at the top of the settings tab (previously only at the bottom right). Time, file and result of the last sync (including failures) are shown below it; the result message names the synchronized file.
 - **Calm DX spot list:** "Received DX spots" is now a table with fixed columns and a new "Worked" column (long country names used to push the following columns). New spots are inserted without jumping, selection and scroll position are kept, and Enter tunes the radio.
 - **Logbook filters:** band, mode, period, country (DXCC), QSL status and sync status, combinable with the callsign search; "N of M QSOs", **Reset filters** and **Export filtered** (ADIF with only the QSOs shown).
-- **Fewer backup copies from the WSJT-X/WS sync:** of the `wsjtx_log.adi.backup-<time>` copies the newest 10 are kept; older ones are removed only after a verified write. Other files in the folder are never touched.
+- **Fewer backup copies from the WSJT-X/WS sync:** of the `wsjtx_log.adi.backup-<time>` copies the newest 10 and one per day of the last week are kept; older ones are removed only after a verified write. Other files in the folder are never touched.
 - **Callsign search in the logbook:** a search field above the logbook table filters by callsign while typing (substring, case-insensitive, wildcards `*` and `?`). The number of matches is shown; Ctrl+F jumps to the search field, Esc clears it, arrow down moves into the results. Works on large logbooks without reloading data.
 
 ## 0.23.0 — 2026-11-08

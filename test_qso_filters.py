@@ -94,6 +94,20 @@ class QsoFilterTests(unittest.TestCase):
         self.assertEqual(choices["years"], ["2026", "2025", "2024"])
         self.assertEqual(choices["countries"], ["Austria", "England", "Fed. Rep. of Germany", "Japan"])
 
+    def test_no_country_and_band_case(self):
+        rows = ROWS + [row("f", "local", "2026-11-20", "XX9XX", "20M", "FT8")]
+        countries = dict(COUNTRIES)
+        self.assertEqual([r[0] for r in filter_rows(rows, QsoFilter(country="__none__"), countries, today=TODAY)], ["f"])
+        self.assertEqual([r[0] for r in filter_rows(rows, QsoFilter(band="20m"), countries, today=TODAY)], ["a", "c", "f"])
+        choices = filter_choices(rows, countries)
+        self.assertTrue(choices["no_country"])
+        self.assertEqual(choices["bands"].count("20m"), 1)
+        self.assertFalse(filter_choices(ROWS, COUNTRIES)["no_country"])
+
+    def test_day_field_drives_relative_periods(self):
+        self.assertEqual([r[0] for r in filter_rows(ROWS, QsoFilter(period="today", day="2026-11-14"), COUNTRIES)], ["b"])
+        self.assertNotEqual(QsoFilter(period="today", day="2026-11-14"), QsoFilter(period="today", day="2026-11-15"))
+
     def test_normalize_qso_date(self):
         self.assertEqual(normalize_qso_date("20261120"), "2026-11-20")
         self.assertEqual(normalize_qso_date("2026-11-20"), "2026-11-20")

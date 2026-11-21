@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -18,7 +18,7 @@ from logger_core import (
 )
 from qsl_storage import QslStorage
 from qso_tree_view import (
-    PERIOD_CHOICES, QSL_CHOICES, SYNC_CHOICES, QsoFilter, apply_row_diff, filter_choices, filter_rows, insert_row,
+    NO_COUNTRY, PERIOD_CHOICES, QSL_CHOICES, SYNC_CHOICES, QsoFilter, apply_row_diff, filter_choices, filter_rows, insert_row,
     normalize_call_query, plan_row_diff,
 )
 from wsjtx_sync import format_wsjtx_result, load_wsjtx_settings, should_wsjtx_sync_for_reason, sync_wsjtx_with_local
@@ -237,21 +237,29 @@ class QsoSyncFeatureMixin:
         values: dict[str, str] = {}
         for key, var in getattr(self, "qso_filter_vars", {}).items():
             values[key] = self._qso_filter_maps.get(key, {}).get(var.get(), "")
+        if values.get("period"):
+            # Relative periods ("today", "7d") change at UTC midnight.
+            values["day"] = datetime.now(timezone.utc).date().isoformat()
         return QsoFilter(call=normalize_call_query(self.qso_search_var.get()), **values)
 
-    def _update_qso_filter_choices(self):
+    def _update_qso_filter_choices(self, found: dict | None = None):
         """Fill the filter lists from the current logbook; keep selections."""
         combos = getattr(self, "qso_filter_combos", None)
         if not combos:
             return
-        found = filter_choices(self._qso_cached_rows, self._qso_cached_countries)
+        if found is None:
+            found = filter_choices(self._qso_cached_rows, self._qso_cached_countries)
+        if found == getattr(self, "_qso_filter_choices_shown", None):
+            return  # unchanged (the normal case after saving a QSO)
+        self._qso_filter_choices_shown = found
         tr = self._tr
         maps: dict[str, list[tuple[str, str]]] = {
             "band": [(tr("Alle Bänder"), "")] + [(band, band) for band in found["bands"]],
             "mode": [(tr("Alle Modes"), "")] + [(mode, mode) for mode in found["modes"]],
             "period": [(tr(label), key) for key, label in PERIOD_CHOICES]
             + [(year, f"year:{year}") for year in found["years"]],
-            "country": [(tr("Alle Länder"), "")] + [(name, name) for name in found["countries"]],
+            "country": [(tr("Alle Länder"), "")] + [(name, name) for name in found["countries"]]
+            + ([(tr("(ohne Land)"), NO_COUNTRY)] if found.get("no_country") else []),
             "qsl": [(tr(label), key) for key, label in QSL_CHOICES],
             "sync": [(tr(label), key) for key, label in SYNC_CHOICES],
         }
@@ -301,6 +309,16 @@ class QsoSyncFeatureMixin:
         if not self._qso_filter.active:
             self.export_adif()
             return
+        if self._qso_view_dirty or self._qso_write_running or self._qso_refresh_running:
+            # The table may not yet show the latest edits/deletions; export
+            # only what the user can actually see after the refresh.
+            self.refresh_qsos(immediate=True)
+            messagebox.showinfo(
+                "ADIF exportieren",
+                self._tr("Das Logbuch wird gerade aktualisiert. Bitte gleich noch einmal exportieren."),
+                parent=self,
+            )
+            return
         rows = self._visible_qso_rows()
         if not rows:
             messagebox.showinfo(
@@ -315,14 +333,40 @@ class QsoSyncFeatureMixin:
         )
         if not target:
             return
-        try:
-            report = self.store.export_adif(Path(target), local_ids=[row[0] for row in rows])
+        local_ids = [row[0] for row in rows]
+        store = self.store
+        button = getattr(self, "qso_export_filtered_button", None)
+        if button is not None:
+            button.state(["disabled"])
+        self.status_var.set(self._tr("ADIF-Export läuft …"))
+
+        def finish(report=None, error=None):
+            if self.closing:
+                return
+            self._update_qso_search_result()  # re-enables the button
+            if error is not None:
+                self.status_var.set(self._tr("ADIF-Export fehlgeschlagen"))
+                messagebox.showerror("ADIF-Export fehlgeschlagen", error, parent=self)
+                return
+            self.status_var.set(f"ADIF-Export: {report['exported']} QSO(s)")
             messagebox.showinfo(
                 "ADIF-Export abgeschlossen",
                 f"{report['exported']} QSO(s) exportiert nach:\n{report['target']}", parent=self,
             )
-        except Exception as exc:
-            messagebox.showerror("ADIF-Export fehlgeschlagen", str(exc), parent=self)
+
+        def worker():
+            # Reading the ADIF store takes ~1 s for very large logbooks.
+            try:
+                report = store.export_adif(Path(target), local_ids=local_ids)
+            except Exception as exc:
+                message = str(exc)
+                if not self.closing:
+                    self.after(0, lambda: finish(error=message))
+                return
+            if not self.closing:
+                self.after(0, lambda: finish(report=report))
+
+        threading.Thread(target=worker, name="adif-export-filtered", daemon=True).start()
 
     def clear_qso_search(self):
         if self.qso_search_var.get():
@@ -554,15 +598,18 @@ class QsoSyncFeatureMixin:
                     meta = meta_by_id.get(local_id)
                     status_text, tag = self._display_sync_status(meta)
 
-                    country = str(q.get("country") or "").strip()
-                    if not country and qso_call:
-                        country = country_memo.get(qso_call, "")
-                        if qso_call not in country_memo:
-                            try:
-                                info = country_db.lookup(qso_call) if country_db is not None else None
-                            except Exception:
-                                info = None
-                            country = country_memo[qso_call] = info.country if info else ""
+                    # One spelling per DXCC entity: the CTY.DAT name of the
+                    # callsign wins over stored names ("FEDERAL REPUBLIC OF
+                    # GERMANY" from Wavelog vs "Fed. Rep. of Germany").
+                    country = country_memo.get(qso_call, "") if qso_call else ""
+                    if qso_call and qso_call not in country_memo:
+                        try:
+                            info = country_db.lookup(qso_call) if country_db is not None else None
+                        except Exception:
+                            info = None
+                        country = country_memo[qso_call] = info.country if info else ""
+                    if not country:
+                        country = str(q.get("country") or "").strip()
                     if country:
                         countries[local_id] = country
 
@@ -635,6 +682,8 @@ class QsoSyncFeatureMixin:
                     "qsos": qsos,
                     "rows": rows,
                     "countries": countries,
+                    # Built here, not on the Tk thread (~0.2 s for 30k QSOs).
+                    "filter_choices": filter_choices(rows, countries),
                     "meta_by_id": meta_by_id,
                     "qsl_by_wid": qsl_by_wid,
                     "fastlog_worked_keys": fastlog_worked_keys,
@@ -682,7 +731,7 @@ class QsoSyncFeatureMixin:
         }
         self._qso_cached_rows = list(result["rows"])
         self._qso_cached_countries = dict(result.get("countries") or {})
-        self._update_qso_filter_choices()
+        self._update_qso_filter_choices(result.get("filter_choices"))
         if self._qso_hidden_ids:
             self._qso_hidden_ids.intersection_update(self._qso_cached_by_id)
         self._qso_cached_meta_by_id = dict(result["meta_by_id"])

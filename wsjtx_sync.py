@@ -9,7 +9,7 @@ import shutil
 import sys
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -645,38 +645,69 @@ def _backup_wsjtx_log(path: Path) -> str:
 WSJTX_BACKUP_KEEP = 10
 
 
-def prune_wsjtx_backups(path: Path, keep: int = WSJTX_BACKUP_KEEP, *, protect: str = "") -> int:
-    """Delete all but the newest ``keep`` backups of ``path``; return the count.
+def prune_wsjtx_backups(
+    path: Path,
+    keep: int = WSJTX_BACKUP_KEEP,
+    *,
+    protect: str = "",
+    now: datetime | None = None,
+    daily_days: int = 7,
+) -> int:
+    """Delete old backups of ``path``; return how many were deleted.
+
+    Kept: the newest ``keep`` backups, additionally the newest backup of each
+    of the last ``daily_days`` days (so frequent syncs cannot push yesterday's
+    state out), every backup dated in the future (wrong clock – its order
+    cannot be trusted) and ``protect`` (the backup just made).
 
     Only files named exactly ``<log>.backup-YYYYMMDD-HHMMSS[-n]`` next to the
     log are considered, so the log itself and foreign files are never touched.
-    ``protect`` (the backup just made) is never deleted.
+    The name is compared case-insensitively only on Windows.
     """
     path = Path(path)
+    flags = re.IGNORECASE if os.name == "nt" else 0
     pattern = re.compile(
-        "^" + re.escape(path.name) + r"\.backup-(\d{8}-\d{6})(?:-(\d+))?$",
-        re.IGNORECASE,
+        re.escape(path.name) + r"\.backup-(\d{8}-\d{6})(?:-(\d+))?",
+        flags,
     )
+    now = now or datetime.now()
     try:
         candidates = list(path.parent.iterdir())
     except OSError:
         return 0
 
-    backups: list[tuple[str, int, Path]] = []
+    backups: list[tuple[datetime, int, Path]] = []
     for candidate in candidates:
-        match = pattern.match(candidate.name)
+        match = pattern.fullmatch(candidate.name)
         if not match:
             continue
+        try:
+            stamp = datetime.strptime(match.group(1), "%Y%m%d-%H%M%S")
+        except ValueError:
+            continue
+        if stamp > now + timedelta(minutes=5):
+            continue  # future-dated: never pruned, never counted
         try:
             if not candidate.is_file():
                 continue
         except OSError:
             continue
-        backups.append((match.group(1), int(match.group(2) or 1), candidate))
+        backups.append((stamp, int(match.group(2) or 1), candidate))
 
     backups.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    keep_paths = {item[2] for item in backups[: max(0, int(keep))]}
+    first_day = (now - timedelta(days=max(0, int(daily_days)) - 1)).date()
+    seen_days: set = set()
+    for stamp, _counter, candidate in backups:
+        day = stamp.date()
+        if day >= first_day and day not in seen_days:
+            seen_days.add(day)
+            keep_paths.add(candidate)
+
     removed = 0
-    for _stamp, _counter, candidate in backups[max(0, int(keep)):]:
+    for _stamp, _counter, candidate in backups:
+        if candidate in keep_paths:
+            continue
         if protect and _same_path(candidate, Path(protect)):
             continue
         try:
@@ -1225,14 +1256,14 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
                 "Das lokale Logbuch ist der Merge-Hub: Fehlende QSOs werden aus WSJT-X/WS "
                 "übernommen und fehlende lokale QSOs in die Logdatei ergänzt. Es wird nichts "
                 "gelöscht. Vor Änderungen an einer vorhandenen Logdatei entsteht ein Backup "
-                "(die letzten 10 bleiben erhalten); "
+                "(die letzten 10 und je eines pro Tag der letzten Woche bleiben erhalten); "
                 "Dubletten werden über Rufzeichen, Band, Mode und Zeit erkannt, fremde "
                 "STATION_CALLSIGNs nicht übernommen."
                 if de
                 else
                 "The local logbook is the merge hub: missing QSOs are imported from WSJT-X/WS "
                 "and missing local QSOs are added to the log file. Nothing is deleted. A backup "
-                "(the newest 10 are kept) is made before an existing log file is changed; duplicates are matched by "
+                "(the newest 10 and one per day of the last week are kept) is made before an existing log file is changed; duplicates are matched by "
                 "callsign, band, mode and time, other STATION_CALLSIGNs are not imported."
             ),
             style="Muted.Card.TLabel",

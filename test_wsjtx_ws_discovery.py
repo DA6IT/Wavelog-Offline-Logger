@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -299,7 +301,7 @@ class BackupRotationTests(unittest.TestCase):
                 (root / name).write_text("f", encoding="utf-8")
             (root / "wsjtx_log.adi.backup-20250101-000000").mkdir()  # directories stay
 
-            removed = prune_wsjtx_backups(log, keep=10)
+            removed = prune_wsjtx_backups(log, keep=10, now=datetime(2026, 12, 31, 12, 0))
 
             self.assertEqual(removed, 5)
             left = sorted(p.name for p in root.glob("wsjtx_log.adi.backup-2026*"))
@@ -311,6 +313,48 @@ class BackupRotationTests(unittest.TestCase):
                 self.assertTrue((root / name).exists(), name)
             self.assertTrue(log.exists())
             self.assertTrue((root / "wsjtx_log.adi.backup-20250101-000000").is_dir())
+
+    def test_daily_and_future_backups_are_kept(self):
+        from wsjtx_sync import prune_wsjtx_backups
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "wsjtx_log.adi"
+            log.write_text("x", encoding="utf-8")
+            now = datetime(2026, 11, 21, 18, 0)
+            # 15 backups today (sync after every QSO), one each of the 8 days before
+            today = [f"wsjtx_log.adi.backup-20261121-1{m:03d}00"[:-2] for m in range(0)]
+            names = [f"wsjtx_log.adi.backup-20261121-17{m:02d}00" for m in range(15)]
+            names += [f"wsjtx_log.adi.backup-202611{d:02d}-120000" for d in range(13, 21)]
+            # wrong clock once: three backups dated in the future
+            names += [f"wsjtx_log.adi.backup-2030010{d}-000000" for d in range(1, 4)]
+            for name in names + today:
+                (root / name).write_text("b", encoding="utf-8")
+
+            prune_wsjtx_backups(log, keep=10, now=now)
+
+            left = {p.name for p in root.glob("wsjtx_log.adi.backup-*")}
+            # newest 10 of today, one per day 15.–20.11. (last 7 days incl. today), future ones
+            self.assertEqual(len([n for n in left if "-20261121-" in n]), 10)
+            for day in range(15, 21):
+                self.assertIn(f"wsjtx_log.adi.backup-202611{day:02d}-120000", left)
+            self.assertNotIn("wsjtx_log.adi.backup-20261114-120000", left)
+            self.assertNotIn("wsjtx_log.adi.backup-20261113-120000", left)
+            for d in range(1, 4):
+                self.assertIn(f"wsjtx_log.adi.backup-2030010{d}-000000", left)
+
+    @unittest.skipIf(os.name == "nt", "case-insensitive file system")
+    def test_other_case_log_is_not_touched_on_posix(self):
+        from wsjtx_sync import prune_wsjtx_backups
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "wsjtx_log.adi"
+            for day in range(1, 16):
+                (root / f"WSJTX_LOG.ADI.backup-202601{day:02d}-000000").write_text("b", encoding="utf-8")
+            (root / "wsjtx_log.adi.backup-20260101-000000\n").write_text("b", encoding="utf-8")
+            self.assertEqual(prune_wsjtx_backups(log, keep=1, now=datetime(2026, 2, 1)), 0)
+            self.assertEqual(len(list(root.iterdir())), 16)
 
     def test_sync_prunes_after_verified_write(self):
         with tempfile.TemporaryDirectory() as tmp:

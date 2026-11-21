@@ -757,14 +757,20 @@ class DxClusterFeatureMixin:
         # only rows whose text or colour changed are touched.  Ids stay
         # stable, so the selection and the scroll position survive refreshes.
         ops = plan_row_diff(previous, rows) if previous is not None else None
+        if ops:
+            try:
+                apply_row_diff(tree, ops)
+            except tk.TclError:
+                ops = None  # table and bookkeeping disagree: rebuild below
         if ops is None:
             children = tree.get_children()
             if children:
                 tree.delete(*children)
             for row in rows:
-                insert_row(tree, "end", row)
-        elif ops:
-            apply_row_diff(tree, ops)
+                try:
+                    insert_row(tree, "end", row)
+                except tk.TclError:
+                    continue
         self.dx_cluster_shown_rows = rows
         self.dx_cluster_spot_by_id = spots
         self.dx_cluster_visible_ids = [row[0] for row in rows]
@@ -773,6 +779,9 @@ class DxClusterFeatureMixin:
         if selected_id in spots:
             if tuple(tree.selection()) != (selected_id,):
                 tree.selection_set(selected_id)
+            if tree.focus() != selected_id:
+                # Keyboard navigation continues from the selected row.
+                tree.focus(selected_id)
         else:
             self.dx_cluster_selected_id = None
         if self.dx_cluster_reveal_selection:

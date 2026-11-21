@@ -109,10 +109,12 @@ QSL_CHOICES: tuple[tuple[str, str], ...] = (
 SYNC_CHOICES: tuple[tuple[str, str], ...] = (
     ("", "Alle Sync-Status"),
     ("local", "Nur lokal"),
-    ("wavelog", "In Wavelog"),
+    ("wavelog", "Synchronisiert"),
     ("open", "Offen/Konflikt/Fehler"),
 )
 _OPEN_SYNC_TAGS = frozenset({"modified", "conflict", "error"})
+# Country filter value for QSOs whose DXCC entity is unknown.
+NO_COUNTRY = "__none__"
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,9 @@ class QsoFilter:
     country: str = ""
     qsl: str = ""
     sync: str = ""
+    # UTC date the relative period refers to (part of equality, so the view
+    # is re-filtered after midnight); "" = today when filtering.
+    day: str = ""
 
     @property
     def active(self) -> bool:
@@ -181,6 +186,11 @@ def filter_rows(
 
     band = criteria.band.strip().casefold()
     mode = criteria.mode.strip().casefold()
+    if today is None and criteria.day:
+        try:
+            today = date.fromisoformat(criteria.day)
+        except ValueError:
+            today = None
     bounds = period_bounds(criteria.period, today)
     country = criteria.country.strip().casefold()
     countries = countries or {}
@@ -197,8 +207,13 @@ def filter_rows(
             qso_date = normalize_qso_date(_cell(values, DATE_COLUMN))
             if not qso_date or not (bounds[0] <= qso_date <= bounds[1]):
                 return False
-        if country and str(countries.get(row[0], "")).casefold() != country:
-            return False
+        if country:
+            row_country = str(countries.get(row[0], "") or "").strip()
+            if country == NO_COUNTRY.casefold():
+                if row_country and row_country != "—":
+                    return False
+            elif row_country.casefold() != country:
+                return False
         if qsl and not _qsl_matches(values, qsl):
             return False
         if sync:
@@ -238,16 +253,17 @@ def _cell(values: Sequence[Any], index: int) -> str:
 
 def filter_choices(rows: Sequence[Row], countries: dict[str, str] | None = None) -> dict[str, list[str]]:
     """Distinct bands, modes, years and countries present in ``rows``."""
-    bands: set[str] = set()
+    bands: dict[str, str] = {}
     modes: set[str] = set()
     years: set[str] = set()
     names: dict[str, str] = {}
+    no_country = False
     countries = countries or {}
     for row in rows:
         values = row[2]
         band = _cell(values, BAND_COLUMN)
         if band:
-            bands.add(band)
+            bands.setdefault(band.casefold(), band.lower())
         mode = _cell(values, MODE_COLUMN)
         if mode:
             modes.add(mode.upper())
@@ -255,7 +271,9 @@ def filter_choices(rows: Sequence[Row], countries: dict[str, str] | None = None)
         if qso_date:
             years.add(qso_date[:4])
         name = str(countries.get(row[0], "") or "").strip()
-        if name and name != "—":
+        if not name or name == "—":
+            no_country = True
+        else:
             # "GERMANY" (imported) and "Germany" (cty.dat) are one country;
             # prefer the mixed-case spelling for display.
             key = name.casefold()
@@ -263,10 +281,11 @@ def filter_choices(rows: Sequence[Row], countries: dict[str, str] | None = None)
             if current is None or (current.isupper() and not name.isupper()):
                 names[key] = name
     return {
-        "bands": sorted(bands, key=_band_sort_key),
+        "bands": sorted(bands.values(), key=_band_sort_key),
         "modes": sorted(modes),
         "years": sorted(years, reverse=True),
         "countries": sorted(names.values(), key=str.casefold),
+        "no_country": no_country,
     }
 
 

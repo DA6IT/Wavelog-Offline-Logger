@@ -263,6 +263,8 @@ ENGLISH = {
     "Rufzeichen suchen": "Search callsign", "Kein QSO mit diesem Rufzeichen": "No QSO with this callsign",
     "Doppelklick/Enter: TRX abstimmen · neu (< 2 min): hellblau · auf Band und Mode gearbeitet: grün": "Double-click/Enter: tune the radio · new (< 2 min): light blue · worked on band and mode: green",
     "Gearbeitet": "Worked", "✓ Land": "✓ Country",
+    "(ohne Land)": "(no country)", "Synchronisiert": "Synchronized", "ADIF-Export läuft …": "ADIF export running …",
+    "Das Logbuch wird gerade aktualisiert. Bitte gleich noch einmal exportieren.": "The logbook is being updated. Please export again in a moment.",
     "Filter zurücksetzen": "Reset filters", "Gefilterte exportieren": "Export filtered",
     "Land": "Country", "Alle Bänder": "All bands", "Alle Modes": "All modes",
     "Alle Länder": "All countries", "Alle Zeiträume": "Any time",
