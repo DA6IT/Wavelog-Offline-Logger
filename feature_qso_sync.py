@@ -17,7 +17,10 @@ from logger_core import (
     utc_now_iso,
 )
 from qsl_storage import QslStorage
-from qso_tree_view import apply_row_diff, filter_rows_by_call, insert_row, normalize_call_query, plan_row_diff
+from qso_tree_view import (
+    PERIOD_CHOICES, QSL_CHOICES, SYNC_CHOICES, QsoFilter, apply_row_diff, filter_choices, filter_rows, insert_row,
+    normalize_call_query, plan_row_diff,
+)
 from wsjtx_sync import format_wsjtx_result, load_wsjtx_settings, should_wsjtx_sync_for_reason, sync_wsjtx_with_local
 from ui_theme import theme
 
@@ -62,11 +65,14 @@ class QsoSyncFeatureMixin:
         # a refresh that scanned before the write must not show them again.
         self._qso_hidden_ids: set[str] = set()
         self._qso_cached_summary: dict[str, object] = {}
-        # Callsign search in the logbook view (v0.24.0). ``_qso_tree_filter``
-        # is the search the Treeview currently shows.
-        self._qso_filter = ""
-        self._qso_tree_filter = ""
+        # Callsign search and filters in the logbook view (v0.24.0).
+        # ``_qso_tree_filter`` is the filter the Treeview currently shows.
+        self._qso_filter = QsoFilter()
+        self._qso_tree_filter = QsoFilter()
         self._qso_filter_job = None
+        # DXCC country per local_id (not a visible column; for the filter).
+        self._qso_cached_countries: dict[str, str] = {}
+        self._qso_filter_maps: dict[str, dict[str, str]] = {}
         self._qso_render_source: list[tuple[str, str, tuple]] = []
 
     def _build_qsos_page(self):
@@ -97,15 +103,25 @@ class QsoSyncFeatureMixin:
 
         search = ttk.Frame(card, style="Card.TFrame")
         search.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
-        ttk.Label(search, text="Rufzeichen suchen", style="Card.TLabel").pack(side="left")
+        search_row = ttk.Frame(search, style="Card.TFrame")
+        search_row.pack(side="top", fill="x")
+        ttk.Label(search_row, text="Rufzeichen suchen", style="Card.TLabel").pack(side="left")
         self.qso_search_var = tk.StringVar()
-        self.qso_search_entry = ttk.Entry(search, textvariable=self.qso_search_var, width=18)
+        self.qso_search_entry = ttk.Entry(search_row, textvariable=self.qso_search_var, width=18)
         self.qso_search_entry.pack(side="left", padx=(8, 4))
         self.qso_search_clear_button = ttk.Button(
-            search, text="✕", width=3, style="Secondary.TButton", command=self.clear_qso_search,
+            search_row, text="✕", width=3, style="Secondary.TButton", command=self.clear_qso_search,
         )
         self.qso_search_clear_button.pack(side="left")
-        self.qso_search_result_label = tk.Label(search, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9))
+        self.qso_filter_reset_button = ttk.Button(
+            search_row, text="Filter zurücksetzen", style="Secondary.TButton", command=self.reset_qso_filters,
+        )
+        self.qso_filter_reset_button.pack(side="left", padx=(10, 0))
+        self.qso_export_filtered_button = ttk.Button(
+            search_row, text="Gefilterte exportieren", style="Secondary.TButton", command=self.export_filtered_adif,
+        )
+        self.qso_export_filtered_button.pack(side="left", padx=(8, 0))
+        self.qso_search_result_label = tk.Label(search_row, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9))
         self.qso_search_result_label.pack(side="left", padx=(10, 0))
         self.qso_search_var.trace_add("write", lambda *_: self._qso_search_changed())
         self.qso_search_entry.bind("<Escape>", lambda _e: self.clear_qso_search())
@@ -113,6 +129,34 @@ class QsoSyncFeatureMixin:
         self.qso_search_entry.bind("<Down>", lambda _e: self._focus_first_qso_row())
         self.bind("<Control-f>", self._focus_qso_search, add="+")
         self.bind("<Control-F>", self._focus_qso_search, add="+")
+
+        # Filters (v0.24.0): all combine with the callsign search (AND).
+        filter_row = ttk.Frame(search, style="Card.TFrame")
+        filter_row.pack(side="top", fill="x", pady=(8, 0))
+        self.qso_filter_vars: dict[str, tk.StringVar] = {}
+        self.qso_filter_combos: dict[str, ttk.Combobox] = {}
+        self._qso_filter_cells: list[ttk.Frame] = []
+        for key, label, width in (
+            ("band", "Band", 10),
+            ("mode", "Mode", 10),
+            ("period", "Zeitraum", 15),
+            ("country", "Land", 21),
+            ("qsl", "QSL", 22),
+            ("sync", "Sync", 18),
+        ):
+            cell = ttk.Frame(filter_row, style="Card.TFrame")
+            ttk.Label(cell, text=label, style="Card.TLabel").pack(side="left", padx=(0, 4))
+            var = tk.StringVar()
+            combo = ttk.Combobox(cell, textvariable=var, state="readonly", width=width)
+            combo.pack(side="left")
+            combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_qso_search_now())
+            self.qso_filter_vars[key] = var
+            self.qso_filter_combos[key] = combo
+            self._qso_filter_cells.append(cell)
+        self._qso_filter_columns = 0
+        filter_row.bind("<Configure>", lambda event: self._layout_qso_filter_cells(event.width), add="+")
+        self._layout_qso_filter_cells(0)
+        self._update_qso_filter_choices()
 
         cols = ("date", "time", "call", "operator", "contest", "band", "mode", "freq", "rst", "status", "email_qsl", "qrz", "lotw", "eqsl", "clublog", "dcl")
         self.tree = ttk.Treeview(card, columns=cols, show="headings", selectmode="extended")
@@ -182,12 +226,103 @@ class QsoSyncFeatureMixin:
         self._qso_filter_job = None
         if self.closing:
             return
-        query = normalize_call_query(self.qso_search_var.get())
-        if query == self._qso_filter:
+        criteria = self._current_qso_filter()
+        if criteria == self._qso_filter:
             return
-        self._qso_filter = query
+        self._qso_filter = criteria
         self._ensure_qso_tree_rendered()
         self._update_qso_search_result()
+
+    def _current_qso_filter(self) -> QsoFilter:
+        values: dict[str, str] = {}
+        for key, var in getattr(self, "qso_filter_vars", {}).items():
+            values[key] = self._qso_filter_maps.get(key, {}).get(var.get(), "")
+        return QsoFilter(call=normalize_call_query(self.qso_search_var.get()), **values)
+
+    def _update_qso_filter_choices(self):
+        """Fill the filter lists from the current logbook; keep selections."""
+        combos = getattr(self, "qso_filter_combos", None)
+        if not combos:
+            return
+        found = filter_choices(self._qso_cached_rows, self._qso_cached_countries)
+        tr = self._tr
+        maps: dict[str, list[tuple[str, str]]] = {
+            "band": [(tr("Alle Bänder"), "")] + [(band, band) for band in found["bands"]],
+            "mode": [(tr("Alle Modes"), "")] + [(mode, mode) for mode in found["modes"]],
+            "period": [(tr(label), key) for key, label in PERIOD_CHOICES]
+            + [(year, f"year:{year}") for year in found["years"]],
+            "country": [(tr("Alle Länder"), "")] + [(name, name) for name in found["countries"]],
+            "qsl": [(tr(label), key) for key, label in QSL_CHOICES],
+            "sync": [(tr(label), key) for key, label in SYNC_CHOICES],
+        }
+        for key, entries in maps.items():
+            combo = combos[key]
+            var = self.qso_filter_vars[key]
+            previous_key = self._qso_filter_maps.get(key, {}).get(var.get(), "")
+            self._qso_filter_maps[key] = {display: value for display, value in entries}
+            combo.configure(values=[display for display, _value in entries])
+            display = next((d for d, value in entries if value == previous_key), None)
+            if display is None:
+                # The selected value vanished from the logbook (e.g. last QSO
+                # of that band deleted): keep filtering by it visibly.
+                display = previous_key.split(":", 1)[-1] if previous_key else entries[0][0]
+                if previous_key:
+                    self._qso_filter_maps[key][display] = previous_key
+            var.set(display)
+
+    def _layout_qso_filter_cells(self, width: int):
+        """One line when the window is wide enough, otherwise two lines of
+        three filters, so no filter is ever cut off at the right edge."""
+        cells = getattr(self, "_qso_filter_cells", [])
+        if not cells:
+            return
+        gap = 12
+        needed = sum(cell.winfo_reqwidth() for cell in cells) + gap * (len(cells) - 1)
+        columns = len(cells) if width <= 1 or needed <= width else (len(cells) + 1) // 2
+        if columns == self._qso_filter_columns:
+            return
+        self._qso_filter_columns = columns
+        for index, cell in enumerate(cells):
+            row, column = divmod(index, columns)
+            cell.grid(
+                row=row, column=column, sticky="w",
+                padx=(0 if column == 0 else gap, 0), pady=(0 if row == 0 else 6, 0),
+            )
+
+    def reset_qso_filters(self):
+        for key, var in getattr(self, "qso_filter_vars", {}).items():
+            entries = list(self._qso_filter_maps.get(key, {}))
+            var.set(entries[0] if entries else "")
+        if self.qso_search_var.get():
+            self.qso_search_var.set("")
+        self._apply_qso_search_now()
+
+    def export_filtered_adif(self):
+        if not self._qso_filter.active:
+            self.export_adif()
+            return
+        rows = self._visible_qso_rows()
+        if not rows:
+            messagebox.showinfo(
+                "ADIF exportieren", self._tr("Der aktuelle Filter zeigt keine QSOs."), parent=self,
+            )
+            return
+        name = self._current_profile().get("name", "profil")
+        target = filedialog.asksaveasfilename(
+            title="ADIF exportieren", defaultextension=".adi",
+            initialfile=f"wavelog-offline-{name}-filter.adi",
+            filetypes=(("ADIF-Datei", "*.adi"), ("Alle Dateien", "*.*")), parent=self,
+        )
+        if not target:
+            return
+        try:
+            report = self.store.export_adif(Path(target), local_ids=[row[0] for row in rows])
+            messagebox.showinfo(
+                "ADIF-Export abgeschlossen",
+                f"{report['exported']} QSO(s) exportiert nach:\n{report['target']}", parent=self,
+            )
+        except Exception as exc:
+            messagebox.showerror("ADIF-Export fehlgeschlagen", str(exc), parent=self)
 
     def clear_qso_search(self):
         if self.qso_search_var.get():
@@ -214,20 +349,33 @@ class QsoSyncFeatureMixin:
     def _visible_qso_rows(self) -> list[tuple[str, str, tuple]]:
         hidden = self._qso_hidden_ids
         rows = [row for row in self._qso_cached_rows if row[0] and row[0] not in hidden]
-        return filter_rows_by_call(rows, self._qso_filter)
+        return filter_rows(rows, self._qso_filter, self._qso_cached_countries)
 
     def _update_qso_search_result(self):
         label = getattr(self, "qso_search_result_label", None)
         if label is None:
             return
-        if not self._qso_filter:
+        criteria = self._qso_filter
+        export_button = getattr(self, "qso_export_filtered_button", None)
+        reset_button = getattr(self, "qso_filter_reset_button", None)
+        for button in (export_button, reset_button):
+            if button is not None:
+                button.state(["!disabled"] if criteria.active else ["disabled"])
+        if not criteria.active:
             label.configure(text="")
             return
         count = len(self._qso_tree_rows) if self._qso_tree_rows is not None else len(self._visible_qso_rows())
-        if count:
-            text = f"{count} Treffer" if self.language != "en" else f"{count} match{'es' if count != 1 else ''}"
+        if criteria.only_call:
+            if count:
+                text = f"{count} Treffer" if self.language != "en" else f"{count} match{'es' if count != 1 else ''}"
+            else:
+                text = self._tr("Kein QSO mit diesem Rufzeichen")
         else:
-            text = self._tr("Kein QSO mit diesem Rufzeichen")
+            total = sum(1 for row in self._qso_cached_rows if row[0] and row[0] not in self._qso_hidden_ids)
+            if count:
+                text = f"{count} von {total} QSOs" if self.language != "en" else f"{count} of {total} QSOs"
+            else:
+                text = self._tr("Keine QSOs für diesen Filter")
         label.configure(text=text, fg=theme.MUTED if count else theme.WARN)
 
     @staticmethod
@@ -381,6 +529,9 @@ class QsoSyncFeatureMixin:
                 )
 
                 rows: list[tuple[str, str, tuple]] = []
+                countries: dict[str, str] = {}
+                country_memo: dict[str, str] = {}
+                country_db = getattr(self, "country_db", None)
                 fastlog_worked_keys: set[tuple[str, str, str]] = set()
                 # Formatting memos: identical inputs repeat thousands of times.
                 mode_memo: dict[tuple[str, str], str] = {}
@@ -402,6 +553,18 @@ class QsoSyncFeatureMixin:
                         fastlog_worked_keys.add((qso_call, qso_band, qso_mode))
                     meta = meta_by_id.get(local_id)
                     status_text, tag = self._display_sync_status(meta)
+
+                    country = str(q.get("country") or "").strip()
+                    if not country and qso_call:
+                        country = country_memo.get(qso_call, "")
+                        if qso_call not in country_memo:
+                            try:
+                                info = country_db.lookup(qso_call) if country_db is not None else None
+                            except Exception:
+                                info = None
+                            country = country_memo[qso_call] = info.country if info else ""
+                    if country:
+                        countries[local_id] = country
 
                     tm = str(q.get("time_on") or "")
                     if len(tm) >= 6:
@@ -471,6 +634,7 @@ class QsoSyncFeatureMixin:
                 result = {
                     "qsos": qsos,
                     "rows": rows,
+                    "countries": countries,
                     "meta_by_id": meta_by_id,
                     "qsl_by_wid": qsl_by_wid,
                     "fastlog_worked_keys": fastlog_worked_keys,
@@ -517,6 +681,8 @@ class QsoSyncFeatureMixin:
             if q.get("local_id")
         }
         self._qso_cached_rows = list(result["rows"])
+        self._qso_cached_countries = dict(result.get("countries") or {})
+        self._update_qso_filter_choices()
         if self._qso_hidden_ids:
             self._qso_hidden_ids.intersection_update(self._qso_cached_by_id)
         self._qso_cached_meta_by_id = dict(result["meta_by_id"])
