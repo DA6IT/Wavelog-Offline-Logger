@@ -531,6 +531,10 @@ class CountryInfo:
     cont: str
     primary_prefix: str
     matched_prefix: str = ""
+    # Approximate entity centre from CTY.DAT (latitude north-positive,
+    # longitude east-positive; CTY.DAT itself stores west as positive).
+    lat: float | None = None
+    lon: float | None = None
 
 
 class CountryDB:
@@ -586,9 +590,9 @@ class CountryDB:
             nonlocal current, aliases
             if not current:
                 return
-            country, cqz, ituz, cont, primary = current
+            country, cqz, ituz, cont, primary, lat, lon = current
             primary = primary.lstrip('*').strip().upper()
-            base_info = CountryInfo(country, cqz, ituz, cont, primary, primary)
+            base_info = CountryInfo(country, cqz, ituz, cont, primary, primary, lat, lon)
             if primary:
                 self.prefixes.append((primary.upper(), base_info))
             text = "".join(aliases)
@@ -597,7 +601,8 @@ class CountryDB:
                 if not base:
                     continue
                 info = CountryInfo(
-                    country, cq_override or cqz, itu_override or ituz, cont_override or cont, primary, base
+                    country, cq_override or cqz, itu_override or ituz, cont_override or cont, primary, base,
+                    lat, lon,
                 )
                 if exact:
                     self.exact[base] = info
@@ -619,7 +624,12 @@ class CountryDB:
                     ituz = str(int(parts[2].strip()))
                     cont = parts[3].strip().upper()
                     primary = parts[7].strip()
-                    current = (country, cqz, ituz, cont, primary)
+                    try:
+                        lat: float | None = float(parts[4].strip())
+                        lon: float | None = -float(parts[5].strip())
+                    except ValueError:
+                        lat = lon = None
+                    current = (country, cqz, ituz, cont, primary, lat, lon)
                 except Exception:
                     current = None
                 continue

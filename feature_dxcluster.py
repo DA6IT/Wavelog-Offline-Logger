@@ -625,12 +625,16 @@ class DxClusterFeatureMixin:
                     str(qso.get("qso_date") or ""), str(qso.get("time_on") or ""),
                     str(qso.get("band") or ""), str(qso.get("mode") or ""),
                 ))
-            country = str(qso.get("country") or "").strip()
-            if not country and call:
+            # CTY.DAT name first: spots are looked up there too, and imported
+            # QSOs may carry another spelling ("FEDERAL REPUBLIC OF GERMANY").
+            country = ""
+            if call:
                 country = country_memo.get(call)
                 if country is None:
                     info = lookup(call)
                     country = country_memo[call] = info.country if info else ""
+            if not country:
+                country = str(qso.get("country") or "").strip()
             raw_mode = str(qso.get("mode") or "")
             band = str(qso.get("band") or "").strip()
             if band:
@@ -901,7 +905,10 @@ class DxClusterFeatureMixin:
         if spot is None:
             messagebox.showinfo("DX Cluster", "Bitte zuerst einen DX-Spot auswählen.", parent=self)
             return
-        callsign = (spot.call or "").strip().upper()
+        self._open_qrz_callsign(spot.call)
+
+    def _open_qrz_callsign(self, callsign: str):
+        callsign = (callsign or "").strip().upper()
         if not callsign:
             return
         url = "https://www.qrz.com/db/" + urllib.parse.quote(callsign, safe="")
@@ -928,6 +935,10 @@ class DxClusterFeatureMixin:
         if spot is None:
             messagebox.showinfo("DX Cluster", "Bitte zuerst einen DX-Spot auswählen.", parent=self)
             return
+        self._use_dx_spot(spot)
+
+    def _use_dx_spot(self, spot: DxSpot):
+        """Fill the QSO form from a spot (DX Cluster and DXpeditions page)."""
         self.call_var.set(spot.call)
         self._call_changed()
         self.freq_var.set(spot.frequency_mhz)
@@ -944,6 +955,10 @@ class DxClusterFeatureMixin:
         if spot is None:
             messagebox.showinfo("DX Cluster", "Bitte zuerst einen DX-Spot auswählen.", parent=self)
             return
+        self._tune_dx_spot(spot)
+
+    def _tune_dx_spot(self, spot: DxSpot):
+        """Tune the radio via CAT to a spot (DX Cluster and DXpeditions page)."""
         if not self.cat_manager.running:
             messagebox.showwarning(
                 "CAT ist ausgeschaltet",

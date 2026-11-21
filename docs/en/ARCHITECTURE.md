@@ -26,6 +26,7 @@ app.py
 ├── feature_cat.py
 ├── feature_rotor.py
 ├── feature_dxcluster.py
+├── feature_dxpeditions.py
 ├── feature_udp.py
 ├── feature_backup.py
 └── feature_settings.py
@@ -69,6 +70,7 @@ usage_stats.py
 | `feature_cat.py` | CAT, Hamlib, FLRig and TUNE |
 | `feature_rotor.py` | rotor UI, `rotctld` lifecycle, live position and QSO bearing control |
 | `feature_dxcluster.py` | DX Cluster and spotting |
+| `feature_dxpeditions.py` | Active DXpeditions (DA6IT.de calendar, spots, worked status) |
 | `feature_udp.py` | UDP and WSJT-X live logging |
 | `feature_backup.py` | backup and restore |
 | `feature_settings.py` | settings pages |

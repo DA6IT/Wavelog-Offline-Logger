@@ -124,6 +124,10 @@ Discovery runs only when **Find FLRig** is clicked. Manual configuration remains
 
 ![DX Cluster](../screenshots/en/dx-cluster.png)
 
+### DXpeditions
+
+The **DXpeditions** page lists only DXpeditions spotted within the **last 30 minutes**, one line per active band and mode with frequency, age of the spot, country, heading and distance from your locator (from the DXpedition grid, otherwise approximately from the CTY.DAT centre of the entity) and end date. Sources: the DA6IT.de DXpedition calendar and its spot summary, plus spots of your own DX Cluster connection. Data is fetched only while the page is open (spots every minute, calendar every three hours; automatic refresh can be switched off). **Status** compares with your local logbook per band and mode: **New country!** (red), **New band/mode** (orange, entity missing on this band/mode), **Country ✓, new call** (blue) and **✓ worked** (green). **Worked** lists every band/mode already logged with the DXpedition; **Only not yet worked** hides green lines. Double-click or Enter tunes the radio, **Use for QSO** fills the form, **Open QRZ.com** opens the callsign page.
+
 Connect manually to receive live spots. Filter by band, mode, time and spotter region; sort by headings. The spots are a table with fixed columns (UTC, DX call, DX country, Worked, MHz, band, mode, spotter, spotter country, comment); new spots are inserted without moving the selection or scroll position. New spots (< 2 min) are light blue, worked ones green, and the **Worked** column shows "✓ Call" or "✓ Country". Worked markers compare band and mode. Double-click or Enter tunes the radio without changing page; **Use for QSO** fills the log form and **Open QRZ.com** opens the selected spot callsign in the browser. Public spotting uses a separate profile-specific DXSpider connection.
 
 ## 10. UDP / WSJT-X
@@ -159,7 +163,7 @@ The app checks GitHub Releases silently. After confirmation it downloads only th
 
 ## 14. Privacy and troubleshooting
 
-Core logging, profiles, ADI, statistics and CTY.DAT work offline. Network can be used by configured Wavelog, QRZ, the DA6IT.de QSL Card Manager, the locally evaluated eQSL member-list download, xOTA, DX Cluster/spotting, release checks, initial Windows runtime setup and the pseudonymous usage statistics enabled after the first-start notice. The usage heartbeat contains only the random installation ID, application version and operating-system family; it can be disabled and deleted from Settings. See [Troubleshooting](TROUBLESHOOTING.md), [Privacy](../../PRIVACY.md) and [Security](../../SECURITY.md).
+Core logging, profiles, ADI, statistics and CTY.DAT work offline. Network can be used by configured Wavelog, QRZ, the DA6IT.de QSL Card Manager, the locally evaluated eQSL member-list download, xOTA, DX Cluster/spotting, the DXpeditions page (DA6IT.de calendar and spot summary, only while the page is open), release checks, initial Windows runtime setup and the pseudonymous usage statistics enabled after the first-start notice. The usage heartbeat contains only the random installation ID, application version and operating-system family; it can be disabled and deleted from Settings. See [Troubleshooting](TROUBLESHOOTING.md), [Privacy](../../PRIVACY.md) and [Security](../../SECURITY.md).
 
 ## DA6IT.de QSL Card Manager
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 WHATS_NEW: dict[str, tuple[str, ...]] = {
 
     "0.24.0": (
+        "Neue Seite „DXpeditionen“: Sie zeigt nur DXpeditionen, die gerade aktiv sind (in den letzten 30 Minuten gespottet) – mit Band, Mode, Frequenz, Richtung und Entfernung und ob du sie auf diesem Band schon gearbeitet hast. Doppelklick stimmt den TRX ab.",
         "WS (früher WSJT-X Improved) wird beim Datei-Abgleich automatisch gefunden, auch mehrere Instanzen wie „WS - DA6IT“. Abgleichen geht jetzt mit dem Knopf „WSJT-X / WS abgleichen“ unter Logbuch & Sync.",
         "Das Logbuch lässt sich jetzt filtern: nach Band, Mode, Zeitraum, Land, QSL-Status und Sync-Status – auch zusammen mit der Rufzeichensuche. Die gefilterten QSOs können direkt als ADIF exportiert werden.",
         "Beim WSJT-X/WS-Abgleich bleiben nur noch die letzten 10 Sicherungskopien der Logdatei (und je eine pro Tag der letzten Woche) erhalten.",
@@ -114,6 +115,7 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
 
     "0.24.0": (
+        "New \"DXpeditions\" page: it shows only DXpeditions that are active right now (spotted in the last 30 minutes) with band, mode, frequency, heading and distance, and whether you have already worked them on that band. Double-click tunes the radio.",
         "WS (formerly WSJT-X Improved) is found automatically for the file sync, including several instances such as \"WS - DA6IT\". Sync now with the \"Sync WSJT-X / WS\" button on Logbook & Sync.",
         "The logbook can now be filtered by band, mode, period, country, QSL status and sync status, also together with the callsign search. The filtered QSOs can be exported directly as ADIF.",
         "The WSJT-X/WS sync now keeps only the newest 10 backup copies of the log file (plus one per day of the last week).",

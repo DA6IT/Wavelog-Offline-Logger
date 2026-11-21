@@ -116,10 +116,13 @@ def eager_worked_cache(country_db, qsos):
                 "qso_date": str(qso.get("qso_date") or ""), "time_on": str(qso.get("time_on") or ""),
                 "band": str(qso.get("band") or ""), "mode": str(qso.get("mode") or ""),
             })
-        country = str(qso.get("country") or "").strip()
-        if not country and call:
+        # v0.24.0: CTY.DAT name of the call first, stored name as fallback.
+        country = ""
+        if call:
             info = country_db.lookup(call)
             country = info.country if info else ""
+        if not country:
+            country = str(qso.get("country") or "").strip()
         frequency_hz = 0
         try:
             frequency_hz = int(round(float(str(qso.get("freq") or "0").replace(",", ".")) * 1_000_000))
