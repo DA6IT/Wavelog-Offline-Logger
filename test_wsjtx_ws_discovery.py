@@ -277,5 +277,64 @@ class LastResultTests(unittest.TestCase):
                 db.close()
 
 
+class BackupRotationTests(unittest.TestCase):
+    def test_keeps_newest_backups_and_ignores_other_files(self):
+        from wsjtx_sync import prune_wsjtx_backups
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log = root / "wsjtx_log.adi"
+            log.write_text("x", encoding="utf-8")
+            names = [f"wsjtx_log.adi.backup-202611{day:02d}-120000" for day in range(1, 15)]
+            names += ["wsjtx_log.adi.backup-20261114-120000-2"]
+            for name in names:
+                (root / name).write_text("b", encoding="utf-8")
+            foreign = [
+                "wsjtx_log.adi.backup-manuell",
+                "other.adi.backup-20260101-000000",
+                "wsjtx_log.adi.bak",
+                "ALL.TXT",
+            ]
+            for name in foreign:
+                (root / name).write_text("f", encoding="utf-8")
+            (root / "wsjtx_log.adi.backup-20250101-000000").mkdir()  # directories stay
+
+            removed = prune_wsjtx_backups(log, keep=10)
+
+            self.assertEqual(removed, 5)
+            left = sorted(p.name for p in root.glob("wsjtx_log.adi.backup-2026*"))
+            self.assertEqual(len(left), 10)
+            self.assertIn("wsjtx_log.adi.backup-20261114-120000-2", left)
+            self.assertIn("wsjtx_log.adi.backup-20261106-120000", left)
+            self.assertNotIn("wsjtx_log.adi.backup-20261105-120000", left)
+            for name in foreign:
+                self.assertTrue((root / name).exists(), name)
+            self.assertTrue(log.exists())
+            self.assertTrue((root / "wsjtx_log.adi.backup-20250101-000000").is_dir())
+
+    def test_sync_prunes_after_verified_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = MetadataDB(root / "metadata.db")
+            try:
+                store = LogStore(root / "adi", "")
+                log_dir = root / "WS"
+                log_dir.mkdir()
+                log = log_dir / "wsjtx_log.adi"
+                log.write_text(qso_to_adif_record(_qso("DL2BBB", "110000")), encoding="utf-8")
+                for day in range(1, 13):
+                    (log_dir / f"wsjtx_log.adi.backup-202601{day:02d}-000000").write_text("b", encoding="utf-8")
+                store.add(_qso("DL1AAA", "100000"))
+
+                result = sync_wsjtx_with_local(store, db, WsjtxSyncSettings(log_path=log, sync_on_manual=True))
+
+                self.assertEqual(result.appended_to_wsjtx, 1)
+                backups = sorted(log_dir.glob("wsjtx_log.adi.backup-*"))
+                self.assertEqual(len(backups), 10)
+                self.assertTrue(Path(result.backup_path).exists())
+            finally:
+                db.close()
+
+
 if __name__ == "__main__":
     unittest.main()

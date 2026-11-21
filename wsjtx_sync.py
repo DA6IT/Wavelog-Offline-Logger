@@ -634,10 +634,58 @@ def _backup_wsjtx_log(path: Path) -> str:
         shutil.copy2(path, target)
     except OSError as exc:
         raise WsjtxSyncError(
-            f"WSJT-X Backup konnte nicht erstellt werden: {exc}"
+            f"WSJT-X/WS-Backup konnte nicht erstellt werden: {exc}"
         ) from exc
 
     return str(target)
+
+
+# Backups of the WSJT-X/WS log made before each writing sync.  Only the newest
+# ones are kept; older ones are removed after a verified write.
+WSJTX_BACKUP_KEEP = 10
+
+
+def prune_wsjtx_backups(path: Path, keep: int = WSJTX_BACKUP_KEEP, *, protect: str = "") -> int:
+    """Delete all but the newest ``keep`` backups of ``path``; return the count.
+
+    Only files named exactly ``<log>.backup-YYYYMMDD-HHMMSS[-n]`` next to the
+    log are considered, so the log itself and foreign files are never touched.
+    ``protect`` (the backup just made) is never deleted.
+    """
+    path = Path(path)
+    pattern = re.compile(
+        "^" + re.escape(path.name) + r"\.backup-(\d{8}-\d{6})(?:-(\d+))?$",
+        re.IGNORECASE,
+    )
+    try:
+        candidates = list(path.parent.iterdir())
+    except OSError:
+        return 0
+
+    backups: list[tuple[str, int, Path]] = []
+    for candidate in candidates:
+        match = pattern.match(candidate.name)
+        if not match:
+            continue
+        try:
+            if not candidate.is_file():
+                continue
+        except OSError:
+            continue
+        backups.append((match.group(1), int(match.group(2) or 1), candidate))
+
+    backups.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    removed = 0
+    for _stamp, _counter, candidate in backups[max(0, int(keep)):]:
+        if protect and _same_path(candidate, Path(protect)):
+            continue
+        try:
+            candidate.unlink()
+            removed += 1
+        except OSError:
+            # A locked or read-only backup simply stays; never fail the sync.
+            continue
+    return removed
 
 
 def _append_records(path: Path, qsos: list[dict[str, Any]]) -> tuple[int, str]:
@@ -693,10 +741,14 @@ def _append_records(path: Path, qsos: list[dict[str, Any]]) -> tuple[int, str]:
 
     if missing_after_write:
         raise WsjtxSyncError(
-            f"WSJT-X Log wurde geschrieben, aber "
+            f"WSJT-X/WS-Log wurde geschrieben, aber "
             f"{len(missing_after_write)} QSO(s) konnten danach nicht verifiziert werden."
             + (f" Backup: {backup}" if backup else "")
         )
+
+    # Verified: now it is safe to drop backups beyond the newest ones.
+    if backup:
+        prune_wsjtx_backups(path, protect=backup)
 
     return len(pending), backup
 
@@ -1172,14 +1224,15 @@ class WsjtxSyncSettingsPanel(ttk.Frame):
             text=(
                 "Das lokale Logbuch ist der Merge-Hub: Fehlende QSOs werden aus WSJT-X/WS "
                 "übernommen und fehlende lokale QSOs in die Logdatei ergänzt. Es wird nichts "
-                "gelöscht. Vor Änderungen an einer vorhandenen Logdatei entsteht ein Backup; "
+                "gelöscht. Vor Änderungen an einer vorhandenen Logdatei entsteht ein Backup "
+                "(die letzten 10 bleiben erhalten); "
                 "Dubletten werden über Rufzeichen, Band, Mode und Zeit erkannt, fremde "
                 "STATION_CALLSIGNs nicht übernommen."
                 if de
                 else
                 "The local logbook is the merge hub: missing QSOs are imported from WSJT-X/WS "
                 "and missing local QSOs are added to the log file. Nothing is deleted. A backup "
-                "is made before an existing log file is changed; duplicates are matched by "
+                "(the newest 10 are kept) is made before an existing log file is changed; duplicates are matched by "
                 "callsign, band, mode and time, other STATION_CALLSIGNs are not imported."
             ),
             style="Muted.Card.TLabel",
