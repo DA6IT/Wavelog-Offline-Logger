@@ -8,12 +8,168 @@ import webbrowser
 from collections import Counter
 from datetime import datetime, timezone
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import messagebox, simpledialog, ttk
+from typing import Callable, Sequence
 from dx_cluster import (
-    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DxClusterClient, DxClusterConfig, DxClusterError, DxSpotterConfig, LazyWorkedHistory, SPOTTER_REGION_OPTIONS, normalize_worked_mode, select_dx_spot_candidate, spot_comment_with_mode, spot_sort_value, spotter_region_for_continent, worked_flags,
+    DEFAULT_CLUSTER_HOST, DEFAULT_CLUSTER_PORT, DxClusterClient, DxClusterConfig, DxClusterError, DxSpot, DxSpotterConfig, LazyWorkedHistory, SPOTTER_REGION_OPTIONS, normalize_worked_mode, select_dx_spot_candidate, spot_comment_with_mode, spot_sort_value, spotter_region_for_continent, worked_flags,
 )
 from logger_core import BANDS, MODES, band_from_mhz
+from qso_tree_view import apply_row_diff, insert_row, plan_row_diff
 from ui_theme import theme
+
+
+# Spot table ("Empfangene DX-Spots"): key, German heading, sample cell text
+# that must fit, cell anchor, stretch.  Column widths are measured from the
+# heading and the sample in the current (zoomed) fonts, so they fit in every
+# language and UI scale.  Only the comment column stretches; every other
+# column keeps its width and position while spots arrive.
+DX_SPOT_COLUMNS = (
+    ("time", "UTC", "00:00", "center", False),
+    ("call", "DX-Rufzeichen", "EA8/DL1ABC", "w", False),
+    ("dx_country", "DX-Land", "Fed. Rep. of Germany", "w", False),
+    ("worked", "Gearbeitet", "✓ Land", "center", False),
+    ("frequency", "MHz", "28.4950", "e", False),
+    ("band", "Band", "160m", "center", False),
+    ("mode", "Mode", "PSK31", "center", False),
+    ("spotter", "Spotter", "DL8ABC-#", "w", False),
+    ("spotter_country", "Spotter-Land", "Fed. Rep. of Germany", "w", False),
+    ("comment", "Kommentar", "", "w", True),
+)
+DX_SPOT_COMMENT_MIN_WIDTH = 160
+DX_SPOT_CELL_PADDING = 18
+DX_SPOT_NEW_SECONDS = 120
+# Text of the "Gearbeitet" column: callsign / only the DXCC entity worked on
+# the spot's band and mode (German; translated via ui_preferences).
+DX_SPOT_WORKED_LABELS = ("✓ Call", "✓ Land")
+
+
+def format_dx_spot_time(time_utc: str) -> str:
+    """Cluster time "1254" -> "12:54"; anything else unchanged or "—"."""
+    text = str(time_utc or "").strip().upper().removesuffix("Z")
+    if len(text) == 4 and text.isdigit():
+        return f"{text[:2]}:{text[2:]}"
+    return text or "—"
+
+
+def format_dx_spot_frequency(frequency_hz: int) -> str:
+    """MHz with a fixed number of decimals so right-aligned values line up.
+
+    Cluster spots have 100 Hz resolution, i.e. four MHz decimals; finer
+    values keep their precision.
+    """
+    try:
+        hz = int(frequency_hz)
+    except (TypeError, ValueError):
+        return "—"
+    if hz <= 0:
+        return "—"
+    if hz % 100 == 0:
+        return f"{hz / 1_000_000:.4f}"
+    return f"{hz / 1_000_000:.6f}".rstrip("0")
+
+
+def dx_spot_row_tag(is_new: bool, worked_call: bool, worked_country: bool) -> str:
+    """One Treeview tag per row (combined state, so no tag precedence issues)."""
+    state = "call" if worked_call else ("country" if worked_country else "")
+    if is_new:
+        return "dx_new_" + state if state else "dx_new"
+    return "dx_" + state if state else "dx_plain"
+
+
+def build_dx_spot_row(
+    item_id: str,
+    spot: DxSpot,
+    dx_country: str,
+    spotter_country: str,
+    comment: str,
+    *,
+    is_new: bool,
+    worked_call: bool,
+    worked_country: bool,
+    worked_labels: tuple[str, str] = DX_SPOT_WORKED_LABELS,
+) -> tuple[str, str, tuple]:
+    """``(iid, tag, values)`` in the order of :data:`DX_SPOT_COLUMNS`."""
+    worked = worked_labels[0] if worked_call else (worked_labels[1] if worked_country else "")
+    values = (
+        format_dx_spot_time(spot.time_utc),
+        spot.call or "—",
+        dx_country or "—",
+        worked,
+        format_dx_spot_frequency(spot.frequency_hz),
+        spot.band or "—",
+        spot.mode or "—",
+        spot.spotter or "—",
+        spotter_country or "—",
+        comment or "",
+    )
+    return item_id, dx_spot_row_tag(is_new, worked_call, worked_country), values
+
+
+def dx_spot_sort_value(
+    spot: DxSpot,
+    key: str,
+    dx_country: str = "",
+    spotter_country: str = "",
+    comment: str = "",
+    worked_call: bool = False,
+    worked_country: bool = False,
+):
+    if key == "worked":
+        # Ties keep the newest-first order of the spot list (stable sort).
+        return 2 if worked_call else (1 if worked_country else 0)
+    return spot_sort_value(spot, key, dx_country, spotter_country, comment)
+
+
+def dx_spot_default_descending(key: str) -> bool:
+    """Newest spot / highest frequency first; text columns A→Z; not worked first."""
+    return key in {"time", "frequency"}
+
+
+def dx_spot_column_widths(
+    measure_heading: Callable[[str], int],
+    measure_cell: Callable[[str], int],
+    scale: float = 1.0,
+    translate: Callable[[str], str] = lambda text: text,
+) -> list[tuple[str, int, int]]:
+    """``(key, width, minwidth)`` per column, measured in the current fonts.
+
+    A column is as wide as its heading including the sort arrow or its
+    sample text, whichever is wider, plus padding.  The comment column takes
+    the remaining space but never less than its minimum.
+    """
+    padding = max(10, int(round(DX_SPOT_CELL_PADDING * scale)))
+    result = []
+    for key, label, sample, _anchor, stretch in DX_SPOT_COLUMNS:
+        heading = measure_heading(translate(label) + " ▼")
+        cell = measure_cell(translate(sample)) if sample else 0
+        width = max(heading, cell) + padding
+        if stretch:
+            width = max(width, int(round(DX_SPOT_COMMENT_MIN_WIDTH * scale)))
+            result.append((key, width, width))
+        else:
+            result.append((key, width, max(20, min(width, int(round(36 * scale))))))
+    return result
+
+
+def dx_spot_scroll_anchor(rows: Sequence[tuple], first_fraction: float) -> str | None:
+    """Id of the row at the top of a scrolled view; ``None`` at the very top.
+
+    At the top the view stays at the top so new spots remain visible.
+    """
+    if not rows or first_fraction <= 0:
+        return None
+    index = min(len(rows) - 1, max(0, int(round(first_fraction * len(rows)))))
+    return rows[index][0]
+
+
+def dx_spot_anchor_index(visible_ids: Sequence[str], anchor: str | None) -> int | None:
+    if anchor is None:
+        return None
+    try:
+        return list(visible_ids).index(anchor)
+    except ValueError:
+        return None
 
 
 class DxClusterFeatureMixin:
@@ -42,6 +198,7 @@ class DxClusterFeatureMixin:
         self.dx_cluster_seen_keys: set[tuple] = set()
         self.dx_cluster_sort_key = "time"
         self.dx_cluster_sort_descending = True
+        self.dx_cluster_reveal_selection = False
 
     def _build_dx_cluster_page(self):
         p = self._new_page("dx_cluster")
@@ -125,9 +282,10 @@ class DxClusterFeatureMixin:
         table.rowconfigure(1, weight=1)
         ttk.Label(table, text="Empfangene DX-Spots", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
         tk.Label(
-            table, text="Doppelklick stimmt den TRX auf Frequenz und Mode ab. QSO übernehmen füllt anschließend das Formular.",
-            bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9), anchor="e",
-        ).grid(row=0, column=1, sticky="e", pady=(0, 8))
+            table,
+            text="Doppelklick/Enter: TRX abstimmen · neu (< 2 min): hellblau · auf Band und Mode gearbeitet: grün",
+            bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9), anchor="e", justify="right", wraplength=760,
+        ).grid(row=0, column=1, sticky="e", padx=(12, 0), pady=(0, 8))
 
         tree_box = ttk.Frame(table, style="Card.TFrame")
         tree_box.grid(row=1, column=0, columnspan=2, sticky="nsew")
@@ -135,34 +293,53 @@ class DxClusterFeatureMixin:
         tree_box.rowconfigure(0, weight=1)
         self.dx_cluster_visible_ids: list[str] = []
         self.dx_cluster_selected_id: str | None = None
-        self.dx_cluster_table_columns = (
-            ("time", self._tr("UTC"), 7), ("call", self._tr("DX-Rufzeichen"), 15),
-            ("dx_country", self._tr("DX-Land"), 20), ("frequency", self._tr("MHz"), 11),
-            ("band", self._tr("Band"), 8), ("mode", self._tr("Mode"), 10),
-            ("spotter", self._tr("Spotter"), 15), ("spotter_country", self._tr("Spotter-Land"), 20),
-            ("comment", self._tr("Kommentar"), 60),
+        # Rows the Treeview currently shows, as (iid, tag, values); None
+        # forces a full rebuild on the next refresh.
+        self.dx_cluster_shown_rows: list[tuple[str, str, tuple]] | None = None
+        self.dx_cluster_column_scale: float | None = None
+        self.dx_cluster_layout_job = None
+        style = ttk.Style(self)
+        # Own style: the selected row must stay distinguishable from the
+        # light-blue "new" rows (the shared Treeview style uses ACTIVE_BG for
+        # both).  Everything else (font, colours) is inherited from Treeview.
+        style.map(
+            "DxSpots.Treeview",
+            background=[("selected", theme.ACCENT)],
+            foreground=[("selected", theme.INPUT_BG)],
         )
-        self.dx_cluster_tree = tk.Text(
-            tree_box, wrap="none", state="disabled", bg=theme.INPUT_BG, fg=theme.TEXT, insertbackground=theme.TEXT,
-            font=("Consolas", 9), relief="solid", borderwidth=1,
-            highlightthickness=0, cursor="arrow", padx=4, pady=2,
+        self.dx_cluster_bold_font = tkfont.Font(root=self, family="Segoe UI", size=9, weight="bold")
+        self.dx_cluster_tree = ttk.Treeview(
+            tree_box, columns=tuple(column[0] for column in DX_SPOT_COLUMNS), show="headings",
+            selectmode="browse", style="DxSpots.Treeview",
         )
-        self.dx_cluster_tree.tag_configure("header", background=theme.NEUTRAL_BADGE_BG, foreground=theme.TEXT, font=("Consolas", 9, "bold"))
-        self.dx_cluster_tree.tag_configure("new", background=theme.ACTIVE_BG)
-        self.dx_cluster_tree.tag_configure("worked", foreground=theme.OK, font=("Consolas", 9, "bold"))
-        self.dx_cluster_tree.tag_configure("selected", background=theme.NAV_ACTIVE_HOVER)
+        for key, label, _sample, anchor, stretch in DX_SPOT_COLUMNS:
+            self.dx_cluster_tree.heading(
+                key, text=self._tr(label), anchor=anchor,
+                command=lambda key=key: self._dx_cluster_sort_by(key),
+            )
+            self.dx_cluster_tree.column(key, anchor=anchor, stretch=stretch)
+        self._dx_cluster_update_headings()
+        self.dx_cluster_tree.tag_configure("dx_new", background=theme.ACTIVE_BG)
+        for prefix, background in (("dx_", None), ("dx_new_", theme.ACTIVE_BG)):
+            extra = {"background": background} if background else {}
+            self.dx_cluster_tree.tag_configure(prefix + "call", foreground=theme.OK, font=self.dx_cluster_bold_font, **extra)
+            self.dx_cluster_tree.tag_configure(prefix + "country", foreground=theme.OK, **extra)
         self.dx_cluster_tree.grid(row=0, column=0, sticky="nsew")
         scroll = ttk.Scrollbar(tree_box, orient="vertical", command=self.dx_cluster_tree.yview)
         scroll.grid(row=0, column=1, sticky="ns")
         hscroll = ttk.Scrollbar(tree_box, orient="horizontal", command=self.dx_cluster_tree.xview)
         hscroll.grid(row=1, column=0, sticky="ew")
         self.dx_cluster_tree.configure(yscrollcommand=scroll.set, xscrollcommand=hscroll.set)
-        self.dx_cluster_tree.bind("<Button-1>", self._dx_cluster_table_click)
+        self.dx_cluster_tree.bind("<<TreeviewSelect>>", self._dx_cluster_selection_changed)
         self.dx_cluster_tree.bind("<Double-1>", self._dx_cluster_table_double_click)
+        self.dx_cluster_tree.bind("<Return>", self._dx_cluster_table_return)
+        self.dx_cluster_tree.bind("<Configure>", self._dx_cluster_schedule_layout, add="+")
+        self._dx_cluster_apply_layout()
 
         actions = ttk.Frame(table, style="Card.TFrame")
         actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        ttk.Button(actions, text="QSO übernehmen", style="Primary.TButton", command=self._use_selected_dx_spot).pack(side="left")
+        actions.columnconfigure(2, weight=1)
+        ttk.Button(actions, text="QSO übernehmen", style="Primary.TButton", command=self._use_selected_dx_spot).grid(row=0, column=0, sticky="w")
         self.dx_cluster_qrz_button = ttk.Button(
             actions,
             text="QRZ.com öffnen",
@@ -170,11 +347,11 @@ class DxClusterFeatureMixin:
             command=self._open_selected_dx_spot_qrz,
             state="disabled",
         )
-        self.dx_cluster_qrz_button.pack(side="left", padx=(8, 0))
-        tk.Label(
-            actions, text="Überschriften sortieren · neu: hellblau · gleicher Mode gearbeitet: grün · Doppelklick stimmt TRX ab.",
-            bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9),
-        ).pack(side="right")
+        self.dx_cluster_qrz_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        self.dx_cluster_count_label = tk.Label(
+            actions, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9), anchor="e",
+        )
+        self.dx_cluster_count_label.grid(row=0, column=2, sticky="e", padx=(12, 0))
         self.dx_cluster_filter_job = self.after(10_000, self._dx_cluster_filter_tick)
 
     def _active_station_callsign(self) -> str:
@@ -512,22 +689,8 @@ class DxClusterFeatureMixin:
             self._dx_cluster_country(callsign)
         return self.dx_cluster_continent_cache.get(key, "")
 
-    @staticmethod
-    def _dx_cluster_table_cell(value: str, width: int) -> str:
-        text = str(value or "—")
-        if len(text) > width - 1:
-            text = text[: width - 2] + "…"
-        return text.ljust(width)
-
-    def _dx_cluster_sort_value(self, row: tuple):
-        _item_id, spot, dx_country, spotter_country, comment, _age = row
-        return spot_sort_value(
-            spot, self.dx_cluster_sort_key, dx_country, spotter_country, comment,
-        )
-
-    def _refresh_dx_cluster_spots(self):
-        if not hasattr(self, "dx_cluster_tree"):
-            return
+    def _dx_cluster_spot_rows(self) -> tuple[list[tuple[str, str, tuple]], dict[str, DxSpot]]:
+        """Filter, sort and format the received spots for the Treeview."""
         band_filter = self._canonical_choice(self.dx_cluster_band_filter_var.get(), ("Alle", *BANDS))
         mode_filter = self._canonical_choice(self.dx_cluster_mode_filter_var.get(), ("Alle", *MODES))
         spotter_region_filter = self._canonical_choice(self.dx_cluster_spotter_region_filter_var.get(), SPOTTER_REGION_OPTIONS)
@@ -538,7 +701,7 @@ class DxClusterFeatureMixin:
             "15 Minuten": 15, "30 Minuten": 30, "60 Minuten": 60, "2 Stunden": 120,
         }.get(window_label)
         now = datetime.now(timezone.utc)
-        rows = []
+        entries = []
         for item_id, spot in self.dx_cluster_spots:
             age_seconds = self._dx_cluster_spot_age_seconds(spot, now)
             if window_minutes is not None and age_seconds > window_minutes * 60:
@@ -555,98 +718,170 @@ class DxClusterFeatureMixin:
             spotter_region = spotter_region_for_continent(self._dx_cluster_continent(spot.spotter))
             if spotter_region_filter != "Alle" and spotter_region != spotter_region_filter:
                 continue
-            rows.append((item_id, spot, dx_country, spotter_country, comment, age_seconds))
-        rows.sort(key=self._dx_cluster_sort_value, reverse=self.dx_cluster_sort_descending)
-
-        old_y = self.dx_cluster_tree.yview()
-        old_x = self.dx_cluster_tree.xview()
-        selected_id = self.dx_cluster_selected_id
-        self.dx_cluster_tree.configure(state="normal")
-        self.dx_cluster_tree.delete("1.0", "end")
-        self.dx_cluster_spot_by_id.clear()
-        self.dx_cluster_visible_ids = []
-        header_parts = []
-        for key, label, width in self.dx_cluster_table_columns:
-            if key == self.dx_cluster_sort_key:
-                label += " ▼" if self.dx_cluster_sort_descending else " ▲"
-            header_parts.append(self._dx_cluster_table_cell(label, width))
-        self.dx_cluster_tree.insert("end", "".join(header_parts) + "\n", ("header",))
-
-        for item_id, spot, dx_country, spotter_country, comment, age_seconds in rows:
             worked_call, worked_country = worked_flags(
                 spot.call, dx_country, spot.band, spot.mode,
                 self.dx_cluster_worked_calls, self.dx_cluster_worked_countries,
             )
-            # One Tk call per row (instead of ~11): chunks alternate with
-            # their tags. Line tags cover the row text, not the newline,
-            # exactly like the former tag_add(line.0, line.end).
-            line_tags = (("new",) if age_seconds <= 120 else ()) + (("selected",) if item_id == selected_id else ())
-            rest = "".join(
-                self._dx_cluster_table_cell(value, width)
-                for value, width in (
-                    (spot.frequency_mhz, 11), (spot.band or "—", 8), (spot.mode or "—", 10),
-                    (spot.spotter, 15), (spotter_country, 20), (comment, 60),
-                )
+            entries.append((
+                item_id, spot, dx_country, spotter_country, comment,
+                age_seconds <= DX_SPOT_NEW_SECONDS, worked_call, worked_country,
+            ))
+        sort_key = self.dx_cluster_sort_key
+        entries.sort(
+            key=lambda entry: dx_spot_sort_value(
+                entry[1], sort_key, entry[2], entry[3], entry[4], entry[6], entry[7],
+            ),
+            reverse=self.dx_cluster_sort_descending,
+        )
+        worked_labels = (self._tr(DX_SPOT_WORKED_LABELS[0]), self._tr(DX_SPOT_WORKED_LABELS[1]))
+        rows = [
+            build_dx_spot_row(
+                item_id, spot, dx_country, spotter_country, comment,
+                is_new=is_new, worked_call=worked_call, worked_country=worked_country,
+                worked_labels=worked_labels,
             )
-            self.dx_cluster_tree.insert(
-                "end",
-                self._dx_cluster_table_cell((spot.time_utc + "Z") if spot.time_utc else "—", 7), line_tags,
-                self._dx_cluster_table_cell(spot.call, 15), (("worked",) if worked_call else ()) + line_tags,
-                self._dx_cluster_table_cell(dx_country, 20), (("worked",) if worked_country else ()) + line_tags,
-                rest, line_tags,
-                "\n", (),
-            )
-            self.dx_cluster_visible_ids.append(item_id)
-            self.dx_cluster_spot_by_id[item_id] = spot
+            for item_id, spot, dx_country, spotter_country, comment, is_new, worked_call, worked_country in entries
+        ]
+        return rows, {entry[0]: entry[1] for entry in entries}
 
-        if selected_id not in self.dx_cluster_spot_by_id:
+    def _refresh_dx_cluster_spots(self):
+        if not hasattr(self, "dx_cluster_tree"):
+            return
+        if self.dx_cluster_layout_job is None:
+            self._dx_cluster_apply_layout()  # no-op unless the UI zoom changed
+        rows, spots = self._dx_cluster_spot_rows()
+        tree = self.dx_cluster_tree
+        previous = self.dx_cluster_shown_rows
+        anchor = dx_spot_scroll_anchor(previous or [], tree.yview()[0])
+        # Incremental update: new spots are inserted, expired ones removed and
+        # only rows whose text or colour changed are touched.  Ids stay
+        # stable, so the selection and the scroll position survive refreshes.
+        ops = plan_row_diff(previous, rows) if previous is not None else None
+        if ops is None:
+            children = tree.get_children()
+            if children:
+                tree.delete(*children)
+            for row in rows:
+                insert_row(tree, "end", row)
+        elif ops:
+            apply_row_diff(tree, ops)
+        self.dx_cluster_shown_rows = rows
+        self.dx_cluster_spot_by_id = spots
+        self.dx_cluster_visible_ids = [row[0] for row in rows]
+
+        selected_id = self.dx_cluster_selected_id
+        if selected_id in spots:
+            if tuple(tree.selection()) != (selected_id,):
+                tree.selection_set(selected_id)
+        else:
             self.dx_cluster_selected_id = None
+        if self.dx_cluster_reveal_selection:
+            # After a sort change show the selected spot (or the top).
+            self.dx_cluster_reveal_selection = False
+            if self.dx_cluster_selected_id:
+                tree.see(self.dx_cluster_selected_id)
+            else:
+                tree.yview_moveto(0)
+        elif anchor is not None and rows:
+            new_index = dx_spot_anchor_index(self.dx_cluster_visible_ids, anchor)
+            if new_index is not None:
+                # Keep the row that was at the top of the view at the top:
+                # Treeview scrolls by row index, so rows inserted above would
+                # push it down.  "yview moveto" lays the tree out first (Tk
+                # >= 8.6.13), i.e. the fraction refers to the new row count.
+                tree.yview_moveto(new_index / len(rows))
         if hasattr(self, "dx_cluster_qrz_button"):
             self.dx_cluster_qrz_button.configure(
                 state="normal" if self.dx_cluster_selected_id else "disabled",
             )
-        self.dx_cluster_tree.configure(state="disabled")
-        if old_y:
-            self.dx_cluster_tree.yview_moveto(old_y[0])
-        if old_x:
-            self.dx_cluster_tree.xview_moveto(old_x[0])
+        if hasattr(self, "dx_cluster_count_label"):
+            self.dx_cluster_count_label.configure(text=f"{len(rows)} / {len(self.dx_cluster_spots)} Spots")
         self._update_dx_cluster_live_status()
 
-    def _dx_cluster_sort_from_character(self, character: int):
-        start = 0
-        for key, _label, width in self.dx_cluster_table_columns:
-            if start <= character < start + width:
-                if self.dx_cluster_sort_key == key:
-                    self.dx_cluster_sort_descending = not self.dx_cluster_sort_descending
-                else:
-                    self.dx_cluster_sort_key = key
-                    self.dx_cluster_sort_descending = key in {"time", "frequency"}
-                self._refresh_dx_cluster_spots()
-                return
-            start += width
+    def _dx_cluster_update_headings(self):
+        for key, label, _sample, _anchor, _stretch in DX_SPOT_COLUMNS:
+            text = self._tr(label)
+            if key == self.dx_cluster_sort_key:
+                text += " ▼" if self.dx_cluster_sort_descending else " ▲"
+            self.dx_cluster_tree.heading(key, text=text)
 
-    def _dx_cluster_table_click(self, event):
-        line_text, character_text = self.dx_cluster_tree.index(f"@{event.x},{event.y}").split(".")
-        line = int(line_text)
-        if line == 1:
-            self._dx_cluster_sort_from_character(int(character_text))
-            return "break"
-        visible_index = line - 2
-        if not 0 <= visible_index < len(self.dx_cluster_visible_ids):
-            return "break"
-        self.dx_cluster_selected_id = self.dx_cluster_visible_ids[visible_index]
-        self.dx_cluster_tree.tag_remove("selected", "1.0", "end")
-        self.dx_cluster_tree.tag_add("selected", f"{line}.0", f"{line}.end")
+    def _dx_cluster_sort_by(self, key: str):
+        if self.dx_cluster_sort_key == key:
+            self.dx_cluster_sort_descending = not self.dx_cluster_sort_descending
+        else:
+            self.dx_cluster_sort_key = key
+            self.dx_cluster_sort_descending = dx_spot_default_descending(key)
+        self.dx_cluster_reveal_selection = True
+        self._dx_cluster_update_headings()
+        self._refresh_dx_cluster_spots()
+
+    def _dx_cluster_schedule_layout(self, _event=None):
+        if self.dx_cluster_layout_job is None and not self.closing:
+            self.dx_cluster_layout_job = self.after(150, self._dx_cluster_apply_layout)
+
+    def _dx_cluster_apply_layout(self):
+        """Scale column widths, row height and the bold font with the UI zoom."""
+        if self.dx_cluster_layout_job is not None:
+            try:
+                self.after_cancel(self.dx_cluster_layout_job)
+            except tk.TclError:
+                pass
+        self.dx_cluster_layout_job = None
+        if self.closing or not hasattr(self, "dx_cluster_tree"):
+            return
+        try:
+            scale = float(getattr(self, "_ui_scale", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            scale = 1.0
+        if self.dx_cluster_column_scale is not None and abs(scale - self.dx_cluster_column_scale) < 0.001:
+            return
+        self.dx_cluster_column_scale = scale
+        tree = self.dx_cluster_tree
+        try:
+            style = ttk.Style(self)
+            cell_font = style.lookup("Treeview", "font") or "TkDefaultFont"
+            heading_font = style.lookup("Treeview.Heading", "font") or cell_font
+
+            def measure(font, text: str) -> int:
+                return int(self.tk.call("font", "measure", font, text))
+
+            widths = dx_spot_column_widths(
+                lambda text: measure(heading_font, text), lambda text: measure(cell_font, text),
+                scale, self._tr,
+            )
+            for key, width, minwidth in widths:
+                tree.column(key, width=width, minwidth=minwidth)
+            linespace = int(self.tk.call("font", "metrics", cell_font, "-linespace"))
+            style.configure("DxSpots.Treeview", rowheight=max(linespace + 4, int(round(22 * scale))))
+            family = self.tk.call("font", "actual", cell_font, "-family")
+            size = int(self.tk.call("font", "actual", cell_font, "-size"))
+            self.dx_cluster_bold_font.configure(family=family, size=size, weight="bold")
+        except (tk.TclError, TypeError, ValueError):
+            pass
+
+    def _dx_cluster_selection_changed(self, _event=None):
+        selection = self.dx_cluster_tree.selection()
+        self.dx_cluster_selected_id = selection[0] if selection else None
         if hasattr(self, "dx_cluster_qrz_button"):
-            self.dx_cluster_qrz_button.configure(state="normal")
-        return "break"
+            self.dx_cluster_qrz_button.configure(
+                state="normal" if self.dx_cluster_selected_id else "disabled",
+            )
 
     def _dx_cluster_table_double_click(self, event):
-        line = int(self.dx_cluster_tree.index(f"@{event.x},{event.y}").split(".")[0])
-        if line == 1:
+        tree = self.dx_cluster_tree
+        if tree.identify_region(event.x, event.y) != "cell":
+            return None  # headings (sorting) and column separators keep their default handling
+        item_id = tree.identify_row(event.y)
+        if not item_id or item_id not in self.dx_cluster_spot_by_id:
             return "break"
-        self._dx_cluster_table_click(event)
+        tree.selection_set(item_id)
+        self.dx_cluster_selected_id = item_id
         self._tune_selected_dx_spot()
+        return "break"
+
+    def _dx_cluster_table_return(self, _event=None):
+        if self._selected_dx_cluster_spot() is not None:
+            self._tune_selected_dx_spot()
         return "break"
 
     def _selected_dx_cluster_spot(self) -> DxSpot | None:
