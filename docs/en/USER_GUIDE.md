@@ -124,7 +124,7 @@ Discovery runs only when **Find FLRig** is clicked. Manual configuration remains
 
 ![DX Cluster](../screenshots/en/dx-cluster.png)
 
-Connect manually to receive live spots. Filter by band, mode, time and spotter region; sort by headings. Worked markers compare band and mode. Double-click tunes the radio without changing page; **Use for QSO** fills the log form and **Open QRZ.com** opens the selected spot callsign in the browser. Public spotting uses a separate profile-specific DXSpider connection.
+Connect manually to receive live spots. Filter by band, mode, time and spotter region; sort by headings. The spots are a table with fixed columns (UTC, DX call, DX country, Worked, MHz, band, mode, spotter, spotter country, comment); new spots are inserted without moving the selection or scroll position. New spots (< 2 min) are light blue, worked ones green, and the **Worked** column shows "✓ Call" or "✓ Country". Worked markers compare band and mode. Double-click or Enter tunes the radio without changing page; **Use for QSO** fills the log form and **Open QRZ.com** opens the selected spot callsign in the browser. Public spotting uses a separate profile-specific DXSpider connection.
 
 ## 10. UDP / WSJT-X
 

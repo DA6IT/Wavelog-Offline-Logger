@@ -10,6 +10,7 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
         "WS (früher WSJT-X Improved) wird beim Datei-Abgleich automatisch gefunden, auch mehrere Instanzen wie „WS - DA6IT“. Abgleichen geht jetzt mit dem Knopf „WSJT-X / WS abgleichen“ unter Logbuch & Sync.",
         "Das Logbuch lässt sich jetzt filtern: nach Band, Mode, Zeitraum, Land, QSL-Status und Sync-Status – auch zusammen mit der Rufzeichensuche. Die gefilterten QSOs können direkt als ADIF exportiert werden.",
         "Beim WSJT-X/WS-Abgleich bleiben nur noch die letzten 10 Sicherungskopien der Logdatei erhalten.",
+        "Die Liste der empfangenen DX-Spots ist jetzt eine ruhige Tabelle mit festen Spalten und der neuen Spalte „Gearbeitet“. Neue Spots verschieben weder Auswahl noch Scrollposition; Enter stimmt den TRX ab.",
         "Im Logbuch gibt es jetzt ein Suchfeld für Rufzeichen: Die Liste zeigt sofort nur noch passende QSOs, auch bei Teilen eines Rufzeichens wie „DL1“. Mit * und ? lassen sich Platzhalter verwenden, Strg+F springt ins Suchfeld und Esc leert die Suche.",
     ),
     "0.23.0": (
@@ -116,6 +117,7 @@ WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
         "WS (formerly WSJT-X Improved) is found automatically for the file sync, including several instances such as \"WS - DA6IT\". Sync now with the \"Sync WSJT-X / WS\" button on Logbook & Sync.",
         "The logbook can now be filtered by band, mode, period, country, QSL status and sync status, also together with the callsign search. The filtered QSOs can be exported directly as ADIF.",
         "The WSJT-X/WS sync now keeps only the newest 10 backup copies of the log file.",
+        "The received DX spots list is now a calm table with fixed columns and a new \"Worked\" column. New spots no longer move the selection or scroll position; Enter tunes the radio.",
         "The logbook now has a callsign search field: the list immediately shows only matching QSOs, also for parts of a callsign such as \"DL1\". * and ? work as wildcards, Ctrl+F jumps to the search field and Esc clears it.",
     ),
     "0.22.0": (

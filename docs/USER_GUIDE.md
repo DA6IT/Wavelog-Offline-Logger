@@ -378,14 +378,15 @@ Funktionen:
 - Filter nach Band, Mode und Spotter-Region
 - Sortierung über jede Tabellenüberschrift
 - Offline-Ländererkennung für DX und Spotter
-- hellblaue Markierung neuer Spots
-- grüne Schrift für bereits gearbeitetes Rufzeichen oder Land
+- Tabelle mit festen Spalten (UTC, DX-Rufzeichen, DX-Land, Gearbeitet, MHz, Band, Mode, Spotter, Spotter-Land, Kommentar); neue Spots werden eingefügt, ohne dass Auswahl oder Scrollposition springen
+- hellblaue Markierung neuer Spots (jünger als 2 Minuten)
+- grüne Schrift für bereits gearbeitetes Rufzeichen oder Land; die Spalte **Gearbeitet** zeigt „✓ Call“ bzw. „✓ Land“
 
 Worked-Markierungen vergleichen immer **Band und Mode**. Ein 20-m-FT8-QSO markiert daher keinen 20-m-USB-Spot und kein QSO auf 15 m.
 
 Fehlt der Mode, wertet die App Kommentar, typische FT8-Frequenzen und eindeutige IARU-Region-1-Bandplanbereiche aus. Mehrdeutiges SSB wird bandabhängig als LSB oder USB behandelt.
 
-- **Doppelklick:** TRX auf Frequenz und Mode abstimmen; kein Seitenwechsel
+- **Doppelklick oder Enter:** TRX auf Frequenz und Mode abstimmen; kein Seitenwechsel
 - **QSO übernehmen:** ausgewählten Spot in das QSO-Formular übertragen
 - **QRZ.com öffnen:** QRZ.com-Seite des ausgewählten Spot-Rufzeichens im Browser öffnen
 - **DX-Spot senden:** aktuellen QSO-Kandidaten über die getrennte DXSpider-Verbindung melden. Nach dem Speichern und Leeren des Formulars bleibt das letzte QSO als eigener Spot-Kandidat erhalten.
