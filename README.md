@@ -30,7 +30,7 @@ Ein Offline-first Desktop-Logger für Funkamateure: unterwegs loggen, auch wenn 
 - CAT über mitgeliefertes Hamlib, inklusive TUNE/ATU und manuellem Windows-Hamlib-Updater mit Rückfallversion
 - Rotorsteuerung über Hamlib `rotctld` mit Live-Position, Kompass, Peilungsübernahme, STOP und Dummy-Test ohne Hardware
 - Telnet-DX-Cluster, Filter, Worked-Markierung und Spotversand
-- Seite **DXpeditionen**: nur in den letzten 30 Minuten gespottete DXpeditionen mit Band/Mode/Frequenz, Gearbeitet-Status je Band und Mode, Richtung und Entfernung (Daten vom DA6IT.de DXpedition-Kalender)
+- Seite **Live DXpeditionen**: nur in den letzten 30 Minuten gespottete DXpeditionen mit Band/Mode/Frequenz, Gearbeitet-Status je Band und Mode, Richtung und Entfernung (Daten vom DA6IT.de DXpedition-Kalender)
 - bidirektionaler WSJT-X-Dateisync über `wsjtx_log.adi` mit Backup, Dublettenschutz und optionalem Abgleich bei Start/Beenden
 - WSJT-X-Live-Status und geloggte QSOs weiterhin zusätzlich über UDP
 - deutsche und englische Oberfläche, Light- und Dark-Theme

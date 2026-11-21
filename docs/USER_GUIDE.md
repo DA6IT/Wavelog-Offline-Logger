@@ -391,9 +391,9 @@ Fehlt der Mode, wertet die App Kommentar, typische FT8-Frequenzen und eindeutige
 - **QRZ.com öffnen:** QRZ.com-Seite des ausgewählten Spot-Rufzeichens im Browser öffnen
 - **DX-Spot senden:** aktuellen QSO-Kandidaten über die getrennte DXSpider-Verbindung melden. Nach dem Speichern und Leeren des Formulars bleibt das letzte QSO als eigener Spot-Kandidat erhalten.
 
-### 12.1 DXpeditionen
+### 12.1 Live DXpeditionen
 
-Die Seite **DXpeditionen** zeigt nur DXpeditionen, die in den **letzten 30 Minuten** gespottet wurden – je aktivem Band und Mode eine Zeile mit Frequenz, „Spot vor“, Land, Richtung und Entfernung vom eigenen Locator (aus dem Grid der DXpedition, sonst ca. aus dem CTY.DAT-Mittelpunkt des Landes) und Enddatum.
+Die Seite **Live DXpeditionen** zeigt nur DXpeditionen, die in den **letzten 30 Minuten** gespottet wurden – je aktivem Band und Mode eine Zeile mit Frequenz, „Spot vor“, Land, Richtung und Entfernung vom eigenen Locator (aus dem Grid der DXpedition, sonst ca. aus dem CTY.DAT-Mittelpunkt des Landes) und Enddatum.
 
 Quellen: der DXpedition-Kalender von DA6IT.de (Rufzeichen, Varianten, Zeitraum, QSL-Weg, Infos) und dessen Spot-Übersicht (letzter Spot je Band der letzten Stunde), zusätzlich die Spots der eigenen DX-Cluster-Verbindung, falls verbunden. Abgerufen wird nur, solange die Seite offen ist: die Spots jede Minute, der Kalender alle drei Stunden; **Jede Minute automatisch aktualisieren** lässt sich abschalten. Ohne Internet bleibt der zuletzt geladene Kalender erhalten.
 
@@ -404,7 +404,7 @@ Die Spalte **Status** vergleicht mit dem lokalen Logbuch (Rufzeichen samt Varian
 - **Land ✓, Call neu** (blau): Das Land ist auf Band und Mode schon gearbeitet, aber nicht diese DXpedition.
 - **✓ gearbeitet** (grün): Diese DXpedition ist auf Band und Mode schon im Log.
 
-**Gearbeitet** listet alle Bänder/Modes, auf denen die DXpedition schon im Log steht. **Nur noch nicht gearbeitete** blendet grüne Zeilen aus. Doppelklick oder Enter stimmt den TRX per CAT ab, **QSO übernehmen** füllt das QSO-Formular, **QRZ.com öffnen** zeigt die QRZ-Seite. Unter der Tabelle stehen Zeitraum, IOTA, QSL-Weg und Infos der ausgewählten DXpedition.
+**Gearbeitet** listet alle Bänder/Modes, auf denen die DXpedition schon im Log steht. **Nur noch nicht gearbeitete** blendet grüne Zeilen aus. Standardmäßig steht der aktuellste Spot oben; ein Klick auf eine Spaltenüberschrift sortiert danach, ein zweiter Klick dreht die Reihenfolge um. Doppelklick oder Enter stimmt den TRX per CAT ab, **QSO übernehmen** füllt das QSO-Formular, **QRZ.com öffnen** zeigt die QRZ-Seite. Unter der Tabelle stehen Zeitraum, IOTA, QSL-Weg und Infos der ausgewählten DXpedition.
 
 ## 13. UDP Logging / WSJT-X
 
@@ -450,7 +450,7 @@ Netzwerk können aktivierte, konfigurierte oder ausdrücklich gestartete Funktio
 - Download der eQSL-Mitgliederliste für lokale QSL-Empfehlungen
 - pseudonyme Nutzungsstatistik nach Bestätigung des Erststart-Hinweises
 - DX-Cluster-Empfang und Spotversand
-- Seite **DXpeditionen**: Abruf des DXpedition-Kalenders und der Spot-Übersicht von `da6it.de` (nur solange die Seite offen ist, abschaltbar; es werden keine Profil- oder QSO-Daten gesendet)
+- Seite **Live DXpeditionen**: Abruf des DXpedition-Kalenders und der Spot-Übersicht von `da6it.de` (nur solange die Seite offen ist, abschaltbar; es werden keine Profil- oder QSO-Daten gesendet)
 - Release-Prüfung
 - einmalige Windows-Runtime-Einrichtung
 

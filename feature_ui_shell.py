@@ -501,7 +501,7 @@ class UiShellFeatureMixin:
             ("qsl", "✉   QSL Card Manager"),
             ("stats", "▤   Statistiken"),
             ("dx_cluster", "◎   DX Cluster"),
-            ("dxpeditions", "✈   DXpeditionen"),
+            ("dxpeditions", "✈   Live DXpeditionen"),
             ("cat", "⌁   CAT Setup"),
             ("udp_log", "◉   UDP Logging"),
             ("settings", "⚙   Einstellungen"),
@@ -593,7 +593,7 @@ class UiShellFeatureMixin:
         return f
 
     def _show_page(self, name: str):
-        titles = {"log": "QSO loggen", "fast_log": "Fast Log / DXpedition", "contest": "Contest Logging", "xota": "xOTA", "qsos": "Logbuch & Sync", "qsl": "QSL Card Manager", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "dxpeditions": "DXpeditionen", "udp_log": "UDP Logging", "settings": "Einstellungen"}
+        titles = {"log": "QSO loggen", "fast_log": "Fast Log / DXpedition", "contest": "Contest Logging", "xota": "xOTA", "qsos": "Logbuch & Sync", "qsl": "QSL Card Manager", "stats": "Statistiken", "cat": "CAT Setup", "dx_cluster": "DX Cluster", "dxpeditions": "Live DXpeditionen", "udp_log": "UDP Logging", "settings": "Einstellungen"}
         subtitles = {
             "log": "Neues QSO erfassen und sicher lokal speichern.",
             "fast_log": "Pileups zügig abarbeiten: Rufzeichen und Enter.",

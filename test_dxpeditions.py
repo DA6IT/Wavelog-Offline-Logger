@@ -177,6 +177,30 @@ class WorkedTests(unittest.TestCase):
         self.assertEqual(worked_status(self.slots["dx-vk9|15m|CW"], "Christmas Island", call_index, country_index)[0], "new_slot")
 
 
+class SortTests(unittest.TestCase):
+    def test_default_is_newest_spot_first_and_columns_sort(self):
+        from feature_dxpeditions import DXPED_DEFAULT_SORT, dxped_sort_value
+
+        calendar = parse_calendar(CALENDAR)
+        slots = active_slots(calendar, SPOTS, now=NOW)
+        entries = [("new_slot" if s.dxpedition.id == "dx-vk9" else "new_country", NOW - s.spotted_ts, s, "", [],
+                    90.0 if s.dxpedition.id == "dx-vk9" else 210.0, 11000.0 if s.dxpedition.id == "dx-vk9" else 4970.0)
+                   for s in slots]
+        key, descending = DXPED_DEFAULT_SORT
+        ordered = sorted(entries, key=lambda e: dxped_sort_value(key, e), reverse=descending)
+        ages = [round(e[1]) for e in ordered]
+        self.assertEqual(ages, sorted(ages))
+        self.assertEqual(round(ordered[0][1]), 240)  # VK9XY spotted 4 min ago
+        by_status = sorted(entries, key=lambda e: dxped_sort_value("status", e))
+        self.assertEqual(by_status[0][0], "new_country")
+        by_distance = sorted(entries, key=lambda e: dxped_sort_value("distance", e))
+        self.assertEqual(by_distance[0][2].call, "3X4U")
+        by_freq = [e[2].frequency_hz for e in sorted(entries, key=lambda e: dxped_sort_value("frequency", e))]
+        self.assertEqual(by_freq, sorted(by_freq))
+        missing = ("worked", 10.0, slots[0], "", [], None, None)
+        self.assertGreater(dxped_sort_value("heading", missing), dxped_sort_value("heading", entries[0]))
+
+
 class FormatTests(unittest.TestCase):
     def test_beam_from_grid_and_cty(self):
         vk9 = Dxpedition(id="a", callsign="VK9XY")

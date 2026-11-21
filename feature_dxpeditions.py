@@ -64,13 +64,52 @@ DXPED_COLUMNS = (
     ("band", "Band", 50, "center", False),
     ("mode", "Mode", 52, "center", False),
     ("frequency", "MHz", 70, "e", False),
-    ("age", "Spot vor", 66, "e", False),
-    ("status", "Status", 124, "w", False),
+    ("age", "Spot vor", 84, "e", False),
+    ("status", "Status", 128, "w", False),
     ("heading", "Richtung", 80, "e", False),
     ("distance", "Entfernung", 92, "e", False),
     ("worked", "Gearbeitet", 130, "w", True),
     ("until", "bis", 56, "center", False),
 )
+
+# Default: newest spot first (wish DA6IT 21.11.2026).
+DXPED_DEFAULT_SORT = ("age", False)
+SETTING_DXPED_SORT = "dxped_sort"
+
+
+def dxped_sort_value(key: str, entry: tuple) -> tuple:
+    """Sort value of one table entry for column ``key`` (ascending order).
+
+    ``entry`` = (status, age_seconds, slot, country, worked_pairs, bearing, km).
+    Ties are broken by age (newest first), then callsign and band.
+    """
+    status, age, slot, country, worked, bearing, km = entry
+    tie = (age, slot.dxpedition.callsign, _band_order(slot.band))
+    missing = float("inf")
+    if key == "call":
+        primary: tuple = (slot.call,)
+    elif key == "country":
+        primary = ((country or slot.dxpedition.dxcc or "").casefold(),)
+    elif key == "band":
+        primary = (_band_order(slot.band),)
+    elif key == "mode":
+        primary = (slot.mode,)
+    elif key == "frequency":
+        primary = (slot.frequency_hz or missing,)
+    elif key == "status":
+        primary = (DXPED_STATUS_ORDER.get(status, 9),)
+    elif key == "heading":
+        primary = (bearing if bearing is not None else missing,)
+    elif key == "distance":
+        primary = (km if km is not None else missing,)
+    elif key == "worked":
+        primary = (len(worked),)
+    elif key == "until":
+        primary = (slot.dxpedition.end or "9999",)
+    else:  # "age"
+        primary = ()
+    return primary + tie
+
 
 _DIRECTIONS_DE = ("N", "NNO", "NO", "ONO", "O", "OSO", "SO", "SSO", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
 _DIRECTIONS_EN = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
@@ -407,6 +446,7 @@ class DxpeditionsFeatureMixin:
         self.dxped_slot_by_id: dict[str, ActiveSlot] = {}
         self.dxped_selected_id: str | None = None
         self._dxped_index_source = None
+        self.dxped_sort_key, self.dxped_sort_descending = DXPED_DEFAULT_SORT
         self._dxped_index: tuple[dict, dict] = ({}, {})
         self._dxped_load_cached_calendar()
 
@@ -443,7 +483,7 @@ class DxpeditionsFeatureMixin:
 
         top = self._card(p, row=0, column=0, sticky="ew", pady=(0, 10))
         top.columnconfigure(1, weight=1)
-        ttk.Label(top, text="Aktive DXpeditionen", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(top, text="Live DXpeditionen", style="CardTitle.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             top,
             text=(
@@ -488,13 +528,16 @@ class DxpeditionsFeatureMixin:
             selectmode="browse", style="Dxped.Treeview",
         )
         for key, label, width, anchor, stretch in DXPED_COLUMNS:
-            self.dxped_tree.heading(key, text=self._tr(label), anchor=anchor)
+            self.dxped_tree.heading(
+                key, text=self._tr(label), anchor=anchor, command=lambda key=key: self._dxped_sort_by(key),
+            )
             self.dxped_tree.column(key, width=width, minwidth=40, anchor=anchor, stretch=stretch)
         self.dxped_bold_font = ("Segoe UI Semibold", 9)
         self.dxped_tree.tag_configure("new_country", foreground=theme.ERR, font=self.dxped_bold_font)
         self.dxped_tree.tag_configure("new_slot", foreground=theme.WARN, font=self.dxped_bold_font)
         self.dxped_tree.tag_configure("new_call", foreground=theme.ACCENT)
         self.dxped_tree.tag_configure("worked", foreground=theme.OK)
+        self._dxped_update_headings()
         self.dxped_tree.grid(row=0, column=0, sticky="nsew")
         scroll = ttk.Scrollbar(box, orient="vertical", command=self.dxped_tree.yview)
         scroll.grid(row=0, column=1, sticky="ns")
@@ -532,6 +575,42 @@ class DxpeditionsFeatureMixin:
         legend.bind("<Configure>", lambda event: legend.configure(wraplength=max(200, event.width - 10)))
         self._dxped_selection_changed()
 
+    def _dxped_sort_by(self, key: str):
+        if key == self.dxped_sort_key:
+            self.dxped_sort_descending = not self.dxped_sort_descending
+        else:
+            self.dxped_sort_key = key
+            # Numbers that matter most when high come first on the first click.
+            self.dxped_sort_descending = key in {"worked"}
+        if self._dxped_settings_ready():
+            self.db.set_setting(SETTING_DXPED_SORT, f"{self.dxped_sort_key}:{int(self.dxped_sort_descending)}")
+        self._dxped_update_headings()
+        self.dxped_rows_shown = None  # order changed: rebuild
+        self._dxped_render()
+        if self.dxped_selected_id and self.dxped_tree.exists(self.dxped_selected_id):
+            self.dxped_tree.see(self.dxped_selected_id)
+        else:
+            self.dxped_tree.yview_moveto(0)
+
+    def _dxped_load_sort(self):
+        raw = self.db.get_setting(SETTING_DXPED_SORT, "") if self._dxped_settings_ready() else ""
+        key, _sep, descending = raw.partition(":")
+        if key in {column[0] for column in DXPED_COLUMNS}:
+            self.dxped_sort_key, self.dxped_sort_descending = key, descending == "1"
+        else:
+            self.dxped_sort_key, self.dxped_sort_descending = DXPED_DEFAULT_SORT
+        self._dxped_update_headings()
+
+    def _dxped_update_headings(self):
+        if not hasattr(self, "dxped_tree"):
+            return
+        for key, label, _width, anchor, _stretch in DXPED_COLUMNS:
+            text = self._tr(label)
+            if key == self.dxped_sort_key:
+                # For "Spot vor" ascending means newest first.
+                text += " ▼" if self.dxped_sort_descending else " ▲"
+            self.dxped_tree.heading(key, text=text)
+
     def _dxped_settings_ready(self) -> bool:
         return getattr(self, "db", None) is not None
 
@@ -544,6 +623,8 @@ class DxpeditionsFeatureMixin:
 
     def _dxped_page_shown(self):
         self._dxped_sync_auto_setting()
+        self._dxped_load_sort()
+        self.dxped_rows_shown = None
         self._dxped_render()
         # Switching pages back and forth must not hammer da6it.de.
         if self.dxped_auto_var.get() and time.time() - self.dxped_spots_fetched > 30:
@@ -696,15 +777,22 @@ class DxpeditionsFeatureMixin:
             if self.dxped_only_new_var.get() and status == "worked":
                 continue
             heading = distance = "—"
+            bearing_value = km_value = None
             result = beam(own_locator, slot.dxpedition, (info.lat, info.lon) if info else None)
+            if result is not None:
+                bearing_value, km_value = result[0], result[1]
             if result is not None:
                 heading = format_heading(result[0], result[2], language)
                 distance = format_distance(result[1], result[2], language)
-            entries.append((status, now - slot.spotted_ts, slot, country, worked, heading, distance))
-        entries.sort(key=lambda entry: (DXPED_STATUS_ORDER.get(entry[0], 9), entry[2].dxpedition.callsign, _band_order(entry[2].band)))
+            entries.append((status, now - slot.spotted_ts, slot, country, worked, bearing_value, km_value, heading, distance))
+        sort_key = self.dxped_sort_key
+        entries.sort(
+            key=lambda entry: dxped_sort_value(sort_key, entry[:7]),
+            reverse=self.dxped_sort_descending,
+        )
         rows = []
         by_id = {}
-        for status, age, slot, country, worked, heading, distance in entries:
+        for status, age, slot, country, worked, _bearing, _km, heading, distance in entries:
             frequency = f"{slot.frequency_hz / 1_000_000:.4f}" if slot.frequency_hz else "—"
             rows.append((
                 slot.key, status,
