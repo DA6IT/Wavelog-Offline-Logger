@@ -555,7 +555,6 @@ class SettingsFeatureMixin:
         collect_optional_help(notebook)
         self._settings_optional_help.append(hint)
 
-
         self.wsjtx_settings_panel = WsjtxSyncSettingsPanel(
             wsjtx_tab,
             self.db,
