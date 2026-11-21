@@ -7,7 +7,7 @@
 ### Added
 
 - **WS (früher WSJT-X Improved) im Datei-Abgleich:** Der Tab heißt jetzt **WSJT-X / WS Sync** und findet automatisch `%LOCALAPPDATA%\WS` und `WS - <Rig-Name>` (z. B. `WS - DA6IT`) – vor den WSJT-X-Ordnern. Ein in WS/WSJT-X selbst gewählter Logdateipfad und das eigene Rufzeichen werden (nur lesend) aus `WS.ini` bzw. `WS - <Rig-Name>.ini` übernommen. Ist noch ein alter WSJT-X-Ordner gewählt, zu dem es ein WS-Gegenstück gibt, erscheint ein Hinweis.
-- **Sichtbarer Knopf für den WSJT-X/WS-Abgleich:** **WSJT-X / WS abgleichen** unter **Logbuch & Sync** und **Jetzt mit WSJT-X / WS abgleichen** oben im Einstellungs-Tab (vorher nur ganz unten rechts). Darunter stehen Zeitpunkt und Ergebnis des letzten Abgleichs; die Ergebnismeldung nennt die abgeglichene Datei.
+- **Sichtbarer Knopf für den WSJT-X/WS-Abgleich:** **WSJT-X / WS abgleichen** unter **Logbuch & Sync** und **Jetzt mit WSJT-X / WS abgleichen** oben im Einstellungs-Tab (vorher nur ganz unten rechts). Darunter stehen Zeitpunkt, Datei und Ergebnis des letzten Abgleichs (auch Fehlschläge); die Ergebnismeldung nennt die abgeglichene Datei.
 - **Rufzeichensuche im Logbuch:** Suchfeld über der Logbuchtabelle filtert beim Tippen nach Rufzeichen (Teilstring, Groß-/Kleinschreibung egal, Platzhalter `*` und `?`). Trefferzahl wird angezeigt; Strg+F springt ins Suchfeld, Esc leert es, Pfeil runter wechselt in die Trefferliste. Auch bei großen Logbüchern ohne Neuladen der Daten.
 
 ## [0.23.0] - 2026-11-08

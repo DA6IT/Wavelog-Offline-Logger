@@ -73,7 +73,11 @@ class QsoSyncFeatureMixin:
         p = self._new_page("qsos")
         p.columnconfigure(0, weight=1)
         p.rowconfigure(1, weight=1)
-        top = self._card(p, row=0, column=0, sticky="ew", pady=(0, 10))
+        card_top = self._card(p, row=0, column=0, sticky="ew", pady=(0, 10))
+        # Buttons on the first line, sync status on its own line below so a
+        # long status text is never squeezed away by the buttons.
+        top = ttk.Frame(card_top, style="Card.TFrame")
+        top.pack(side="top", fill="x")
         ttk.Button(top, text="Synchronisieren", style="Primary.TButton", command=self.sync_now).pack(side="left")
         ttk.Button(top, text="ADI-Ordner öffnen", style="Secondary.TButton", command=self.open_log_dir).pack(side="left", padx=8)
         ttk.Button(top, text="ADIF importieren", style="Secondary.TButton", command=self.import_adif).pack(side="left")
@@ -84,8 +88,8 @@ class QsoSyncFeatureMixin:
             top, text="WSJT-X / WS abgleichen", style="Secondary.TButton", command=self.sync_wsjtx_now,
         )
         self.wsjtx_sync_button.pack(side="left")
-        self.sync_label = tk.Label(top, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9))
-        self.sync_label.pack(side="right")
+        self.sync_label = tk.Label(card_top, text="", bg=theme.CARD, fg=theme.MUTED, font=("Segoe UI", 9), anchor="w")
+        self.sync_label.pack(side="top", fill="x", pady=(6, 0))
 
         card = self._card(p, row=1, column=0, sticky="nsew")
         card.columnconfigure(0, weight=1)
@@ -1181,6 +1185,7 @@ class QsoSyncFeatureMixin:
         self.sync_operation = ""
         self.sync_reason = ""
         self.status_var.set("WSJT-X/WS Sync fehlgeschlagen")
+        self._refresh_wsjtx_panel()
         if hasattr(self, "sync_label"):
             self.sync_label.configure(text="WSJT-X/WS Sync fehlgeschlagen")
         write_startup_log("WSJT-X/WS Sync fehlgeschlagen: " + message)

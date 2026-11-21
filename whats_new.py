@@ -111,7 +111,7 @@ WHATS_NEW: dict[str, tuple[str, ...]] = {
 WHATS_NEW_EN: dict[str, tuple[str, ...]] = {
 
     "0.24.0": (
-        "WS (formerly WSJT-X Improved) is found automatically for the file sync, including several instances such as \"WS - DA6IT\". Sync now with the \"WSJT-X / WS abgleichen\" button on Logbook & Sync.",
+        "WS (formerly WSJT-X Improved) is found automatically for the file sync, including several instances such as \"WS - DA6IT\". Sync now with the \"Sync WSJT-X / WS\" button on Logbook & Sync.",
         "The logbook now has a callsign search field: the list immediately shows only matching QSOs, also for parts of a callsign such as \"DL1\". * and ? work as wildcards, Ctrl+F jumps to the search field and Esc clears it.",
     ),
     "0.22.0": (

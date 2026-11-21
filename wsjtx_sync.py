@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import contextlib
 import json
+import ntpath
 import os
 import re
 import shutil
 import sys
-import urllib.parse
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -266,6 +266,16 @@ def _decode_qsettings_value(raw: str) -> str:
     return "".join(out).strip()
 
 
+_QT_KEY_ESCAPE_RE = re.compile(r"%U([0-9A-Fa-f]{4})|%([0-9A-Fa-f]{2})")
+
+
+def _unescape_qt_key(value: str) -> str:
+    """Undo QSettings' ini key escaping (``%XX`` Latin-1, ``%UXXXX`` UTF-16)."""
+    return _QT_KEY_ESCAPE_RE.sub(
+        lambda m: chr(int(m.group(1) or m.group(2), 16)), value
+    )
+
+
 def read_wsjtx_ini(path: Path) -> dict[str, str]:
     """Read a WSJT-X/WS ini into ``{"Section/Key/Sub": value}`` (read-only)."""
     result: dict[str, str] = {}
@@ -279,14 +289,14 @@ def read_wsjtx_ini(path: Path) -> dict[str, str]:
         if not stripped or stripped.startswith(";"):
             continue
         if stripped.startswith("[") and stripped.endswith("]"):
-            section = urllib.parse.unquote(stripped[1:-1].strip())
+            section = _unescape_qt_key(stripped[1:-1].strip())
             if section.casefold() == "general":
                 section = ""
             continue
         if "=" not in stripped:
             continue
         key, _sep, value = stripped.partition("=")
-        key = key.strip().replace("\\", "/")
+        key = "/".join(_unescape_qt_key(part) for part in key.strip().split("\\"))
         full = f"{section}/{key}" if section else key
         result[full] = _decode_qsettings_value(value)
     return result
@@ -302,13 +312,26 @@ def _ini_candidates(directory: Path) -> list[Path]:
     return unique
 
 
-def _configured_logs(directory: Path) -> tuple[list[tuple[str, Path]], str]:
-    """Log files named in the program's ini plus the station callsign.
+def _usable_log_path(value: str) -> Path | None:
+    """Only absolute paths: WS resolves a relative MyLog against its own
+    working directory, which the logger cannot know."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if not (path.is_absolute() or ntpath.isabs(raw)):
+        return None
+    return path
 
-    Returns ``([(configuration_label, log_path), ...], my_call)``.  The active
-    configuration comes first; alternative configurations (MultiSettings)
-    follow when they name a different file.
+
+def _configured_logs(directory: Path) -> list[tuple[str, Path, str]]:
+    """Log files of a WS/WSJT-X data folder: ``[(config_label, path, call)]``.
+
+    The active configuration comes first (``MyLog`` or the default
+    ``wsjtx_log.adi``); alternative configurations (MultiSettings) follow when
+    they name a different file.  The ini is only read, never written.
     """
+    default_log = directory / WSJTX_DEFAULT_LOG_NAME
     for ini_path in _ini_candidates(directory):
         try:
             if not ini_path.is_file():
@@ -316,20 +339,23 @@ def _configured_logs(directory: Path) -> tuple[list[tuple[str, Path]], str]:
         except OSError:
             continue
         values = read_wsjtx_ini(ini_path)
-        logs: list[tuple[str, Path]] = []
-        active = values.get("Configuration/MyLog", "").strip()
-        if active:
-            logs.append(("", Path(active)))
-        for key, value in sorted(values.items()):
-            if key == "Configuration/MyLog" or not key.endswith("/Configuration/MyLog"):
-                continue
-            if not value.strip():
-                continue
-            label = key[: -len("/Configuration/MyLog")].split("/")[-1]
-            logs.append((label, Path(value.strip())))
         my_call = values.get("Configuration/MyCall", "").strip().upper()
-        return logs, my_call
-    return [], ""
+        logs: list[tuple[str, Path, str]] = [
+            ("", _usable_log_path(values.get("Configuration/MyLog", "")) or default_log, my_call)
+        ]
+        suffix = "/Configuration/MyLog"
+        for key, value in sorted(values.items()):
+            if key == "Configuration/MyLog" or not key.endswith(suffix):
+                continue
+            log_path = _usable_log_path(value)
+            if log_path is None:
+                continue
+            group = key[: -len(suffix)]
+            label = group.split("/")[-1]
+            call = values.get(f"{group}/Configuration/MyCall", "").strip().upper() or my_call
+            logs.append((label, log_path, call))
+        return logs
+    return [("", default_log, "")]
 
 
 def _same_path(a: Path, b: Path) -> bool:
@@ -364,15 +390,12 @@ def discover_wsjtx_profiles() -> list[WsjtxProfile]:
 
         program, instance = classified
         base_name = _profile_name_from_dir(child.name)
-        configured, my_call = _configured_logs(child)
-        label = f"{base_name} ({my_call})" if my_call else base_name
-        default_log = child / WSJTX_DEFAULT_LOG_NAME
-        entries = configured or [("", default_log)]
         seen: list[Path] = []
-        for config_label, log_path in entries:
+        for config_label, log_path, my_call in _configured_logs(child):
             if any(_same_path(log_path, other) for other in seen):
                 continue
             seen.append(log_path)
+            label = f"{base_name} ({my_call})" if my_call else base_name
             name = f"{label} – {config_label}" if config_label else label
             found.append(
                 (
@@ -400,7 +423,12 @@ def ws_replacement_hint(log_path: Path | None, profiles: Iterable[WsjtxProfile] 
     instance = classified[1].casefold()
     for profile in profiles if profiles is not None else discover_wsjtx_profiles():
         other = classify_wsjtx_dir(profile.directory.name)
-        if other and other[0] == "WS" and other[1].casefold() == instance:
+        if (
+            other
+            and other[0] == "WS"
+            and other[1].casefold() == instance
+            and not _same_path(profile.log_path, Path(log_path))
+        ):
             return profile
     return None
 
@@ -420,7 +448,7 @@ def read_wsjtx_qsos(path: Path) -> list[dict[str, Any]]:
     try:
         text = _read_text(path)
     except OSError as exc:
-        raise WsjtxSyncError(f"WSJT-X Log konnte nicht gelesen werden: {exc}") from exc
+        raise WsjtxSyncError(f"WSJT-X/WS-Log konnte nicht gelesen werden: {exc}") from exc
 
     if not text.strip():
         return []
@@ -428,7 +456,7 @@ def read_wsjtx_qsos(path: Path) -> list[dict[str, Any]]:
     try:
         return [adif_fields_to_qso(fields) for fields in parse_adif(text)]
     except Exception as exc:
-        raise WsjtxSyncError(f"WSJT-X ADIF konnte nicht ausgewertet werden: {exc}") from exc
+        raise WsjtxSyncError(f"WSJT-X/WS-ADIF konnte nicht ausgewertet werden: {exc}") from exc
 
 
 def _digits(value: Any) -> str:
@@ -652,7 +680,7 @@ def _append_records(path: Path, qsos: list[dict[str, Any]]) -> tuple[int, str]:
 
     except OSError as exc:
         raise WsjtxSyncError(
-            f"WSJT-X Log konnte nicht ergänzt werden: {exc}"
+            f"WSJT-X/WS-Log konnte nicht ergänzt werden: {exc}"
         ) from exc
 
     verified = read_wsjtx_qsos(path)
@@ -679,11 +707,21 @@ def sync_wsjtx_with_local(
     settings: WsjtxSyncSettings | None = None,
 ) -> WsjtxSyncResult:
     settings = settings or load_wsjtx_settings(db)
+    try:
+        return _sync_wsjtx_with_local(store, db, settings)
+    except Exception as exc:
+        # Record the failure too, so "last synchronization" never keeps
+        # showing an older success after a failed run.
+        _remember_failed_result(db, settings.log_path, str(exc))
+        raise
+
+
+def _sync_wsjtx_with_local(store, db, settings: WsjtxSyncSettings) -> WsjtxSyncResult:
     path = settings.log_path
 
     if path is None:
         raise WsjtxSyncError(
-            "Kein WSJT-X Profil bzw. keine wsjtx_log.adi ausgewählt."
+            "Kein WSJT-X/WS Profil bzw. keine wsjtx_log.adi ausgewählt."
         )
 
     result = WsjtxSyncResult()
@@ -792,6 +830,23 @@ def _remember_last_result(db, result: WsjtxSyncResult) -> None:
         pass
 
 
+def _remember_failed_result(db, path: Path | None, message: str) -> None:
+    try:
+        db.set_setting(
+            SETTING_LAST_RESULT,
+            json.dumps(
+                {
+                    "at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "path": str(path or ""),
+                    "error": str(message or "")[:300],
+                },
+                ensure_ascii=False,
+            ),
+        )
+    except Exception:
+        pass
+
+
 def load_last_result(db) -> dict[str, Any]:
     try:
         data = json.loads(db.get_setting(SETTING_LAST_RESULT, "") or "{}")
@@ -814,16 +869,31 @@ def format_last_result(data: dict[str, Any], language: str = "de") -> str:
         )
     except ValueError:
         stamp = at
-    imported = int(data.get("imported") or 0)
-    appended = int(data.get("appended") or 0)
+    path_text = str(data.get("path") or "")
+    file_note = ""
+    if path_text:
+        parent = ntpath.basename(ntpath.dirname(path_text.replace("/", "\\")))
+        name = ntpath.basename(path_text.replace("/", "\\"))
+        file_note = f" · {parent}\\{name}" if parent else f" · {name}"
+    if data.get("error"):
+        error = str(data.get("error"))
+        if language == "en":
+            return f"Last synchronization FAILED: {stamp}{file_note} · {error}"
+        return f"Letzter Abgleich FEHLGESCHLAGEN: {stamp}{file_note} · {error}"
+    try:
+        imported = int(data.get("imported") or 0)
+        appended = int(data.get("appended") or 0)
+        in_file = int(data.get("wsjtx") or 0)
+    except (TypeError, ValueError):
+        imported = appended = in_file = 0
     if language == "en":
         return (
-            f"Last synchronization: {stamp} · local +{imported} · "
-            f"WSJT-X/WS +{appended} · {data.get('wsjtx', 0)} QSOs in the file"
+            f"Last synchronization: {stamp}{file_note} · local +{imported} · "
+            f"file +{appended} · {in_file} QSOs in the file"
         )
     return (
-        f"Letzter Abgleich: {stamp} · lokal +{imported} · "
-        f"WSJT-X/WS +{appended} · {data.get('wsjtx', 0)} QSOs in der Datei"
+        f"Letzter Abgleich: {stamp}{file_note} · lokal +{imported} · "
+        f"Datei +{appended} · {in_file} QSOs in der Datei"
     )
 
 

@@ -74,6 +74,22 @@ class QSettingsIniTests(unittest.TestCase):
         self.assertEqual(values["MultiSettings Extra/key"], "v")
 
 
+class QtKeyEscapeTests(unittest.TestCase):
+    def test_qt_percent_escaped_keys_and_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ini = Path(tmp) / "WS.ini"
+            ini.write_bytes(
+                "\ufeff[MultiSettings]\r\nPortable%202\\Configuration\\MyLog=C:/a.adi\r\n"
+                "F%FCnf\\Configuration\\MyLog=C:/b.adi\r\n%U20ACuro\\x=1\r\n"
+                "[Gr%FC%DFe]\r\nk=v\r\n".encode("utf-8")
+            )
+            values = read_wsjtx_ini(ini)
+        self.assertEqual(values["MultiSettings/Portable 2/Configuration/MyLog"], "C:/a.adi")
+        self.assertEqual(values["MultiSettings/Fünf/Configuration/MyLog"], "C:/b.adi")
+        self.assertEqual(values["MultiSettings/€uro/x"], "1")
+        self.assertEqual(values["Grüße/k"], "v")
+
+
 class DiscoveryTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -137,6 +153,39 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(profiles[0].log_path, ws / "wsjtx_log.adi")
         self.assertEqual(profiles[0].name, "WS (DA6IT)")
 
+    def test_alternative_configuration_uses_its_own_callsign(self):
+        ws = self._mkdir("WS")
+        alt = Path(self._tmp.name) / "portabel.adi"
+        (ws / "WS.ini").write_text(
+            "[Configuration]\nMyCall=DA6IT\n"
+            "[MultiSettings]\nPortabel\\Configuration\\MyLog=" + alt.as_posix() + "\n"
+            "Portabel\\Configuration\\MyCall=DA6IT/P\n",
+            encoding="utf-8",
+        )
+        profiles = discover_wsjtx_profiles()
+        self.assertEqual([p.name for p in profiles], ["WS (DA6IT)", "WS (DA6IT/P) – Portabel"])
+        self.assertEqual(profiles[0].log_path, ws / "wsjtx_log.adi")
+
+    def test_default_log_kept_when_only_alternatives_name_a_file(self):
+        ws = self._mkdir("WS")
+        alt = Path(self._tmp.name) / "x.adi"
+        (ws / "WS.ini").write_text(
+            "[MultiSettings]\nPortable\\Configuration\\MyLog=" + alt.as_posix() + "\n",
+            encoding="utf-8",
+        )
+        self.assertEqual([p.log_path for p in discover_wsjtx_profiles()], [ws / "wsjtx_log.adi", alt])
+
+    def test_relative_mylog_is_ignored(self):
+        ws = self._mkdir("WS")
+        (ws / "WS.ini").write_text("[Configuration]\nMyLog=mylog.adi\n", encoding="utf-8")
+        self.assertEqual([p.log_path for p in discover_wsjtx_profiles()], [ws / "wsjtx_log.adi"])
+
+    def test_no_hint_when_ws_still_writes_the_old_wsjtx_file(self):
+        ws = self._mkdir("WS")
+        old = self._mkdir("WSJT-X") / "wsjtx_log.adi"
+        (ws / "WS.ini").write_text("[Configuration]\nMyLog=" + old.as_posix() + "\n", encoding="utf-8")
+        self.assertIsNone(ws_replacement_hint(old))
+
     def test_ws_replacement_hint_for_old_wsjtx_selection(self):
         self._mkdir("WS")
         self._mkdir("WS - DA6IT")
@@ -189,6 +238,30 @@ class LastResultTests(unittest.TestCase):
                 self.assertIn("Last synchronization", format_last_result(last, "en"))
                 self.assertIn(f"Datei: {log}", format_wsjtx_result(result))
                 self.assertIn(f"File: {log}", format_wsjtx_result(result, "en"))
+            finally:
+                db.close()
+
+    def test_failed_sync_replaces_old_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db = MetadataDB(root / "metadata.db")
+            try:
+                db.set_setting(
+                    "wsjtx_sync_last_result",
+                    '{"at": "2026-11-20 10:00", "imported": 5, "appended": 0, "wsjtx": 5, "path": "C:/x/WS/wsjtx_log.adi"}',
+                )
+                self.assertIn("lokal +5", format_last_result(load_last_result(db)))
+                self.assertIn("WS\\wsjtx_log.adi", format_last_result(load_last_result(db)))
+                store = LogStore(root / "adi", "")
+                broken = root / "WS" / "wsjtx_log.adi"
+                broken.mkdir(parents=True)  # a directory instead of a file
+                with self.assertRaises(Exception):
+                    sync_wsjtx_with_local(store, db, WsjtxSyncSettings(log_path=broken, sync_on_manual=True))
+                last = load_last_result(db)
+                self.assertTrue(last.get("error"))
+                self.assertEqual(last["path"], str(broken))
+                self.assertIn("FEHLGESCHLAGEN", format_last_result(last))
+                self.assertIn("FAILED", format_last_result(last, "en"))
             finally:
                 db.close()
 
