@@ -127,7 +127,13 @@ def select_update_asset(
     machine_name = (machine or platform.machine()).lower()
     arm = machine_name in {"arm64", "aarch64"}
     if system_name.startswith("win"):
-        suffix = f"v{release.version}-windows-x64.exe"
+        # The 32-bit build runs a 32-bit Python; platform.machine() reports the
+        # OS (AMD64) there, so decide by the interpreter unless a machine is given.
+        if machine is not None:
+            x86 = machine_name in {"x86", "i386", "i686"}
+        else:
+            x86 = sys.maxsize <= 2**32
+        suffix = f"v{release.version}-windows-{'x86' if x86 else 'x64'}.exe"
     elif system_name == "darwin":
         suffix = f"v{release.version}-macos-{'arm64' if arm else 'x64'}.zip"
     elif system_name.startswith("linux"):

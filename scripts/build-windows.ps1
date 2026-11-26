@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [ValidateSet('x64', 'x86')]
+    [string]$Arch = 'x64'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,26 +92,38 @@ try {
     # Windows account. Some sandbox-created Pillow folders carry child ACLs
     # that an interactive user cannot traverse even when the repository root
     # itself is writable.
-    $pythonPackages = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'build\embedded\python-packages\windows-x64-release'))
+    $pythonPackages = [System.IO.Path]::GetFullPath((Join-Path $projectRoot "build\embedded\python-packages\windows-$Arch-release"))
     $expectedPackagesRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'build\embedded\python-packages'))
     if (-not $pythonPackages.StartsWith($expectedPackagesRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Unsicherer Python-Paketpfad: $pythonPackages"
     }
-    & (Join-Path $PSScriptRoot 'prepare-pillow-windows.ps1') -OutputDirectory $pythonPackages -PillowVersion '13.0.0'
+    & (Join-Path $PSScriptRoot 'prepare-pillow-windows.ps1') -OutputDirectory $pythonPackages -PillowVersion '13.0.0' -Arch $Arch
     & (Join-Path $PSScriptRoot 'prepare-network-trust-windows.ps1') -OutputDirectory $pythonPackages `
         -TruststoreVersion '0.10.4' -CertifiVersion '2026.10.19'
 
-    & (Join-Path $PSScriptRoot 'prepare-hamlib-windows.ps1')
+    & (Join-Path $PSScriptRoot 'prepare-hamlib-windows.ps1') -Arch $Arch
     if ($LASTEXITCODE -ne 0) {
         throw 'Hamlib konnte nicht fuer den Windows-Build vorbereitet werden.'
     }
 
+    # bootstrap_windows.go embeds build/embedded/*/windows-* by pattern. Remove
+    # staging folders of the other architecture so they never end up in this EXE.
+    $otherArch = if ($Arch -eq 'x86') { 'x64' } else { 'x86' }
+    foreach ($stale in @(
+        (Join-Path $projectRoot "build\embedded\hamlib\windows-$otherArch"),
+        (Join-Path $projectRoot "build\embedded\python-packages\windows-$otherArch-release")
+    )) {
+        if (Test-Path -LiteralPath $stale) {
+            Remove-Item -LiteralPath $stale -Recurse -Force
+        }
+    }
+
     New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
-    $fileName = "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.exe"
+    $fileName = "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-$Arch.exe"
     $outputPath = Join-Path $OutputDirectory $fileName
 
     $env:GOOS = 'windows'
-    $env:GOARCH = 'amd64'
+    $env:GOARCH = if ($Arch -eq 'x86') { '386' } else { 'amd64' }
     $env:CGO_ENABLED = '0'
     # Keep the compiler cache inside the ignored build directory. This also
     # makes local builds work when the interactive user and workspace owner
@@ -171,7 +185,8 @@ try {
     }
 
     $hash = (Get-FileHash -LiteralPath $outputPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $checksumPath = Join-Path $OutputDirectory 'SHA256SUMS.txt'
+    $checksumName = if ($Arch -eq 'x86') { 'SHA256SUMS-windows-x86.txt' } else { 'SHA256SUMS.txt' }
+    $checksumPath = Join-Path $OutputDirectory $checksumName
     $checksumLine = "$hash  $fileName`n"
     [System.IO.File]::WriteAllText($checksumPath, $checksumLine, [System.Text.UTF8Encoding]::new($false))
 

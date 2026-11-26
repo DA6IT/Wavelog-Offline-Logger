@@ -59,6 +59,42 @@ jobs:
           $arguments += $assets.FullName
           gh @arguments
 
+  windows-x86-release:
+    name: Build and publish Windows x86 release
+    needs: windows-release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12.10'
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.23.2'
+          cache: false
+
+      - name: Test and package
+        shell: pwsh
+        run: .\scripts\package-release.ps1 -OutputDirectory dist -Arch x86
+
+      - name: Publish Windows x86 assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $assets = Get-ChildItem -LiteralPath dist -File | Where-Object {
+            $_.Extension -in '.exe', '.zip' -or $_.Name -eq 'SHA256SUMS-windows-x86.txt'
+          }
+          gh release upload $tag $assets.FullName --clobber
+
   macos-release:
     name: Build and publish macOS ${{ matrix.package_arch }} release
     needs: windows-release

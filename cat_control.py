@@ -18,6 +18,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+# Hamlib folder of the running build: 32-bit Python -> windows-x86, else windows-x64.
+_WINDOWS_ARCH_DIR = "windows-x64" if sys.maxsize > 2**32 else "windows-x86"
+
 
 HAMLIB_VERSION = "4.7.2"
 FLRIG_MODEL_ID = 4
@@ -314,13 +317,13 @@ def find_hamlib_dir() -> Path:
         local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home()))
         candidates.append(
             local_app_data / "AFU-Tools" / "WavelogOfflineLogger"
-            / "hamlib-runtime" / "windows-x64" / "current"
+            / "hamlib-runtime" / _WINDOWS_ARCH_DIR / "current"
         )
     candidates.extend(
         [
             bundle_root / "hamlib",
             here / "hamlib",
-            here / "build" / "embedded" / "hamlib" / "windows-x64",
+            here / "build" / "embedded" / "hamlib" / _WINDOWS_ARCH_DIR,
         ]
     )
     executable = "rigctld.exe" if sys.platform == "win32" else "rigctld"
