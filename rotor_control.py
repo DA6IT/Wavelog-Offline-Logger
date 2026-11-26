@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+# Hamlib folder of the running build: 32-bit Python -> windows-x86, else windows-x64.
+_WINDOWS_ARCH_DIR = "windows-x64" if sys.maxsize > 2**32 else "windows-x86"
+
 
 DEFAULT_ROTCTLD_PORT = 4533
 DEFAULT_ROTOR_POLL_MS = 750
@@ -117,7 +120,7 @@ def _candidate_hamlib_dirs() -> list[Path]:
             / "AFU-Tools"
             / "WavelogOfflineLogger"
             / "hamlib-runtime"
-            / "windows-x64"
+            / _WINDOWS_ARCH_DIR
             / "current"
         )
 
@@ -125,7 +128,7 @@ def _candidate_hamlib_dirs() -> list[Path]:
         [
             bundle_root / "hamlib",
             here / "hamlib",
-            here / "build" / "embedded" / "hamlib" / "windows-x64",
+            here / "build" / "embedded" / "hamlib" / _WINDOWS_ARCH_DIR,
             here / "build" / "embedded" / "hamlib" / f"linux-{os.uname().machine}" if hasattr(os, "uname") else here,
             here / "build" / "embedded" / "hamlib" / f"macos-{os.uname().machine}" if hasattr(os, "uname") else here,
         ]

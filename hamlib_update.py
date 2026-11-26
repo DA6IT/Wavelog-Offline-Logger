@@ -26,6 +26,11 @@ class HamlibUpdateError(RuntimeError):
     pass
 
 
+def windows_arch() -> str:
+    """Package architecture of the running Python: "x86" (32 bit) or "x64"."""
+    return "x64" if sys.maxsize > 2**32 else "x86"
+
+
 @dataclass(frozen=True)
 class HamlibRelease:
     version: str
@@ -94,7 +99,8 @@ def find_latest_windows_release(
         parsed = _version_tuple(version)
         if not parsed or parsed <= current:
             continue
-        expected_name = f"hamlib-w64-{version}.zip".lower()
+        bits = "32" if windows_arch() == "x86" else "64"
+        expected_name = f"hamlib-w{bits}-{version}.zip".lower()
         for asset in release.get("assets") or ():
             if not isinstance(asset, dict) or str(asset.get("name", "")).lower() != expected_name:
                 continue
@@ -119,7 +125,7 @@ def find_latest_windows_release(
 
 
 def hamlib_runtime_root(data_dir: Path) -> Path:
-    return Path(data_dir) / "hamlib-runtime" / "windows-x64"
+    return Path(data_dir) / "hamlib-runtime" / f"windows-{windows_arch()}"
 
 
 def user_hamlib_dir(data_dir: Path) -> Path:

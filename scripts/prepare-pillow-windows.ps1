@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory,
-    [string]$PillowVersion = '13.0.0'
+    [string]$PillowVersion = '13.0.0',
+    [ValidateSet('x64', 'x86')]
+    [string]$Arch = 'x64'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,7 +11,7 @@ $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $allowedRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot 'build\embedded\python-packages'))
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    $OutputDirectory = Join-Path $allowedRoot 'windows-x64-release'
+    $OutputDirectory = Join-Path $allowedRoot "windows-$Arch-release"
 } elseif (-not [System.IO.Path]::IsPathRooted($OutputDirectory)) {
     $OutputDirectory = Join-Path $projectRoot $OutputDirectory
 }
@@ -27,12 +29,15 @@ if (Test-Path -LiteralPath $pillowMarker) {
 
 $pinnedWheelHashes = @{
     # pillow-13.0.0-cp312-cp312-win_amd64.whl
-    '13.0.0' = 'ff3fe9eb621fbb9db4c4be33ab946f6bac5f98ab50ca8d3260503653656c961b'  # pragma: allowlist secret (public PyPI wheel SHA-256)
+    '13.0.0|x64' = 'ff3fe9eb621fbb9db4c4be33ab946f6bac5f98ab50ca8d3260503653656c961b'  # pragma: allowlist secret (public PyPI wheel SHA-256)
+    # pillow-13.0.0-cp312-cp312-win32.whl
+    '13.0.0|x86' = '02464da86f561f410e13b061ec37c3068a9cb557a095494157742d07b3c24a27'  # pragma: allowlist secret (public PyPI wheel SHA-256)
 }
-if (-not $pinnedWheelHashes.ContainsKey($PillowVersion)) {
-    throw "Fuer Pillow $PillowVersion ist noch keine freigegebene Windows-Wheel-Pruefsumme hinterlegt."
+$hashKey = "$PillowVersion|$Arch"
+if (-not $pinnedWheelHashes.ContainsKey($hashKey)) {
+    throw "Fuer Pillow $PillowVersion ($Arch) ist noch keine freigegebene Windows-Wheel-Pruefsumme hinterlegt."
 }
-$pinnedHash = $pinnedWheelHashes[$PillowVersion]
+$pinnedHash = $pinnedWheelHashes[$hashKey]
 
 $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $downloadDirectory = [System.IO.Path]::GetFullPath((Join-Path $tempRoot ('wavelog-pillow-' + [guid]::NewGuid().ToString('N'))))
@@ -48,13 +53,13 @@ try {
     $metadataUri = "https://pypi.org/pypi/Pillow/$PillowVersion/json"
     Write-Host "Lade Pillow-Metadaten von PyPI ..."
     $metadata = Invoke-RestMethod -Uri $metadataUri -Headers @{ 'User-Agent' = 'DA6IT-Wavelog-Offline-Logger-Build' }
-    $wheelSuffix = '-cp312-cp312-win_amd64.whl'
+    $wheelSuffix = if ($Arch -eq 'x86') { '-cp312-cp312-win32.whl' } else { '-cp312-cp312-win_amd64.whl' }
     $wheelAsset = @($metadata.urls) | Where-Object {
         $candidateName = [string]$_.filename
         $_.packagetype -eq 'bdist_wheel' -and $candidateName.EndsWith($wheelSuffix, [System.StringComparison]::OrdinalIgnoreCase)
     } | Select-Object -First 1
     if (-not $wheelAsset) {
-        throw "Kein offizielles Pillow-$PillowVersion-Wheel fuer CPython 3.12 / Windows x64 gefunden."
+        throw "Kein offizielles Pillow-$PillowVersion-Wheel fuer CPython 3.12 / Windows $Arch gefunden."
     }
 
     $expectedHash = ([string]$wheelAsset.digests.sha256).Trim().ToLowerInvariant()

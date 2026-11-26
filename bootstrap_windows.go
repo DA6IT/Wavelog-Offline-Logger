@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -21,9 +22,13 @@ import (
 )
 
 const (
-	appVersion   = "0.24.0"
-	pythonURL    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
-	pythonSHA256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
+	appVersion      = "0.24.0"
+	pythonURLx64    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+	pythonSHA256x64 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb" // pragma: allowlist secret (public installer SHA-256)
+	// Official 32-bit installer; signature checked with the python.org Sigstore bundle
+	// (identity thomas@python.org) before pinning.
+	pythonURLx86    = "https://www.python.org/ftp/python/3.12.10/python-3.12.10.exe"
+	pythonSHA256x86 = "fdfe385b94f5b8785a0226a886979527fd26eb65defdbf29992fd22cc4b0e31e" // pragma: allowlist secret (public installer SHA-256)
 
 	JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 	JOB_OBJECT_LIMIT_BREAKAWAY_OK      = 0x00000800
@@ -146,29 +151,56 @@ var da6itIcon []byte
 // Hamlib is prepared by scripts/prepare-hamlib-windows.ps1 before go build.
 // The official archive is pinned and SHA-256 verified by that script.
 //
-//go:embed build/embedded/hamlib/windows-x64/*
+// Only the directory of the target architecture exists at build time
+// (windows-x64 or windows-x86); scripts/build-windows.ps1 removes the other one.
+//
+//go:embed build/embedded/hamlib/windows-*
 var hamlibFS embed.FS
 
 // Pillow is staged by scripts/build-windows.ps1. It is embedded next to the
 // Python sources, so QRZ station photos work without a system-wide install.
 //
-//go:embed all:build/embedded/python-packages/windows-x64-release
+//go:embed all:build/embedded/python-packages/windows-*-release
 var pythonPackagesFS embed.FS
 
-var hamlibFileNames = []string{
-	"rigctld.exe",
-	"rotctld.exe",
-	"libhamlib-4.dll",
-	"libusb-1.0.dll",
-	"libgcc_s_seh-1.dll",
-	"libwinpthread-1.dll",
-	"COPYING.txt",
-	"COPYING.LIB.txt",
-	"LICENSE.txt",
-	"AUTHORS.txt",
-	"README.md.txt",
-	"README.w64-bin.txt",
-	"HAMLIB_VERSION.txt",
+// windowsArch is the package architecture of this launcher: "x86" for the
+// 32-bit build (GOARCH=386), otherwise "x64".
+func windowsArch() string {
+	if runtime.GOARCH == "386" {
+		return "x86"
+	}
+	return "x64"
+}
+
+func pythonInstaller() (url, sha string) {
+	if windowsArch() == "x86" {
+		return pythonURLx86, pythonSHA256x86
+	}
+	return pythonURLx64, pythonSHA256x64
+}
+
+var hamlibFileNames = buildHamlibFileNames()
+
+func buildHamlibFileNames() []string {
+	gccRuntime, readme := "libgcc_s_seh-1.dll", "README.w64-bin.txt"
+	if windowsArch() == "x86" {
+		gccRuntime, readme = "libgcc_s_dw2-1.dll", "README.w32-bin.txt"
+	}
+	return []string{
+		"rigctld.exe",
+		"rotctld.exe",
+		"libhamlib-4.dll",
+		"libusb-1.0.dll",
+		gccRuntime,
+		"libwinpthread-1.dll",
+		"COPYING.txt",
+		"COPYING.LIB.txt",
+		"LICENSE.txt",
+		"AUTHORS.txt",
+		"README.md.txt",
+		readme,
+		"HAMLIB_VERSION.txt",
+	}
 }
 
 func featureFileNames() ([]string, error) {
@@ -259,7 +291,8 @@ func verifySHA256(path string) error {
 		return err
 	}
 	got := hex.EncodeToString(h.Sum(nil))
-	if !strings.EqualFold(got, pythonSHA256) {
+	_, want := pythonInstaller()
+	if !strings.EqualFold(got, want) {
 		return fmt.Errorf("Pruefsumme stimmt nicht (erhalten %s)", got)
 	}
 	return nil
@@ -282,9 +315,10 @@ func ensurePython(runtimeDir string) error {
 		return err
 	}
 
-	installer := filepath.Join(os.TempDir(), "da6it-python-3.12.10-amd64.exe")
+	installerURL, _ := pythonInstaller()
+	installer := filepath.Join(os.TempDir(), "da6it-python-3.12.10-"+windowsArch()+".exe")
 	defer os.Remove(installer)
-	if err := download(pythonURL, installer); err != nil {
+	if err := download(installerURL, installer); err != nil {
 		return fmt.Errorf("Python-Download fehlgeschlagen: %w", err)
 	}
 	if err := verifySHA256(installer); err != nil {
@@ -464,7 +498,7 @@ func writeAppFiles(appDir string) error {
 		return err
 	}
 	for _, name := range hamlibFileNames {
-		embeddedPath := "build/embedded/hamlib/windows-x64/" + name
+		embeddedPath := "build/embedded/hamlib/windows-" + windowsArch() + "/" + name
 		data, err := hamlibFS.ReadFile(embeddedPath)
 		if err != nil {
 			return fmt.Errorf("Hamlib-Datei %s fehlt im Build: %w", name, err)
@@ -477,7 +511,7 @@ func writeAppFiles(appDir string) error {
 			return err
 		}
 	}
-	packageRoot := "build/embedded/python-packages/windows-x64-release"
+	packageRoot := "build/embedded/python-packages/windows-" + windowsArch() + "-release"
 	if err := fs.WalkDir(pythonPackagesFS, packageRoot, func(embeddedPath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -680,8 +714,14 @@ func main() {
 		local = home
 	}
 	base := filepath.Join(local, "AFU-Tools", "WavelogOfflineLogger")
-	runtimeDir := filepath.Join(base, "runtime", "python312")
-	appDir := filepath.Join(base, "app-v"+strings.ReplaceAll(appVersion, ".", ""))
+	// The 32-bit build keeps its own Python runtime and app folder, so an x64
+	// and an x86 launcher on the same PC never mix binaries.
+	archSuffix := ""
+	if windowsArch() == "x86" {
+		archSuffix = "-x86"
+	}
+	runtimeDir := filepath.Join(base, "runtime", "python312"+archSuffix)
+	appDir := filepath.Join(base, "app-v"+strings.ReplaceAll(appVersion, ".", "")+archSuffix)
 
 	if err := writeAppFiles(appDir); err != nil {
 		messageBox("DA6IT.de Logger - Startfehler", "Programmdateien konnten nicht vorbereitet werden:\n"+err.Error(), 0x10)

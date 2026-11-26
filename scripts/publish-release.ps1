@@ -627,6 +627,8 @@ try {
     $requiredAssetPatterns = @(
         "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.exe",
         "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.zip",
+        "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x86.exe",
+        "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x86.zip",
         "DA6IT.de-Wavelog-Offline-Logger-v$version-macos-arm64.zip",
         "DA6IT.de-Wavelog-Offline-Logger-v$version-macos-x64.zip",
         "DA6IT.de-Wavelog-Offline-Logger-v$version-linux-x64.deb",

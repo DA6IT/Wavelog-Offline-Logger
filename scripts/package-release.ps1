@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [ValidateSet('x64', 'x86')]
+    [string]$Arch = 'x64'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +15,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 
-& (Join-Path $PSScriptRoot 'build-windows.ps1') -OutputDirectory $OutputDirectory -SkipTests:$SkipTests
+& (Join-Path $PSScriptRoot 'build-windows.ps1') -OutputDirectory $OutputDirectory -SkipTests:$SkipTests -Arch $Arch
 if ($LASTEXITCODE -ne 0) {
     throw 'Windows-Build fehlgeschlagen.'
 }
@@ -24,11 +26,12 @@ if (-not $versionMatch.Success) {
     throw 'Versionsnummer konnte nicht gelesen werden.'
 }
 $version = $versionMatch.Groups[1].Value
-$exeName = "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.exe"
-$zipName = "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-x64.zip"
+$exeName = "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-$Arch.exe"
+$zipName = "DA6IT.de-Wavelog-Offline-Logger-v$version-windows-$Arch.zip"
 $exePath = Join-Path $OutputDirectory $exeName
 $zipPath = Join-Path $OutputDirectory $zipName
-$checksumPath = Join-Path $OutputDirectory 'SHA256SUMS.txt'
+$checksumName = if ($Arch -eq 'x86') { 'SHA256SUMS-windows-x86.txt' } else { 'SHA256SUMS.txt' }
+$checksumPath = Join-Path $OutputDirectory $checksumName
 
 $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $stage = Join-Path $tempRoot ("wavelog-offline-logger-release-" + [guid]::NewGuid().ToString('N'))

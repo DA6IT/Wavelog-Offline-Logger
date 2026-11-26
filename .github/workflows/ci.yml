@@ -278,8 +278,12 @@ jobs:
           PY
 
   windows-build:
-    name: Windows x64 build
+    name: Windows ${{ matrix.arch }} build
     needs: [selftest, security]
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, x86]
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -298,15 +302,15 @@ jobs:
 
       - name: Build Windows executable
         shell: pwsh
-        run: .\scripts\build-windows.ps1 -OutputDirectory dist -SkipTests
+        run: .\scripts\build-windows.ps1 -OutputDirectory dist -SkipTests -Arch ${{ matrix.arch }}
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: windows-x64
+          name: windows-${{ matrix.arch }}
           path: |
             dist/*.exe
-            dist/SHA256SUMS.txt
+            dist/SHA256SUMS*.txt
           if-no-files-found: error
 
   macos-build:
